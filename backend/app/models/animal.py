@@ -149,7 +149,13 @@ class Animal(BaseModel):
     
     # Relationships (qo'shilamiz keyinroq)
     # detections = relationship("Detection", back_populates="animal")
-    # weight_logs = relationship("WeightLog", back_populates="animal")
+    weight_measurements: Mapped[list["WeightMeasurement"]] = relationship(
+        "WeightMeasurement",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="WeightMeasurement.timestamp.desc()",
+    )
     # health_records = relationship("HealthRecord", back_populates="animal")
     
     # Table-level constraints
