@@ -125,7 +125,7 @@
 #         return False
 
 ##############################################################
-# Gemini buni tavfsiya qildi
+# Gemini tavfsiya qildi 10/02/2026 
 
 """
 Database connection and session management.
