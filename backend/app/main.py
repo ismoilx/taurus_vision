@@ -79,9 +79,18 @@ async def startup_event():
     
     Initialize database connections, load ML models, etc.
     """
+    from app.core.database import check_db_connection
+    
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Debug mode: {settings.DEBUG}")
-    # TODO: Initialize database
+    
+    # Check database connection
+    db_healthy = await check_db_connection()
+    if db_healthy:
+        logger.info("✓ Database connection established")
+    else:
+        logger.error("✗ Database connection failed!")
+    
     # TODO: Load ML models
 
 
@@ -93,8 +102,11 @@ async def shutdown_event():
     
     Clean up resources, close connections, etc.
     """
+    from app.core.database import close_db
+    
     logger.info("Shutting down application...")
-    # TODO: Close database connections
+    await close_db()
+    logger.info("✓ Database connections closed")
     # TODO: Cleanup resources
 
 
