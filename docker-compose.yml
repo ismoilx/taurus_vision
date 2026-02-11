@@ -1,0 +1,160 @@
+# ============================================================================
+# Taurus Vision - Full Stack Orchestration
+# ============================================================================
+# Services:
+# - postgres: PostgreSQL 15 database
+# - backend: FastAPI application
+# - frontend: React dashboard (Vite dev server)
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: taurus-postgres
+    restart: unless-stopped
+    
+    environment:
+      POSTGRES_USER: taurus
+      POSTGRES_PASSWORD: taurus123
+      POSTGRES_DB: taurus_vision
+      PGDATA: /var/lib/postgresql/data/pgdata
+    
+    volumes:
+      # Persistent data storage
+      - postgres_data:/var/lib/postgresql/data
+    
+    ports:
+      - "5432:5432"
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taurus -d taurus_vision"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    
+    networks:
+      - taurus-network
+
+  # ==========================================================================
+  # Backend API (FastAPI)
+  # ==========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    
+    container_name: taurus-backend
+    restart: unless-stopped
+    
+    environment:
+      # Application
+      APP_NAME: "Taurus Vision API"
+      APP_VERSION: "0.1.0"
+      DEBUG: "true"
+      
+      # Database
+      DATABASE_URL: "postgresql://taurus:taurus123@postgres:5432/taurus_vision"
+      
+      # Server
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      
+      # CORS (allow frontend)
+      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000"]'
+    
+    ports:
+      - "8000:8000"
+    
+    volumes:
+      # Mount code for development (hot reload)
+      # Comment this out in production
+      - ./backend/app:/app/app
+      
+      # Persistent data
+      - backend_data:/app/data
+    
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    networks:
+      - taurus-network
+    
+    # Run migrations on startup, then start server
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # ==========================================================================
+  # Frontend (React + Vite)
+  # ==========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      target: development
+    
+    container_name: taurus-frontend
+    restart: unless-stopped
+    
+    environment:
+      # API endpoint
+      VITE_API_URL: "http://localhost:8000"
+      VITE_WS_URL: "ws://localhost:8000"
+    
+    ports:
+      - "5173:5173"
+    
+    volumes:
+      # Mount source for hot reload
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      
+      # Node modules (named volume for performance)
+      - frontend_node_modules:/app/node_modules
+    
+    depends_on:
+      backend:
+        condition: service_healthy
+    
+    networks:
+      - taurus-network
+    
+    stdin_open: true
+    tty: true
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  taurus-network:
+    driver: bridge
+    name: taurus-network
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+    name: taurus_postgres_data
+  
+  backend_data:
+    name: taurus_backend_data
+  
+  frontend_node_modules:
+    name: taurus_frontend_node_modules

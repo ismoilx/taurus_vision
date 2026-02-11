@@ -7,6 +7,7 @@ Handles CRUD operations and statistics for weight measurements.
 from typing import Optional
 from fastapi import APIRouter, Depends, status, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
+import logging # Loglarni ko'rish uchun qo'shildi
 
 from app.core.database import get_db
 from app.services.weight_measurement import WeightMeasurementService
@@ -17,6 +18,9 @@ from app.schemas.weight_measurement import (
     WeightMeasurementListResponse,
     WeightStatsResponse,
 )
+
+# Logger sozlash
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/weights",
@@ -73,7 +77,33 @@ async def create_measurement(
     This endpoint is typically called by AI cameras or edge devices
     after performing weight estimation.
     """
-    return await service.create_measurement(measurement_data)
+    # 1. Avval ma'lumotni Service orqali bazaga saqlaymiz (Eski kod)
+    result = await service.create_measurement(measurement_data)
+
+    # 2. --- YANGI QISM: Majburiy Broadcast (Arxitekturani buzmasdan) ---
+    try:
+        ws_manager = get_ws_manager()
+        
+        # Frontend kutayotgan aniq formatda ma'lumot tayyorlaymiz
+        broadcast_data = {
+            "animal_id": result.animal_id,
+            "animal_tag_id": getattr(result, "animal_tag_id", "UNKNOWN"), # Pydantic modeldan olish
+            "estimated_weight_kg": result.estimated_weight_kg,
+            "confidence_score": result.confidence_score,
+            "camera_id": result.camera_id,
+            "timestamp": result.timestamp.isoformat() if result.timestamp else None
+        }
+        
+        # Barchaga yuborish
+        await ws_manager.broadcast(broadcast_data)
+        logger.info(f"📡 Broadcast sent for Animal {broadcast_data['animal_tag_id']}")
+        
+    except Exception as e:
+        # Agar WebSocket ishlamasa ham, API 201 qaytarishi kerak (muhim!)
+        logger.error(f"⚠️ WebSocket broadcast failed inside endpoint: {e}")
+    # -------------------------------------------------------------------
+
+    return result
 
 
 @router.get(
