@@ -13,6 +13,18 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# --- MANA SHUNI QO'SHING (Importlardan keyin) ---
+class DateTimeEncoder(json.JSONEncoder):
+    """
+    Vaqtni (datetime) JSON tushunadigan formatga (ISO string) o'girib beradi.
+    """
+    def default(self, obj):
+        from datetime import datetime
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+# -----------------------------------------------
+
 
 class ConnectionManager:
     """
@@ -111,8 +123,12 @@ class ConnectionManager:
             "data": message,
         }
         
-        # Convert to JSON once
-        json_message = json.dumps(broadcast_message)
+        # Convert to JSON once (with DateTimeEncoder)
+        try:
+            json_message = json.dumps(broadcast_message, cls=DateTimeEncoder)
+        except TypeError as e:
+            logger.error(f"JSON serialization failed: {e}")
+            return
         
         # Track failed connections
         failed_connections = set()

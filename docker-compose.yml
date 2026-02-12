@@ -75,6 +75,8 @@ services:
       # Mount code for development (hot reload)
       # Comment this out in production
       - ./backend/app:/app/app
+
+      - ./backend/ml:/app/ml
       
       # Persistent data
       - backend_data:/app/data

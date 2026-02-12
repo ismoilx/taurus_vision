@@ -135,7 +135,7 @@ class WeightMeasurementService:
                 estimated_weight_kg=measurement.estimated_weight_kg,
                 confidence_score=measurement.confidence_score,
                 camera_id=measurement.camera_id,
-                timestamp=measurement.timestamp,
+                timestamp=measurement.timestamp.isoformat(),
             )
             
             await self.ws_manager.broadcast(update.model_dump())
