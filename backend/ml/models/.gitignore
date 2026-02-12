@@ -1,0 +1,9 @@
+# Ignore all model files (large)
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.pb
+
+# Keep .gitkeep
+!.gitkeep
