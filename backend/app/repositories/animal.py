@@ -1,347 +1,20 @@
-# """
-# Animal repository for data access operations.
-
-# This layer handles all database operations for Animal entities.
-# It uses SQLAlchemy 2.0 async syntax and is strictly typed.
-
-# RESPONSIBILITY: Database access only, NO business logic.
-# """
-
-# from typing import Optional, Sequence
-# from sqlalchemy import select, func, update, delete
-# from sqlalchemy.ext.asyncio import AsyncSession
-
-# from app.models.animal import Animal, AnimalStatus
-# from app.schemas.animal import AnimalCreate, AnimalUpdate
-# from app.core.exceptions import DatabaseError
-# import logging
-
-# logger = logging.getLogger(__name__)
-
-
-# class AnimalRepository:
-#     """
-#     Repository for Animal entity database operations.
-    
-#     Provides CRUD operations using async SQLAlchemy.
-#     All methods are strictly async and use SQLAlchemy 2.0 syntax.
-    
-#     Args:
-#         db: AsyncSession instance (injected via dependency)
-#     """
-    
-#     def __init__(self, db: AsyncSession):
-#         self.db = db
-    
-#     async def create(self, animal_data: AnimalCreate) -> Animal:
-#         """
-#         Create a new animal record.
-        
-#         Args:
-#             animal_data: Validated animal creation data
-            
-#         Returns:
-#             Created animal instance with generated ID
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-            
-#         Note:
-#             Does NOT check for duplicates - that's Service layer responsibility.
-#         """
-#         try:
-#             # Create Animal instance from schema
-#             animal = Animal(**animal_data.model_dump())
-            
-#             # Add to session
-#             self.db.add(animal)
-            
-#             # Flush to get the ID (without committing transaction)
-#             await self.db.flush()
-            
-#             # Refresh to get database-generated values
-#             await self.db.refresh(animal)
-            
-#             logger.info(f"Created animal: {animal.tag_id} (ID: {animal.id})")
-            
-#             return animal
-            
-#         except Exception as e:
-#             logger.error(f"Failed to create animal: {e}")
-#             raise DatabaseError(
-#                 message="Failed to create animal",
-#                 details={"error": str(e)},
-#             )
-    
-#     async def get_by_id(self, animal_id: int) -> Optional[Animal]:
-#         """
-#         Get animal by ID.
-        
-#         Args:
-#             animal_id: Primary key
-            
-#         Returns:
-#             Animal instance if found, None otherwise
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-#         """
-#         try:
-#             # SQLAlchemy 2.0 syntax
-#             stmt = select(Animal).where(Animal.id == animal_id)
-#             result = await self.db.execute(stmt)
-#             animal = result.scalar_one_or_none()
-            
-#             return animal
-            
-#         except Exception as e:
-#             logger.error(f"Failed to get animal {animal_id}: {e}")
-#             raise DatabaseError(
-#                 message="Failed to retrieve animal",
-#                 details={"animal_id": animal_id, "error": str(e)},
-#             )
-    
-#     async def get_by_tag_id(self, tag_id: str) -> Optional[Animal]:
-#         """
-#         Get animal by tag ID.
-        
-#         Args:
-#             tag_id: Unique tag identifier
-            
-#         Returns:
-#             Animal instance if found, None otherwise
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-            
-#         Note:
-#             tag_id is case-insensitive (stored as uppercase in DB).
-#         """
-#         try:
-#             stmt = select(Animal).where(Animal.tag_id == tag_id.upper())
-#             result = await self.db.execute(stmt)
-#             animal = result.scalar_one_or_none()
-            
-#             return animal
-            
-#         except Exception as e:
-#             logger.error(f"Failed to get animal by tag {tag_id}: {e}")
-#             raise DatabaseError(
-#                 message="Failed to retrieve animal",
-#                 details={"tag_id": tag_id, "error": str(e)},
-#             )
-    
-#     async def get_all(
-#         self,
-#         skip: int = 0,
-#         limit: int = 100,
-#         species: Optional[str] = None,
-#         status: Optional[AnimalStatus] = None,
-#     ) -> Sequence[Animal]:
-#         """
-#         Get all animals with optional filtering and pagination.
-        
-#         Args:
-#             skip: Number of records to skip (for pagination)
-#             limit: Maximum number of records to return
-#             species: Filter by species (optional)
-#             status: Filter by status (optional)
-            
-#         Returns:
-#             List of animal instances
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-            
-#         Note:
-#             Returns empty list if no animals found (not an error).
-#         """
-#         try:
-#             # Base query
-#             stmt = select(Animal)
-            
-#             # Apply filters
-#             if species:
-#                 stmt = stmt.where(Animal.species == species)
-            
-#             if status:
-#                 stmt = stmt.where(Animal.status == status)
-            
-#             # Order by ID (newest first)
-#             stmt = stmt.order_by(Animal.id.desc())
-            
-#             # Apply pagination
-#             stmt = stmt.offset(skip).limit(limit)
-            
-#             # Execute
-#             result = await self.db.execute(stmt)
-#             animals = result.scalars().all()
-            
-#             logger.info(
-#                 f"Retrieved {len(animals)} animals "
-#                 f"(skip={skip}, limit={limit}, species={species}, status={status})"
-#             )
-            
-#             return animals
-            
-#         except Exception as e:
-#             logger.error(f"Failed to get animals: {e}")
-#             raise DatabaseError(
-#                 message="Failed to retrieve animals",
-#                 details={"error": str(e)},
-#             )
-    
-#     async def count(
-#         self,
-#         species: Optional[str] = None,
-#         status: Optional[AnimalStatus] = None,
-#     ) -> int:
-#         """
-#         Count total animals (for pagination metadata).
-        
-#         Args:
-#             species: Filter by species (optional)
-#             status: Filter by status (optional)
-            
-#         Returns:
-#             Total count of animals matching filters
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-#         """
-#         try:
-#             # Base query
-#             stmt = select(func.count()).select_from(Animal)
-            
-#             # Apply same filters as get_all
-#             if species:
-#                 stmt = stmt.where(Animal.species == species)
-            
-#             if status:
-#                 stmt = stmt.where(Animal.status == status)
-            
-#             # Execute
-#             result = await self.db.execute(stmt)
-#             count = result.scalar_one()
-            
-#             return count
-            
-#         except Exception as e:
-#             logger.error(f"Failed to count animals: {e}")
-#             raise DatabaseError(
-#                 message="Failed to count animals",
-#                 details={"error": str(e)},
-#             )
-    
-#     async def update(self, animal_id: int, update_data: AnimalUpdate) -> Optional[Animal]:
-#         """
-#         Update animal record.
-        
-#         Args:
-#             animal_id: Primary key
-#             update_data: Fields to update (only non-None fields are updated)
-            
-#         Returns:
-#             Updated animal instance if found, None otherwise
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-            
-#         Note:
-#             Uses Pydantic's exclude_unset to only update provided fields.
-#             Does NOT enforce business rules - that's Service layer responsibility.
-#         """
-#         try:
-#             # Get existing animal
-#             animal = await self.get_by_id(animal_id)
-            
-#             if not animal:
-#                 return None
-            
-#             # Get only fields that were actually set (exclude None/unset)
-#             update_dict = update_data.model_dump(exclude_unset=True)
-            
-#             if not update_dict:
-#                 # No fields to update
-#                 return animal
-            
-#             # Update fields
-#             for field, value in update_dict.items():
-#                 setattr(animal, field, value)
-            
-#             # Flush changes
-#             await self.db.flush()
-#             await self.db.refresh(animal)
-            
-#             logger.info(f"Updated animal {animal_id}: {list(update_dict.keys())}")
-            
-#             return animal
-            
-#         except Exception as e:
-#             logger.error(f"Failed to update animal {animal_id}: {e}")
-#             raise DatabaseError(
-#                 message="Failed to update animal",
-#                 details={"animal_id": animal_id, "error": str(e)},
-#             )
-    
-#     async def delete(self, animal_id: int) -> bool:
-#         """
-#         Delete animal record (hard delete).
-        
-#         Args:
-#             animal_id: Primary key
-            
-#         Returns:
-#             True if animal was deleted, False if not found
-            
-#         Raises:
-#             DatabaseError: If database operation fails
-            
-#         Note:
-#             This is a HARD delete (permanent).
-#             Service layer should enforce soft delete for archived animals.
-#         """
-#         try:
-#             # Check if exists
-#             animal = await self.get_by_id(animal_id)
-            
-#             if not animal:
-#                 return False
-            
-#             # Delete using SQLAlchemy 2.0 syntax
-#             stmt = delete(Animal).where(Animal.id == animal_id)
-#             await self.db.execute(stmt)
-#             await self.db.flush()
-            
-#             logger.info(f"Deleted animal {animal_id}")
-            
-#             return True
-            
-#         except Exception as e:
-#             logger.error(f"Failed to delete animal {animal_id}: {e}")
-#             raise DatabaseError(
-#                 message="Failed to delete animal",
-#                 details={"animal_id": animal_id, "error": str(e)},
-#             )
-#######################################################################################
-#Gemini tavfsiya qildi 10/02/2026
 """
 Animal repository for data access operations.
 
-This layer handles all database operations for Animal entities.
-It uses SQLAlchemy 2.0 async syntax and is strictly typed.
+RESPONSIBILITY: Database access ONLY — no business logic here.
+All queries use SQLAlchemy 2.0 async syntax with full type safety.
 
-RESPONSIBILITY: Database access only, NO business logic.
+PATTERN: Repository pattern isolates DB layer from business logic.
+Service layer calls repository; repository never calls service.
 """
 
 from typing import Optional, Sequence
-from sqlalchemy import select, func, update, delete
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.animal import Animal, AnimalStatus
+from app.models.animal import Animal, AnimalStatus, AnimalSpecies
 from app.schemas.animal import AnimalCreate, AnimalUpdate
 from app.core.exceptions import DatabaseError
-from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -350,83 +23,101 @@ logger = logging.getLogger(__name__)
 class AnimalRepository:
     """
     Repository for Animal entity database operations.
-    
-    Provides CRUD operations using async SQLAlchemy.
-    All methods are strictly async and use SQLAlchemy 2.0 syntax.
-    
+
+    Provides full CRUD + filtering using async SQLAlchemy 2.0.
+    All methods are strictly async and type-annotated.
+
     Args:
-        db: AsyncSession instance (injected via dependency)
+        db: AsyncSession injected via FastAPI Depends()
     """
-    
-    def __init__(self, db: AsyncSession):
+
+    def __init__(self, db: AsyncSession) -> None:
         self.db = db
-    
+
+    # -------------------------------------------------------------------------
+    # CREATE
+    # -------------------------------------------------------------------------
+
     async def create(self, animal_data: AnimalCreate) -> Animal:
         """
-        Create a new animal record with timezone normalization.
+        Insert a new animal row.
+
+        NOTE: Does NOT check uniqueness — that is the Service layer's job.
+
+        Args:
+            animal_data: Validated Pydantic schema
+
+        Returns:
+            Persisted Animal ORM instance (with generated id)
+
+        Raises:
+            DatabaseError: On any SQLAlchemy/DB-level failure
         """
         try:
-            # 1. Ma'lumotlarni lug'atga aylantiramiz
-            data = animal_data.model_dump()
-            
-            # 2. BAZA BILAN MOSLASHTIRISH: 
-            # PostgreSQL 'TIMESTAMP WITHOUT TIME ZONE' ishlatgani uchun 
-            # Python'dagi aware datetime'larni naive holatga keltiramiz.
-            for key, value in data.items():
-                if isinstance(value, datetime) and value.tzinfo is not None:
-                    data[key] = value.replace(tzinfo=None)
-            
-            # 3. Tozalangan ma'lumotlar bilan model yaratamiz
-            animal = Animal(**data)
-            
-            # Add to session
+            animal = Animal(**animal_data.model_dump())
             self.db.add(animal)
-            
-            # Flush to get the ID
-            await self.db.flush()
-            
-            # Refresh to get database-generated values
-            await self.db.refresh(animal)
-            
-            logger.info(f"Created animal: {animal.tag_id} (ID: {animal.id})")
-            
+            await self.db.flush()          # Get generated PK without commit
+            await self.db.refresh(animal)  # Load DB-computed defaults
+            logger.debug(f"[repo] Created animal pk={animal.id} tag={animal.tag_id}")
             return animal
-            
-        except Exception as e:
-            logger.error(f"Failed to create animal: {e}")
+        except Exception as exc:
+            logger.error(f"[repo] create failed: {exc}", exc_info=True)
             raise DatabaseError(
                 message="Failed to create animal",
-                details={"error": str(e)},
-            )
-    
+                details={"error": str(exc)},
+            ) from exc
+
+    # -------------------------------------------------------------------------
+    # READ — single
+    # -------------------------------------------------------------------------
+
     async def get_by_id(self, animal_id: int) -> Optional[Animal]:
-        """Get animal by ID."""
+        """
+        Fetch animal by primary key.
+
+        Returns:
+            Animal instance or None if not found
+        """
         try:
-            stmt = select(Animal).where(Animal.id == animal_id)
-            result = await self.db.execute(stmt)
-            animal = result.scalar_one_or_none()
-            return animal
-        except Exception as e:
-            logger.error(f"Failed to get animal {animal_id}: {e}")
-            raise DatabaseError(
-                message="Failed to retrieve animal",
-                details={"animal_id": animal_id, "error": str(e)},
+            result = await self.db.execute(
+                select(Animal).where(Animal.id == animal_id)
             )
-    
+            return result.scalar_one_or_none()
+        except Exception as exc:
+            logger.error(f"[repo] get_by_id({animal_id}) failed: {exc}")
+            raise DatabaseError(
+                message=f"Failed to fetch animal id={animal_id}",
+                details={"error": str(exc)},
+            ) from exc
+
     async def get_by_tag_id(self, tag_id: str) -> Optional[Animal]:
-        """Get animal by tag ID."""
+        """
+        Fetch animal by tag identifier (case-insensitive).
+
+        Args:
+            tag_id: e.g. "jnv-001" or "JNV-001" — treated equally
+
+        Returns:
+            Animal instance or None
+        """
         try:
-            stmt = select(Animal).where(Animal.tag_id == tag_id.upper())
-            result = await self.db.execute(stmt)
-            animal = result.scalar_one_or_none()
-            return animal
-        except Exception as e:
-            logger.error(f"Failed to get animal by tag {tag_id}: {e}")
-            raise DatabaseError(
-                message="Failed to retrieve animal",
-                details={"tag_id": tag_id, "error": str(e)},
+            result = await self.db.execute(
+                select(Animal).where(
+                    func.upper(Animal.tag_id) == tag_id.upper()
+                )
             )
-    
+            return result.scalar_one_or_none()
+        except Exception as exc:
+            logger.error(f"[repo] get_by_tag_id({tag_id}) failed: {exc}")
+            raise DatabaseError(
+                message=f"Failed to fetch animal tag={tag_id}",
+                details={"error": str(exc)},
+            ) from exc
+
+    # -------------------------------------------------------------------------
+    # READ — collection
+    # -------------------------------------------------------------------------
+
     async def get_all(
         self,
         skip: int = 0,
@@ -434,93 +125,223 @@ class AnimalRepository:
         species: Optional[str] = None,
         status: Optional[AnimalStatus] = None,
     ) -> Sequence[Animal]:
-        """Get all animals with optional filtering and pagination."""
+        """
+        Paginated list with optional filters.
+
+        Args:
+            skip:    Offset for pagination
+            limit:   Page size (caller should cap at 100)
+            species: Filter by species string (e.g. "cattle")
+            status:  Filter by AnimalStatus enum
+
+        Returns:
+            Sequence of Animal instances (may be empty)
+        """
         try:
             stmt = select(Animal)
+
+            # Build WHERE clauses dynamically
+            conditions = []
             if species:
-                stmt = stmt.where(Animal.species == species)
+                try:
+                    conditions.append(
+                        Animal.species == AnimalSpecies(species.lower())
+                    )
+                except ValueError:
+                    logger.warning(f"[repo] Unknown species filter: {species!r} — ignored")
+
             if status:
-                stmt = stmt.where(Animal.status == status)
-            
-            stmt = stmt.order_by(Animal.id.desc())
-            stmt = stmt.offset(skip).limit(limit)
-            
+                conditions.append(Animal.status == status)
+
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+
+            stmt = stmt.offset(skip).limit(limit).order_by(Animal.id)
+
             result = await self.db.execute(stmt)
-            animals = result.scalars().all()
-            
-            logger.info(f"Retrieved {len(animals)} animals")
-            return animals
-        except Exception as e:
-            logger.error(f"Failed to get animals: {e}")
-            raise DatabaseError(message="Failed to retrieve animals", details={"error": str(e)})
-    
+            return result.scalars().all()
+
+        except Exception as exc:
+            logger.error(f"[repo] get_all failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message="Failed to fetch animals",
+                details={"error": str(exc)},
+            ) from exc
+
     async def count(
         self,
         species: Optional[str] = None,
         status: Optional[AnimalStatus] = None,
     ) -> int:
-        """Count total animals matching filters."""
+        """
+        Count animals matching optional filters.
+
+        Used alongside get_all() to build paginated responses.
+
+        Returns:
+            Integer count
+        """
         try:
             stmt = select(func.count()).select_from(Animal)
+
+            conditions = []
             if species:
-                stmt = stmt.where(Animal.species == species)
+                try:
+                    conditions.append(
+                        Animal.species == AnimalSpecies(species.lower())
+                    )
+                except ValueError:
+                    pass
+
             if status:
-                stmt = stmt.where(Animal.status == status)
-            
+                conditions.append(Animal.status == status)
+
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+
             result = await self.db.execute(stmt)
             return result.scalar_one()
-        except Exception as e:
-            logger.error(f"Failed to count animals: {e}")
-            raise DatabaseError(message="Failed to count animals")
-    
-    async def update(self, animal_id: int, update_data: AnimalUpdate) -> Optional[Animal]:
-        """Update animal record with timezone normalization."""
+
+        except Exception as exc:
+            logger.error(f"[repo] count failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message="Failed to count animals",
+                details={"error": str(exc)},
+            ) from exc
+
+    # -------------------------------------------------------------------------
+    # UPDATE
+    # -------------------------------------------------------------------------
+
+    async def update(
+        self,
+        animal_id: int,
+        update_data: AnimalUpdate,
+    ) -> Optional[Animal]:
+        """
+        Partial update — only non-None fields are applied.
+
+        Args:
+            animal_id:   PK of the animal to update
+            update_data: Pydantic schema; None fields are skipped
+
+        Returns:
+            Updated Animal instance, or None if not found
+
+        Raises:
+            DatabaseError: On DB failure
+        """
         try:
             animal = await self.get_by_id(animal_id)
             if not animal:
                 return None
-            
-            # 1. Faqat kiritilgan maydonlarni lug'atga olamiz
-            update_dict = update_data.model_dump(exclude_unset=True)
-            
-            # 2. Vaqt zonalarini tozalash
-            for key, value in update_dict.items():
-                if isinstance(value, datetime) and value.tzinfo is not None:
-                    update_dict[key] = value.replace(tzinfo=None)
-            
-            if not update_dict:
-                return animal
-            
-            # 3. Maydonlarni yangilash
-            for field, value in update_dict.items():
+
+            # Apply only fields that were explicitly set
+            update_fields = update_data.model_dump(exclude_none=True)
+            for field, value in update_fields.items():
                 setattr(animal, field, value)
-            
+
             await self.db.flush()
             await self.db.refresh(animal)
-            
-            logger.info(f"Updated animal {animal_id}")
-            return animal
-            
-        except Exception as e:
-            logger.error(f"Failed to update animal {animal_id}: {e}")
-            raise DatabaseError(
-                message="Failed to update animal",
-                details={"animal_id": animal_id, "error": str(e)},
+
+            logger.debug(
+                f"[repo] Updated animal pk={animal_id} "
+                f"fields={list(update_fields.keys())}"
             )
-    
+            return animal
+
+        except DatabaseError:
+            raise
+        except Exception as exc:
+            logger.error(f"[repo] update({animal_id}) failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message=f"Failed to update animal id={animal_id}",
+                details={"error": str(exc)},
+            ) from exc
+
+    # -------------------------------------------------------------------------
+    # DELETE
+    # -------------------------------------------------------------------------
+
     async def delete(self, animal_id: int) -> bool:
-        """Hard delete animal record."""
+        """
+        Hard-delete animal by PK.
+
+        Returns:
+            True if deleted, False if not found
+        """
         try:
             animal = await self.get_by_id(animal_id)
             if not animal:
                 return False
-            
-            stmt = delete(Animal).where(Animal.id == animal_id)
-            await self.db.execute(stmt)
+
+            await self.db.delete(animal)
             await self.db.flush()
-            
-            logger.info(f"Deleted animal {animal_id}")
+
+            logger.debug(f"[repo] Deleted animal pk={animal_id}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to delete animal {animal_id}: {e}")
-            raise DatabaseError(message="Failed to delete animal")
+
+        except DatabaseError:
+            raise
+        except Exception as exc:
+            logger.error(f"[repo] delete({animal_id}) failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message=f"Failed to delete animal id={animal_id}",
+                details={"error": str(exc)},
+            ) from exc
+
+    # -------------------------------------------------------------------------
+    # HELPERS (used by pipeline / detection)
+    # -------------------------------------------------------------------------
+
+    async def get_first_active(self) -> Optional[Animal]:
+        """
+        Return the first active animal.
+
+        Used by the detection pipeline when animal matching is not yet
+        implemented (MVP fallback).
+        """
+        try:
+            result = await self.db.execute(
+                select(Animal)
+                .where(Animal.status == AnimalStatus.ACTIVE)
+                .order_by(Animal.id)
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
+        except Exception as exc:
+            raise DatabaseError(
+                message="Failed to fetch first active animal",
+                details={"error": str(exc)},
+            ) from exc
+
+    async def increment_detection_count(
+        self,
+        animal_id: int,
+    ) -> None:
+        """
+        Atomically increment total_detections and update last_detected_at.
+
+        Called by the detection pipeline after each confirmed detection.
+
+        Args:
+            animal_id: PK of the detected animal
+        """
+        from datetime import datetime
+
+        try:
+            animal = await self.get_by_id(animal_id)
+            if not animal:
+                logger.warning(
+                    f"[repo] increment_detection_count: animal {animal_id} not found"
+                )
+                return
+
+            animal.mark_detected()   # uses the model helper method
+            await self.db.flush()
+
+        except Exception as exc:
+            logger.error(
+                f"[repo] increment_detection_count({animal_id}) failed: {exc}"
+            )
+            # Non-critical — don't raise, just log

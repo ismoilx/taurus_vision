@@ -1,14 +1,21 @@
-export enum ConnectionStatus {
-  CONNECTING = 'connecting',
-  CONNECTED = 'connected',
-  DISCONNECTED = 'disconnected',
-  RECONNECTING = 'reconnecting',
-  ERROR = 'error',
-}
+export type ConnectionStatus = 
+  | 'connecting'
+  | 'disconnected' 
+  | 'connected'
+  | 'reconnecting'
+  | 'error';
+
+export const ConnectionStatus = {
+  CONNECTING:   'connecting',
+  CONNECTED:    'connected',
+  DISCONNECTED: 'disconnected',
+  RECONNECTING: 'reconnecting',
+  ERROR:        'error',
+} as const;
 
 export interface WebSocketMessage {
   type: 'connection' | 'weight_update' | 'heartbeat';
-  data?: any;
+  data?: LiveWeightUpdate;
   status?: string;
   message?: string;
   timestamp?: number;

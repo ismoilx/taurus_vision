@@ -148,7 +148,13 @@ class Animal(BaseModel):
     )
     
     # Relationships (qo'shilamiz keyinroq)
-    # detections = relationship("Detection", back_populates="animal")
+    detections: Mapped[list["Detection"]] = relationship(
+        "Detection",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="Detection.timestamp.desc()",
+    )
     weight_measurements: Mapped[list["WeightMeasurement"]] = relationship(
         "WeightMeasurement",
         back_populates="animal",

@@ -1,102 +1,6 @@
-# # Web Framework
-# fastapi==0.104.1
-# uvicorn[standard]==0.24.0
-# python-multipart==0.0.6
-
-# # Database
-# sqlalchemy==2.0.23
-# alembic==1.12.1
-# psycopg2-binary==2.9.9
-
-# # Pydantic
-# pydantic==2.5.0
-# pydantic-settings==2.1.0
-
-# # Security (keyinroq)
-# python-jose[cryptography]==3.3.0
-# passlib[bcrypt]==1.7.4
-
-# # Utilities
-# python-dotenv==1.0.0
-# loguru==0.7.2
-
-# # Image processing
-# Pillow==10.1.0
-
-# # Testing
-# pytest==7.4.3
-# pytest-asyncio==0.21.1
-# httpx==0.25.1
-
-# # Development
-# black==23.11.0
-# flake8==6.1.0
-# mypy==1.7.1
-# ##############################
-# # PYTHON DEPENDENCIES QOSHISH
-# # Web Framework
-# fastapi==0.104.1
-# uvicorn[standard]==0.24.0
-# python-multipart==0.0.6
-
-# # Database
-# sqlalchemy==2.0.23
-# alembic==1.12.1
-# psycopg2-binary==2.9.9
-
-# # Pydantic
-# pydantic==2.5.0
-# pydantic-settings==2.1.0
-
-# # Security (keyinroq)
-# python-jose[cryptography]==3.3.0
-# passlib[bcrypt]==1.7.4
-
-# # Utilities
-# python-dotenv==1.0.0
-# loguru==0.7.2
-
-# # Image processing
-# Pillow==10.1.0
-
-# # Testing
-# pytest==7.4.3
-# pytest-asyncio==0.21.1
-# httpx==0.25.1
-
-# # Development
-# black==23.11.0
-# flake8==6.1.0
-# mypy==1.7.1
-
-# # Async PostgreSQL driver
-# asyncpg==0.29.0
-
-# # Additional utilities
-# python-dateutil==2.8.2
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# ==============================================================================
+# Taurus Vision — Backend Dependencies
+# ==============================================================================
 
 # Web Framework
 fastapi==0.104.1
@@ -106,33 +10,34 @@ python-multipart==0.0.6
 # Database
 sqlalchemy==2.0.23
 alembic==1.12.1
-psycopg2-binary==2.9.9
+asyncpg==0.29.0          # Async PostgreSQL driver (required for SQLAlchemy async)
+psycopg2-binary==2.9.9   # Sync driver (used by Alembic migrations)
 
 # Pydantic
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
-# Security
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-
 # Utilities
 python-dotenv==1.0.0
-loguru==0.7.2
 python-dateutil==2.8.2
 
-# Async PostgreSQL driver
-asyncpg==0.29.0
+# AI / ML
+ultralytics>=8.3.0        # YOLOv8 / v11
+opencv-python-headless==4.9.0.80
+numpy==1.26.3
+torch==2.2.0
+torchvision==0.17.0
+Pillow==10.2.0
+
+# WebSocket
+websockets==12.0
 
 # Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
 httpx==0.25.1
 
-# AI/ML Core (Eng muhim qismi)
-ultralytics>=8.3.0
-opencv-python-headless==4.9.0.80
-numpy==1.26.3
-torch==2.2.0
-torchvision==0.17.0
-Pillow==10.2.0
+# Dev tools
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1

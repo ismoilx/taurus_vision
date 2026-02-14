@@ -5,7 +5,7 @@
  */
 
 import { Scale, Camera, Clock } from 'lucide-react';
-import { LiveWeightUpdate } from '../../../shared/types';
+import type { LiveWeightUpdate } from '../../../shared/types';
 import { formatDistanceToNow } from 'date-fns';
 
 interface LiveFeedCardProps {
