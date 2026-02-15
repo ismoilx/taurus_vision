@@ -44,3 +44,7 @@ mypy==1.7.1
 
 # System monitoring
 psutil==5.9.8
+
+# Video streaming
+av
+imageio-ffmpeg==0.4.9
