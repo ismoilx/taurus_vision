@@ -80,6 +80,8 @@ COPY --chown=taurus:taurus ./alembic ./alembic
 COPY --chown=taurus:taurus ./alembic.ini ./alembic.ini
 COPY --chown=taurus:taurus ./tests ./tests
 COPY --chown=taurus:taurus ./pytest.ini ./pytest.ini
+COPY --chown=taurus:taurus ./requirements-test.txt ./
+COPY --chown=taurus:taurus ./run_tests.py ./
 
 # Create directories for data with proper permissions
 RUN mkdir -p /app/data/logs /app/data/images && \

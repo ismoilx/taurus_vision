@@ -1,0 +1,30 @@
+# ==============================================================================
+# Taurus Vision — Testing Dependencies
+# ==============================================================================
+
+# Testing Framework
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0           # Coverage reports
+pytest-xdist==3.5.0         # Parallel test execution
+pytest-timeout==2.2.0        # Test timeout
+pytest-mock==3.12.0          # Mocking utilities
+
+# HTTP Testing
+httpx==0.25.1               # Async HTTP client for API tests
+
+# Coverage Tools
+coverage[toml]==7.3.2       # Coverage measurement
+
+# Performance Testing
+pytest-benchmark==4.0.0     # Performance benchmarks
+
+# Test Utilities
+faker==20.1.0               # Fake data generation
+freezegun==1.4.0            # Time mocking
+
+# Code Quality (optional, for CI/CD)
+flake8==6.1.0               # Linting
+black==23.11.0              # Code formatting
+mypy==1.7.1                 # Type checking
+isort==5.12.0               # Import sorting
