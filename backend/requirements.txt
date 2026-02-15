@@ -48,3 +48,6 @@ psutil==5.9.8
 # Video streaming
 av
 imageio-ffmpeg==0.4.9
+
+#pytest-cov
+pytest-cov

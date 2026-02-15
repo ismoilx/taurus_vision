@@ -55,9 +55,99 @@ class CameraInfo:
     location: str | None = None  # Physical location (e.g., "North Barn")
 
 
+class CameraInterface(ABC):
+    """
+    Synchronous camera interface for real-time camera access.
+    
+    Simplified interface for RTSP, USB, and simulated cameras.
+    All methods are synchronous for real-time frame capture.
+    
+    USAGE:
+    ```python
+    camera = RTSPCamera(camera_id="CAM-01", rtsp_url="rtsp://...")
+    camera.start()
+    
+    frame = camera.get_frame()  # Sync call
+    if frame is not None:
+        # Process frame
+        pass
+    
+    camera.stop()
+    ```
+    """
+    
+    @abstractmethod
+    def start(self) -> None:
+        """
+        Start camera stream.
+        
+        Establishes connection and begins frame capture.
+        """
+        pass
+    
+    @abstractmethod
+    def stop(self) -> None:
+        """
+        Stop camera stream.
+        
+        Closes connection and releases resources.
+        """
+        pass
+    
+    @abstractmethod
+    def get_frame(self) -> np.ndarray | None:
+        """
+        Get latest frame from camera.
+        
+        Returns:
+            Frame as numpy array (BGR format) or None if unavailable
+        """
+        pass
+    
+    @abstractmethod
+    def is_opened(self) -> bool:
+        """
+        Check if camera is connected and operational.
+        
+        Returns:
+            True if camera is ready, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    def get_fps(self) -> float:
+        """
+        Get actual frames per second.
+        
+        Returns:
+            Current FPS
+        """
+        pass
+    
+    @abstractmethod
+    def get_resolution(self) -> tuple[int, int]:
+        """
+        Get frame resolution.
+        
+        Returns:
+            Tuple of (width, height)
+        """
+        pass
+    
+    @abstractmethod
+    def get_stats(self) -> dict:
+        """
+        Get camera statistics.
+        
+        Returns:
+            Dictionary with camera stats (frame_count, errors, etc.)
+        """
+        pass
+
+
 class CameraServiceInterface(ABC):
     """
-    Abstract base class for camera services.
+    Abstract base class for camera services (LEGACY - Async version).
     
     All camera implementations (RTSP, USB, simulated) must implement this.
     Ensures consistent API regardless of camera source.

@@ -27,6 +27,137 @@ from app.services.camera.base import (
 logger = logging.getLogger(__name__)
 
 
+class SimulatedCamera:
+    """
+    Synchronous simulated camera for testing.
+    
+    Generates synthetic frames with random colored rectangles.
+    Compatible with RTSPCamera and USBCamera interface.
+    
+    Features:
+    - Random colored frames
+    - Configurable resolution and FPS
+    - Thread-safe operation
+    - Statistics tracking
+    """
+    
+    def __init__(
+        self,
+        camera_id: str,
+        fps: int = 10,
+        width: int = 1920,
+        height: int = 1080,
+    ):
+        """
+        Initialize simulated camera.
+        
+        Args:
+            camera_id: Unique camera identifier
+            fps: Target frames per second
+            width: Frame width
+            height: Frame height
+        """
+        self.camera_id = camera_id
+        self.fps = fps
+        self.width = width
+        self.height = height
+        
+        self._running = False
+        self._frame_count = 0
+        self._error_count = 0
+        
+        logger.info(f"Simulated camera initialized: {camera_id}")
+    
+    def start(self) -> None:
+        """Start camera stream."""
+        if self._running:
+            logger.warning(f"Camera {self.camera_id} already running")
+            return
+        
+        self._running = True
+        logger.info(f"Simulated camera started: {self.camera_id}")
+    
+    def stop(self) -> None:
+        """Stop camera stream."""
+        self._running = False
+        logger.info(f"Simulated camera stopped: {self.camera_id}")
+    
+    def get_frame(self) -> np.ndarray | None:
+        """
+        Get simulated frame.
+        
+        Returns:
+            Synthetic frame as numpy array (BGR format)
+        """
+        if not self._running:
+            return None
+        
+        try:
+            # Generate random colored frame
+            frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            
+            # Add random colored rectangles (simulate animals)
+            num_objects = np.random.randint(1, 5)
+            for _ in range(num_objects):
+                x1 = np.random.randint(0, self.width - 100)
+                y1 = np.random.randint(0, self.height - 100)
+                x2 = x1 + np.random.randint(50, 200)
+                y2 = y1 + np.random.randint(50, 200)
+                
+                color = (
+                    np.random.randint(0, 255),
+                    np.random.randint(0, 255),
+                    np.random.randint(0, 255),
+                )
+                
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
+            
+            # Add frame counter text
+            cv2.putText(
+                frame,
+                f"Frame: {self._frame_count}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2,
+            )
+            
+            self._frame_count += 1
+            return frame
+            
+        except Exception as e:
+            logger.error(f"Error generating frame from {self.camera_id}: {e}")
+            self._error_count += 1
+            return None
+    
+    def is_opened(self) -> bool:
+        """Check if camera is running."""
+        return self._running
+    
+    def get_fps(self) -> float:
+        """Get configured FPS."""
+        return float(self.fps)
+    
+    def get_resolution(self) -> tuple[int, int]:
+        """Get frame resolution."""
+        return (self.width, self.height)
+    
+    def get_stats(self) -> dict:
+        """Get camera statistics."""
+        return {
+            "camera_id": self.camera_id,
+            "type": "simulated",
+            "connected": self._running,
+            "running": self._running,
+            "frame_count": self._frame_count,
+            "error_count": self._error_count,
+            "fps": self.get_fps(),
+            "resolution": self.get_resolution(),
+            "last_frame_age_seconds": 0.0,
+        }
+
+
 class SimulatedCameraService(CameraServiceInterface):
     """
     Simulated camera for testing.

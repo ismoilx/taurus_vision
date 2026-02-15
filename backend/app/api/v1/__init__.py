@@ -6,7 +6,7 @@ Combines all v1 endpoints into a single router.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import animals, weights, live, detection, pipeline
+from app.api.v1.endpoints import animals, weights, live, detection, pipeline, cameras
 
 # Create main v1 router
 router = APIRouter(prefix="/v1")
@@ -17,6 +17,7 @@ router.include_router(weights.router)
 router.include_router(live.router)
 router.include_router(detection.router)
 router.include_router(pipeline.router)
+router.include_router(cameras.router)
 
 # Add more routers here as we build them:
 # router.include_router(health.router)

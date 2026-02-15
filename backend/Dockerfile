@@ -78,6 +78,8 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=taurus:taurus ./app ./app
 COPY --chown=taurus:taurus ./alembic ./alembic
 COPY --chown=taurus:taurus ./alembic.ini ./alembic.ini
+COPY --chown=taurus:taurus ./tests ./tests
+COPY --chown=taurus:taurus ./pytest.ini ./pytest.ini
 
 # Create directories for data with proper permissions
 RUN mkdir -p /app/data/logs /app/data/images && \
