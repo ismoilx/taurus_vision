@@ -67,13 +67,23 @@ export function useWebSocket(url: string, options: UseWebSocketOptions = {}) {
     }
   }, [url]);
 
+  // Yangi qo'shilgan qism: Disconnect funksiyasi
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+    }
+    setStatus(ConnectionStatus.DISCONNECTED);
+  }, []);
+
   useEffect(() => {
     connect();
     return () => {
-      socketRef.current?.close();
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      disconnect();
     };
-  }, [connect]);
+  }, [connect, disconnect]);
 
-  return { status, lastMessage, connect };
+  // Endi disconnect ni ham tashqariga uzatamiz
+  return { status, lastMessage, connect, disconnect };
 }

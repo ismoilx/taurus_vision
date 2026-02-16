@@ -132,3 +132,4 @@ GET    /metrics                   # Prometheus metrics
 ## 📄 Litsenziya
 
 MIT License — see [LICENSE](LICENSE)
+
