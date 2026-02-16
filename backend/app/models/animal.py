@@ -4,7 +4,6 @@ Animal database model.
 This module defines the Animal model which represents individual animals
 in the farm monitoring system.
 """
-
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Enum as SQLEnum, Index, CheckConstraint
@@ -162,7 +161,13 @@ class Animal(BaseModel):
         lazy="selectin",
         order_by="WeightMeasurement.timestamp.desc()",
     )
-    # health_records = relationship("HealthRecord", back_populates="animal")
+    # health_records: Mapped[list["HealthRecord"]] = relationship(
+    #     "HealthRecord",
+    #     back_populates="animal",
+    #     cascade="all, delete-orphan",
+    #     lazy="selectin",
+    #     order_by="HealthRecord.recorded_at.desc()",
+    # )
     
     # Table-level constraints
     __table_args__ = (

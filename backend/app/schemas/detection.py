@@ -92,6 +92,7 @@ class InferenceResultResponse(BaseModel):
     timestamp: datetime
     
     model_config = ConfigDict(
+        protected_namespaces=(),  # <-- Pydantic Warning uchun shu qator qo'shildi
         json_schema_extra={
             "example": {
                 "detections": [
@@ -160,6 +161,7 @@ class ModelInfoResponse(BaseModel):
     available_classes: int
     
     model_config = ConfigDict(
+        protected_namespaces=(),  # <-- Pydantic Warning uchun shu qator qo'shildi
         json_schema_extra={
             "example": {
                 "name": "yolo11n.pt",

@@ -345,3 +345,193 @@ class AnimalRepository:
                 f"[repo] increment_detection_count({animal_id}) failed: {exc}"
             )
             # Non-critical — don't raise, just log
+    # ============================================================================
+    # ADVANCED SEARCH METHODS - ADD TO ANIMAL REPOSITORY
+    # ============================================================================
+    #
+    # Location: backend/app/repositories/animal.py
+    # Action: ADD these methods to the AnimalRepository class
+    #
+    # Add at the end of the class (before the final closing)
+    # ============================================================================
+
+    # -------------------------------------------------------------------------
+    # ADVANCED SEARCH
+    # -------------------------------------------------------------------------
+
+    async def advanced_search(
+        self,
+        tag_id: Optional[str] = None,
+        species: Optional[AnimalSpecies] = None,
+        gender: Optional[str] = None,
+        status: Optional[AnimalStatus] = None,
+        breed: Optional[str] = None,
+        min_detections: Optional[int] = None,
+        search_text: Optional[str] = None,
+        sort_by: str = "tag_id",
+        sort_order: str = "asc",
+        skip: int = 0,
+        limit: int = 100
+    ) -> tuple[Sequence[Animal], int]:
+        """
+        Advanced multi-field search with filtering and sorting.
+        
+        Args:
+            tag_id: Filter by tag ID (partial match, case-insensitive)
+            species: Filter by species
+            gender: Filter by gender
+            status: Filter by status
+            breed: Filter by breed (partial match, case-insensitive)
+            min_detections: Minimum number of detections
+            search_text: Full-text search across tag_id, breed, notes
+            sort_by: Field to sort by (tag_id, species, status, total_detections, last_detected_at)
+            sort_order: Sort order (asc or desc)
+            skip: Pagination offset
+            limit: Maximum results
+        
+        Returns:
+            Tuple of (animals list, total count)
+        
+        Example:
+            >>> animals, total = await repo.advanced_search(
+            ...     species=AnimalSpecies.CATTLE,
+            ...     status=AnimalStatus.ACTIVE,
+            ...     min_detections=10,
+            ...     sort_by="total_detections",
+            ...     sort_order="desc"
+            ... )
+        """
+        from sqlalchemy import or_, desc, asc
+        
+        try:
+            logger.info(f"[repo] Advanced search: species={species}, status={status}, search_text={search_text}")
+            
+            # Build base query
+            conditions = []
+            
+            # Tag ID filter (partial match)
+            if tag_id:
+                conditions.append(Animal.tag_id.ilike(f"%{tag_id}%"))
+            
+            # Species filter
+            if species:
+                conditions.append(Animal.species == species)
+            
+            # Gender filter
+            if gender:
+                conditions.append(Animal.gender == gender)
+            
+            # Status filter
+            if status:
+                conditions.append(Animal.status == status)
+            
+            # Breed filter (partial match)
+            if breed:
+                conditions.append(Animal.breed.ilike(f"%{breed}%"))
+            
+            # Minimum detections filter
+            if min_detections is not None:
+                conditions.append(Animal.total_detections >= min_detections)
+            
+            # Full-text search across multiple fields
+            if search_text:
+                search_pattern = f"%{search_text}%"
+                text_conditions = [
+                    Animal.tag_id.ilike(search_pattern),
+                    Animal.breed.ilike(search_pattern),
+                    Animal.notes.ilike(search_pattern)
+                ]
+                conditions.append(or_(*text_conditions))
+            
+            # Build WHERE clause
+            where_clause = and_(*conditions) if conditions else True
+            
+            # Count total (without pagination)
+            count_query = select(func.count(Animal.id)).where(where_clause)
+            count_result = await self.db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Build data query with sorting
+            query = select(Animal).where(where_clause)
+            
+            # Apply sorting
+            sort_column = getattr(Animal, sort_by, Animal.tag_id)
+            if sort_order.lower() == "desc":
+                query = query.order_by(desc(sort_column))
+            else:
+                query = query.order_by(asc(sort_column))
+            
+            # Apply pagination
+            query = query.offset(skip).limit(limit)
+            
+            # Execute
+            result = await self.db.execute(query)
+            animals = result.scalars().all()
+            
+            logger.info(f"[repo] Advanced search found {len(animals)} animals (total: {total})")
+            return animals, total
+            
+        except Exception as exc:
+            logger.error(f"[repo] advanced_search failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message="Failed to perform advanced search",
+                details={"error": str(exc)},
+            ) from exc
+    
+    async def search_by_text(
+        self,
+        search_text: str,
+        skip: int = 0,
+        limit: int = 100
+    ) -> tuple[Sequence[Animal], int]:
+        """
+        Simple full-text search across tag_id, breed, and notes.
+        
+        Args:
+            search_text: Text to search for (case-insensitive)
+            skip: Pagination offset
+            limit: Maximum results
+        
+        Returns:
+            Tuple of (animals list, total count)
+        
+        Example:
+            >>> animals, total = await repo.search_by_text("JNV")
+        """
+        from sqlalchemy import or_
+        
+        try:
+            logger.info(f"[repo] Text search: '{search_text}'")
+            
+            search_pattern = f"%{search_text}%"
+            conditions = [
+                Animal.tag_id.ilike(search_pattern),
+                Animal.breed.ilike(search_pattern),
+                Animal.notes.ilike(search_pattern)
+            ]
+            
+            where_clause = or_(*conditions)
+            
+            # Count
+            count_query = select(func.count(Animal.id)).where(where_clause)
+            count_result = await self.db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Data
+            query = select(Animal).where(where_clause).order_by(Animal.tag_id).offset(skip).limit(limit)
+            result = await self.db.execute(query)
+            animals = result.scalars().all()
+            
+            logger.info(f"[repo] Text search found {len(animals)} animals (total: {total})")
+            return animals, total
+            
+        except Exception as exc:
+            logger.error(f"[repo] search_by_text failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message="Failed to perform text search",
+                details={"error": str(exc)},
+            ) from exc
+
+    # ============================================================================
+    # END OF ADVANCED SEARCH METHODS
+    # ============================================================================

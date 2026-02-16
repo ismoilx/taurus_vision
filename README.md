@@ -128,16 +128,6 @@ GET    /metrics                   # Prometheus metrics
 
 ---
 
-## 🗺️ Yo'l xaritasi
-
-| Phase | Sprint | Holat |
-|-------|--------|-------|
-| Phase 1 | 1-5: MVP | ✅ Tugallandi |
-| Phase 1 | 6: Real-world test | 🔄 Jarayonda |
-| Phase 2 | 7-12: Advanced features | ⏳ Rejalashtirilgan |
-| Phase 3 | 13-24: Custom AI | ⏳ Rejalashtirilgan |
-
----
 
 ## 📄 Litsenziya
 

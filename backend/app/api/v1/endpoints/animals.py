@@ -9,7 +9,9 @@ and delegates business logic to the service layer.
 from typing import Optional
 from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from typing import Optional
+from fastapi import Query
+from app.models.animal import AnimalSpecies, AnimalStatus
 from app.core.database import get_db
 from app.services.animal import AnimalService
 from app.schemas.animal import (
@@ -18,6 +20,8 @@ from app.schemas.animal import (
     AnimalResponse,
     AnimalListResponse,
 )
+import logging
+logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(
@@ -234,3 +238,263 @@ async def get_animal_by_tag(
         tag_id: Unique tag identifier (e.g., "JNV-001")
     """
     return await service.get_animal_by_tag(tag_id)
+    # ============================================================================
+    # ADVANCED SEARCH API ENDPOINT - ADD TO ANIMALS API
+    # ============================================================================
+@router.get(
+    "/search",
+    response_model=list[AnimalResponse],
+    summary="Advanced animal search",
+    description="""
+    Advanced multi-field search with filtering, sorting, and pagination.
+    
+    **Search capabilities:**
+    - Tag ID (partial match, case-insensitive)
+    - Species filter
+    - Gender filter
+    - Status filter
+    - Breed (partial match)
+    - Minimum detections threshold
+    - Full-text search across tag_id, breed, notes
+    
+    **Sorting:**
+    - Sort by: tag_id, species, status, total_detections, last_detected_at
+    - Order: asc (ascending) or desc (descending)
+    
+    **Pagination:**
+    - skip: Offset (default: 0)
+    - limit: Max results (default: 20, max: 100)
+    
+    **Examples:**
+    
+    Find all active cattle:
+    ```
+    GET /api/v1/animals/search?species=cattle&status=active
+    ```
+    
+    Search for animals with "JNV" in tag:
+    ```
+    GET /api/v1/animals/search?tag_id=JNV
+    ```
+    
+    Find most detected animals:
+    ```
+    GET /api/v1/animals/search?sort_by=total_detections&sort_order=desc&limit=10
+    ```
+    
+    Full-text search:
+    ```
+    GET /api/v1/animals/search?search_text=holstein
+    ```
+    """,
+    responses={
+        200: {
+            "description": "Search results retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "id": 1,
+                            "tag_id": "JNV-001",
+                            "species": "cattle",
+                            "gender": "female",
+                            "status": "active",
+                            "breed": "Holstein",
+                            "acquisition_date": "2024-01-15",
+                            "birth_date": "2023-06-10",
+                            "total_detections": 145,
+                            "last_detected_at": "2026-02-16T10:30:00",
+                            "first_detected_at": "2024-01-16T08:00:00",
+                            "notes": "High milk producer",
+                            "created_at": "2024-01-15T12:00:00",
+                            "updated_at": "2026-02-16T10:30:00"
+                        }
+                    ]
+                }
+            }
+        },
+        400: {"description": "Invalid parameters"},
+        500: {"description": "Server error"}
+    },
+    tags=["Animals"]
+)
+async def search_animals(
+    tag_id: Optional[str] = Query(None, description="Filter by tag ID (partial match)"),
+    species: Optional[str] = Query(None, description="Filter by species (cattle/sheep/goat/horse/other)"),
+    gender: Optional[str] = Query(None, description="Filter by gender (male/female/unknown)"),
+    status: Optional[str] = Query(None, description="Filter by status (active/quarantine/sick/sold/deceased/transferred)"),
+    breed: Optional[str] = Query(None, description="Filter by breed (partial match)"),
+    min_detections: Optional[int] = Query(None, description="Minimum number of detections", ge=0),
+    search_text: Optional[str] = Query(None, description="Full-text search across tag_id, breed, notes"),
+    sort_by: str = Query("tag_id", description="Sort by field", regex="^(tag_id|species|status|total_detections|last_detected_at)$"),
+    sort_order: str = Query("asc", description="Sort order", regex="^(asc|desc)$"),
+    skip: int = Query(0, description="Pagination offset", ge=0),
+    limit: int = Query(20, description="Maximum results", ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+) -> list[AnimalResponse]:
+    """
+    Advanced animal search with multiple filters.
+    
+    This endpoint provides powerful search capabilities for finding animals
+    based on various criteria. Combine multiple filters for precise results.
+    
+    Performance note: Queries are optimized with proper indexing.
+    Large result sets are paginated for efficiency.
+    
+    Frontend usage example:
+    ```javascript
+    // Search for active cattle sorted by detections
+    const response = await fetch(
+      '/api/v1/animals/search?species=cattle&status=active&sort_by=total_detections&sort_order=desc'
+    );
+    const animals = await response.json();
+    ```
+    """
+    from app.repositories.animal import AnimalRepository
+    from app.schemas.animal import AnimalResponse
+    from app.models.animal import AnimalSpecies, AnimalStatus
+    
+    logger.info(
+        f"API call: GET /animals/search",
+        extra={
+            "extra_data": {
+                "tag_id": tag_id,
+                "species": species,
+                "status": status,
+                "search_text": search_text,
+                "sort_by": sort_by
+            }
+        }
+    )
+    
+    try:
+        # Convert string enums to proper types
+        species_enum = AnimalSpecies(species) if species else None
+        status_enum = AnimalStatus(status) if status else None
+        
+        # Perform search
+        repo = AnimalRepository(db)
+        animals, total = await repo.advanced_search(
+            tag_id=tag_id,
+            species=species_enum,
+            gender=gender,
+            status=status_enum,
+            breed=breed,
+            min_detections=min_detections,
+            search_text=search_text,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            skip=skip,
+            limit=limit
+        )
+        
+        logger.info(
+            f"Search completed: found {len(animals)} animals (total: {total})",
+            extra={
+                "extra_data": {
+                    "results_count": len(animals),
+                    "total": total,
+                    "skip": skip,
+                    "limit": limit
+                }
+            }
+        )
+        
+        # Note: We're returning list directly, not paginated response
+        # Frontend can use skip/limit for pagination
+        return [AnimalResponse.model_validate(animal) for animal in animals]
+        
+    except ValueError as e:
+        logger.warning(f"Invalid parameter: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid parameter: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error during search: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to perform search"
+        )
+
+
+@router.get(
+    "/search/text",
+    response_model=list[AnimalResponse],
+    summary="Simple text search",
+    description="""
+    Simple full-text search across animal data.
+    
+    Searches in:
+    - Tag ID
+    - Breed
+    - Notes
+    
+    Case-insensitive, partial matching.
+    
+    **Example:**
+    ```
+    GET /api/v1/animals/search/text?q=holstein&limit=10
+    ```
+    
+    Use this for:
+    - Quick search bars
+    - Autocomplete
+    - Simple filtering
+    
+    For advanced filtering, use `/search` endpoint instead.
+    """,
+    responses={
+        200: {"description": "Search results retrieved successfully"},
+        400: {"description": "Missing or invalid search query"},
+        500: {"description": "Server error"}
+    },
+    tags=["Animals"]
+)
+async def text_search_animals(
+    q: str = Query(..., description="Search query", min_length=1),
+    skip: int = Query(0, description="Pagination offset", ge=0),
+    limit: int = Query(20, description="Maximum results", ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+) -> list[AnimalResponse]:
+    """
+    Simple text search across animal fields.
+    
+    Args:
+        q: Search query (minimum 1 character)
+        skip: Pagination offset
+        limit: Maximum results
+        db: Database session
+    
+    Returns:
+        List of matching animals
+    
+    Frontend usage:
+    ```javascript
+    // Search as user types
+    const results = await fetch(`/api/v1/animals/search/text?q=${userInput}`);
+    ```
+    """
+    from app.repositories.animal import AnimalRepository
+    from app.schemas.animal import AnimalResponse
+    
+    logger.info(f"API call: GET /animals/search/text?q={q}")
+    
+    try:
+        repo = AnimalRepository(db)
+        animals, total = await repo.search_by_text(
+            search_text=q,
+            skip=skip,
+            limit=limit
+        )
+        
+        logger.info(f"Text search completed: found {len(animals)} animals (total: {total})")
+        
+        return [AnimalResponse.model_validate(animal) for animal in animals]
+        
+    except Exception as e:
+        logger.error(f"Error during text search: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to perform text search"
+        )

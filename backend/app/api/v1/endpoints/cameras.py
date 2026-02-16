@@ -18,7 +18,10 @@ from app.services.camera.camera_factory import CameraFactory
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+
+# Barcha endpointlar bitta qatorda "Cameras" papkasiga tushishi uchun
+# shu yerni o'zgartirdik:
+router = APIRouter(tags=["Cameras"])
 
 
 # Pydantic schemas
