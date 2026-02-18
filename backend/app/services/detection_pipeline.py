@@ -35,11 +35,13 @@ from app.services.camera.base import CameraServiceInterface
 from app.services.ai.yolo_service import YoloService
 from app.services.weight_measurement import WeightMeasurementService
 from app.services.weight_estimator import WeightEstimator, get_weight_estimator
+from app.services.identification_service import IdentificationService
 from app.services.ai.base import Detection
 from app.schemas.weight_measurement import WeightMeasurementCreate
 from app.api.v1.websocket import ConnectionManager
 from app.config import settings
 from app.core.database import AsyncSessionLocal
+from app.utils.image_utils import extract_muzzle_region
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +242,9 @@ class DetectionPipeline:
     ) -> None:
         """
         Process single detection.
-        
+
+        Sprint 2 update: Real animal identification via muzzle embedding.
+
         Args:
             detection: YOLO detection object
             frame: CameraFrame
@@ -253,26 +257,85 @@ class DetectionPipeline:
                 frame_shape=frame_shape,
                 use_conservative=True,
             )
-            
+
+            # Step 2b: Animal identification via muzzle print
+            animal_id = await self._identify_animal(detection, frame)
+
             logger.info(
                 f"Weight estimated: {weight_kg:.1f}kg "
                 f"(confidence: {confidence:.2f}) "
-                f"for {detection.class_name}"
+                f"animal_id={animal_id or 'UNKNOWN'}"
             )
-            
-            # Step 3: Save to database (idempotent)
+
+            # Step 3: Save to database
             await self._save_measurement(
                 detection=detection,
                 weight_kg=weight_kg,
                 confidence=confidence,
                 camera_id=frame.camera_id,
+                animal_id=animal_id,
             )
-            
+
         except Exception as e:
             logger.error(
                 f"Detection processing failed: {e}",
                 exc_info=True
             )
+
+    async def _identify_animal(
+        self,
+        detection: Detection,
+        frame,
+    ) -> Optional[int]:
+        """
+        Identify animal from detected bounding box using muzzle print.
+
+        Extracts muzzle region from detection, runs identification,
+        returns animal_id or None if unknown.
+
+        Args:
+            detection: YOLO detection with bounding box
+            frame: CameraFrame with BGR image
+
+        Returns:
+            animal_id if identified, None if unknown
+        """
+        try:
+            # Extract muzzle region from bounding box
+            muzzle_crop = extract_muzzle_region(
+                frame=frame.frame,
+                bbox_x=detection.bounding_box.x,
+                bbox_y=detection.bounding_box.y,
+                bbox_w=detection.bounding_box.width,
+                bbox_h=detection.bounding_box.height,
+                normalized=True,
+            )
+
+            if muzzle_crop is None:
+                logger.debug("Muzzle crop failed — skipping identification")
+                return None
+
+            # Run identification against DB
+            async with AsyncSessionLocal() as db:
+                id_service = IdentificationService(db)
+                result = await id_service.identify_from_crop(muzzle_crop)
+
+            if result.is_identified:
+                logger.info(
+                    f"✓ Identified: {result.tag_id} "
+                    f"(score={result.similarity_score:.3f})"
+                )
+                return result.animal_id
+            else:
+                logger.info(
+                    f"Unknown animal (score={result.similarity_score:.3f}) "
+                    "— not registered yet"
+                )
+                return None
+
+        except Exception as e:
+            logger.warning(f"Identification error (non-fatal): {e}")
+            return None
     
     async def _save_measurement(
         self,
@@ -280,33 +343,32 @@ class DetectionPipeline:
         weight_kg: float,
         confidence: float,
         camera_id: str,
+        animal_id: Optional[int] = None,
     ) -> None:
         """
         Save weight measurement to database.
-        
-        IDEMPOTENT: Safe to retry (upsert logic in future).
-        
+
+        Sprint 2 update: animal_id now comes from identification service
+        (not from _get_or_create_animal MVP hack).
+
         Args:
-            detection: YOLO detection
-            weight_kg: Estimated weight
+            detection:  YOLO detection
+            weight_kg:  Estimated weight
             confidence: Estimation confidence
-            camera_id: Camera identifier
+            camera_id:  Camera identifier
+            animal_id:  Identified animal ID (None if unknown)
         """
-        # Get database session
+        if animal_id is None:
+            # Unknown animal — still log the measurement without animal link
+            logger.info(
+                "Saving measurement for UNKNOWN animal "
+                "(animal_id=None, not linked to any registered animal)"
+            )
+
         async with AsyncSessionLocal() as db:
             try:
-                # Create service
                 service = WeightMeasurementService(db, self.ws_manager)
-                
-                # CRITICAL: Find or create animal
-                # In MVP, we assume animal_id=1 exists
-                # TODO: Implement animal matching/tracking
-                animal_id = await self._get_or_create_animal(
-                    db,
-                    detection.class_name
-                )
-                
-                # Create measurement
+
                 measurement_data = WeightMeasurementCreate(
                     animal_id=animal_id,
                     timestamp=detection.timestamp,
@@ -318,19 +380,19 @@ class DetectionPipeline:
                         'bounding_box': detection.bounding_box.to_dict(),
                         'class_id': detection.class_id,
                         'class_name': detection.class_name,
+                        'identified': animal_id is not None,
                     },
                 )
-                
-                # Save (triggers WebSocket broadcast)
+
                 await service.create_measurement(measurement_data)
-                
                 self._stats['measurements_created'] += 1
-                
+
                 logger.info(
-                    f"✓ Measurement saved and broadcasted "
-                    f"(animal_id: {animal_id})"
+                    f"✓ Measurement saved "
+                    f"(animal_id={animal_id or 'UNKNOWN'}, "
+                    f"weight={weight_kg:.1f}kg)"
                 )
-                
+
             except Exception as e:
                 logger.error(f"Database save failed: {e}", exc_info=True)
                 raise

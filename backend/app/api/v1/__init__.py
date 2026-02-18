@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     analytics,  # Sprint 3 - Analytics endpoints
     reports,    # Sprint 3 - Report generation (PDF)
     export,     # Sprint 3 - Data export (CSV, Excel)
+    registration,  # Sprint 2 - Muzzle identification
 )
 
 # Create main v1 router
@@ -33,6 +34,9 @@ router.include_router(cameras.router)
 router.include_router(analytics.router)
 router.include_router(reports.router)
 router.include_router(export.router)
+
+# Sprint 2 - Identification
+router.include_router(registration.router)
 
 # Future routers:
 # router.include_router(health.router)

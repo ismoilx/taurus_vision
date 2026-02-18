@@ -286,13 +286,21 @@ async def startup_event():
     
     # ===== STEP 5: AI Models =====
     from app.services.ai.yolo_service import initialize_yolo_service
+    from app.services.ai.feature_extractor import initialize_feature_extractor
     
     try:
         await initialize_yolo_service()
-        logger.info("✓ AI models loaded successfully")
+        logger.info("✓ YOLO model loaded successfully")
     except Exception as e:
-        logger.error(f"✗ AI model loading failed: {e}")
-        logger.warning("⚠️ API will start but AI endpoints will not work")
+        logger.error(f"✗ YOLO model loading failed: {e}")
+        logger.warning("⚠️ Detection endpoints will not work")
+
+    try:
+        await initialize_feature_extractor()
+        logger.info("✓ Feature extractor (MobileNetV2) loaded successfully")
+    except Exception as e:
+        logger.error(f"✗ Feature extractor loading failed: {e}")
+        logger.warning("⚠️ Identification endpoints will not work")
     
     # ===== STARTUP COMPLETE =====
     logger.info("=" * 70)
@@ -315,12 +323,19 @@ async def shutdown_event():
     
     # ===== STEP 1: Shutdown AI models =====
     from app.services.ai.yolo_service import shutdown_yolo_service
+    from app.services.ai.feature_extractor import shutdown_feature_extractor
     
     try:
         await shutdown_yolo_service()
-        logger.info("✓ AI models unloaded")
+        logger.info("✓ YOLO model unloaded")
     except Exception as e:
-        logger.error(f"❌ Error unloading AI models: {e}")
+        logger.error(f"❌ Error unloading YOLO model: {e}")
+
+    try:
+        await shutdown_feature_extractor()
+        logger.info("✓ Feature extractor unloaded")
+    except Exception as e:
+        logger.error(f"❌ Error unloading feature extractor: {e}")
     
     # ===== STEP 2: Shutdown WebSocket connections =====
     from app.api.v1.websocket import shutdown_ws_manager

@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     AI_CONFIDENCE_THRESHOLD: float = 0.5
     AI_TARGET_CLASSES: list[int] = [19]  # COCO: 19 = cow
     FRAME_SKIP: int = 5  # Process every Nth frame
+
+    # Identification (Sprint 2)
+    IDENTIFICATION_THRESHOLD: float = 0.80   # Cosine similarity threshold
+    MAX_EMBEDDINGS_PER_ANIMAL: int = 10      # Max stored embeddings per animal
+    EMBEDDING_DIM: int = 1280                # MobileNetV2 output dim
     
     # Camera
     CAMERA_URL: Optional[str] = None  # rtsp://... yoki /dev/video0

@@ -161,6 +161,13 @@ class Animal(BaseModel):
         lazy="selectin",
         order_by="WeightMeasurement.timestamp.desc()",
     )
+    embeddings: Mapped[list["AnimalEmbedding"]] = relationship(
+        "AnimalEmbedding",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="AnimalEmbedding.created_at.desc()",
+    )
     # health_records: Mapped[list["HealthRecord"]] = relationship(
     #     "HealthRecord",
     #     back_populates="animal",

@@ -18,6 +18,7 @@ from app.models.animal import (
 )
 from app.models.weight_measurement import WeightMeasurement
 from app.models.detection import Detection
+from app.models.animal_embedding import AnimalEmbedding
 
 __all__ = [
     # Base
@@ -34,4 +35,6 @@ __all__ = [
     "WeightMeasurement",
     # Detections
     "Detection",
+    # Identification embeddings
+    "AnimalEmbedding",
 ]
