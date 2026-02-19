@@ -12,11 +12,11 @@ FEATURES:
 """
 import cv2
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
 import numpy as np
-import logging
 
 from app.services.camera.base import (
     CameraServiceInterface,
@@ -170,13 +170,15 @@ class SimulatedCameraService(CameraServiceInterface):
     camera = SimulatedCameraService(
         camera_id="SIM-001",
         fps=30,
-        test_images_dir="./test_data/cattle"
+        test_images_dir="./test_data/cattle",
+        video_path="./test_data/sample.mp4",
+        mode="video"
     )
     
     await camera.initialize()
+    await camera.start()
     
     async for frame in camera.stream_frames(skip_frames=5):
-        # Process every 5th frame
         result = await yolo_service.detect(frame.frame)
     ```
     """
@@ -187,7 +189,7 @@ class SimulatedCameraService(CameraServiceInterface):
         resolution: tuple[int, int] = (640, 480),
         fps: int = 30,
         test_images_dir: Path | str | None = None,
-        video_path: str | None = None,  # <--- Yangi qator
+        video_path: str | None = None,
         mode: str = "random",  # 'random', 'images', or 'video'
     ):
         self._camera_id = camera_id
@@ -195,13 +197,13 @@ class SimulatedCameraService(CameraServiceInterface):
         self._fps = fps
         self._mode = mode
         self._test_images_dir = Path(test_images_dir) if test_images_dir else None
-        self._video_path = video_path  # <--- Yangi qator
+        self._video_path = video_path
         
         self._is_active = False
         self._frame_count = 0
         self._test_images: list[np.ndarray] = []
         self._current_image_index = 0
-        self._cap = None  # <--- Videoni ushlab turish uchun
+        self._cap: cv2.VideoCapture | None = None
     
     async def initialize(self) -> None:
         logger.info(f"Initializing simulated camera: {self._camera_id}")
@@ -213,13 +215,24 @@ class SimulatedCameraService(CameraServiceInterface):
         if self._mode == "video" and self._video_path:
             self._cap = cv2.VideoCapture(self._video_path)
             if not self._cap.isOpened():
-                logger.error(f"Video faylni ochib bo'lmadi: {self._video_path}")
+                logger.error(f"Video faylni ochib bo'lmadi: {self._video_path}. Random rejimga o'tilmoqda.")
                 self._mode = "random"
+                self._cap = None
         # -------------------------------
 
         self._is_active = True
         self._frame_count = 0
     
+    # ----------------------------------------------------
+    #  start() funksiyasi:
+    # ----------------------------------------------------
+    async def start(self) -> None:
+        """Start camera processing."""
+        logger.info(f"Starting simulated camera service: {self._camera_id}")
+        if not self._is_active:
+            await self.initialize()
+    # ----------------------------------------------------
+            
     async def _load_test_images(self) -> None:
         """Load test images from directory."""
         if not self._test_images_dir or not self._test_images_dir.exists():
@@ -231,8 +244,6 @@ class SimulatedCameraService(CameraServiceInterface):
             return
         
         try:
-            import cv2
-            
             image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
             image_files = [
                 f for f in self._test_images_dir.iterdir()
@@ -275,9 +286,6 @@ class SimulatedCameraService(CameraServiceInterface):
             dtype=np.uint8
         )
         
-        # Add some "objects" (rectangles) to simulate animals
-        import cv2
-        
         num_objects = np.random.randint(0, 3)
         
         for _ in range(num_objects):
@@ -298,20 +306,28 @@ class SimulatedCameraService(CameraServiceInterface):
         return frame
     
     def _get_next_frame_data(self) -> np.ndarray:
-        if self._mode == "video" and self._cap:
+        # 1. VIDEO REJIMI
+        if self._mode == "video" and self._cap is not None:
             ret, frame = self._cap.read()
             if not ret:  # Video tugasa, boshidan boshlaymiz (Loop)
                 self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 ret, frame = self._cap.read()
             
-            if ret:
+            # Agar kadr muvaffaqiyatli o'qilgan bo'lsa
+            if ret and frame is not None:
                 return cv2.resize(frame, self._resolution)
+            else:
+                logger.warning("Kadrni o'qib bo'lmadi, random kadr ishlatilmoqda.")
+                # Agar videoda qandaydir jiddiy muammo bo'lsa, tushib ketmasligi uchun:
+                return self._generate_random_frame()
         
-        if self._mode == "images" and self._test_images:
+        # 2. RASMLAR REJIMI
+        elif self._mode == "images" and self._test_images:
             frame = self._test_images[self._current_image_index]
             self._current_image_index = (self._current_image_index + 1) % len(self._test_images)
             return frame
         
+        # 3. RANDOM REJIMI
         return self._generate_random_frame()
     
     async def get_frame(self) -> CameraFrame:
@@ -381,6 +397,11 @@ class SimulatedCameraService(CameraServiceInterface):
         logger.info(f"Stopping simulated camera: {self._camera_id}")
         self._is_active = False
         self._frame_count = 0
+        
+        # Video faylni xotiradan tozalash
+        if self._cap is not None:
+            self._cap.release()
+            self._cap = None
     
     def get_info(self) -> CameraInfo:
         """Get camera metadata."""

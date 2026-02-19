@@ -7,7 +7,7 @@ and delegates business logic to the service layer.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from fastapi import Query
@@ -74,170 +74,6 @@ async def create_animal(
     return await service.create_animal(animal_data)
 
 
-@router.get(
-    "/{animal_id}",
-    response_model=AnimalResponse,
-    summary="Get animal by ID",
-    description="Retrieve a single animal by its database ID.",
-    responses={
-        200: {"description": "Animal found"},
-        404: {"description": "Animal not found"},
-    },
-)
-async def get_animal(
-    animal_id: int,
-    service: AnimalService = Depends(get_animal_service),
-) -> AnimalResponse:
-    """
-    Get a single animal by ID.
-    
-    Args:
-        animal_id: Primary key of the animal
-    """
-    return await service.get_animal(animal_id)
-
-
-@router.get(
-    "/",
-    response_model=AnimalListResponse,
-    summary="List all animals",
-    description="""
-    Get a paginated list of animals with optional filtering.
-    
-    **Filtering:**
-    - `species`: Filter by species (cattle, sheep, goat, horse, other)
-    - `status`: Filter by status (active, quarantine, sick, sold, deceased, transferred)
-    
-    **Pagination:**
-    - `skip`: Number of records to skip (default: 0)
-    - `limit`: Maximum records to return (default: 10, max: 100)
-    """,
-    responses={
-        200: {"description": "List of animals"},
-    },
-)
-async def list_animals(
-    skip: int = Query(
-        default=0,
-        ge=0,
-        description="Number of records to skip",
-    ),
-    limit: int = Query(
-        default=10,
-        ge=1,
-        le=100,
-        description="Maximum number of records to return",
-    ),
-    species: Optional[str] = Query(
-        default=None,
-        description="Filter by species (e.g., 'cattle', 'sheep')",
-    ),
-    status: Optional[str] = Query(
-        default=None,
-        description="Filter by status (e.g., 'active', 'sold')",
-    ),
-    service: AnimalService = Depends(get_animal_service),
-) -> AnimalListResponse:
-    """
-    Get paginated list of animals.
-    
-    Returns list with pagination metadata.
-    """
-    return await service.get_animals(
-        skip=skip,
-        limit=limit,
-        species=species,
-        status=status,
-    )
-
-
-@router.patch(
-    "/{animal_id}",
-    response_model=AnimalResponse,
-    summary="Update animal",
-    description="""
-    Partially update an animal record.
-    
-    **Business Rules:**
-    - Only provided fields will be updated (partial update)
-    - Cannot update archived animals (status: SOLD or DECEASED)
-    - If updating tag_id, new tag must be unique
-    """,
-    responses={
-        200: {"description": "Animal updated successfully"},
-        400: {
-            "description": (
-                "Cannot modify archived animal or tag_id conflict"
-            ),
-        },
-        404: {"description": "Animal not found"},
-        422: {"description": "Invalid request data"},
-    },
-)
-async def update_animal(
-    animal_id: int,
-    update_data: AnimalUpdate,
-    service: AnimalService = Depends(get_animal_service),
-) -> AnimalResponse:
-    """
-    Update an existing animal (partial update).
-    
-    Only non-null fields in the request body will be updated.
-    """
-    return await service.update_animal(animal_id, update_data)
-
-
-@router.delete(
-    "/{animal_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete animal",
-    description="""
-    Delete an animal record.
-    
-    **Business Rule:**
-    - Cannot delete archived animals (status: SOLD or DECEASED)
-    - Archived animals must be preserved for audit trail
-    """,
-    responses={
-        204: {"description": "Animal deleted successfully"},
-        400: {"description": "Cannot delete archived animal"},
-        404: {"description": "Animal not found"},
-    },
-)
-async def delete_animal(
-    animal_id: int,
-    service: AnimalService = Depends(get_animal_service),
-) -> None:
-    """
-    Delete an animal.
-    
-    Returns 204 No Content on success.
-    """
-    await service.delete_animal(animal_id)
-    # FastAPI automatically returns 204 with no body
-
-
-@router.get(
-    "/tag/{tag_id}",
-    response_model=AnimalResponse,
-    summary="Get animal by tag ID",
-    description="Retrieve a single animal by its tag identifier (case-insensitive).",
-    responses={
-        200: {"description": "Animal found"},
-        404: {"description": "Animal not found"},
-    },
-)
-async def get_animal_by_tag(
-    tag_id: str,
-    service: AnimalService = Depends(get_animal_service),
-) -> AnimalResponse:
-    """
-    Get a single animal by tag ID.
-    
-    Args:
-        tag_id: Unique tag identifier (e.g., "JNV-001")
-    """
-    return await service.get_animal_by_tag(tag_id)
     # ============================================================================
     # ADVANCED SEARCH API ENDPOINT - ADD TO ANIMALS API
     # ============================================================================
@@ -326,8 +162,8 @@ async def search_animals(
     breed: Optional[str] = Query(None, description="Filter by breed (partial match)"),
     min_detections: Optional[int] = Query(None, description="Minimum number of detections", ge=0),
     search_text: Optional[str] = Query(None, description="Full-text search across tag_id, breed, notes"),
-    sort_by: str = Query("tag_id", description="Sort by field", regex="^(tag_id|species|status|total_detections|last_detected_at)$"),
-    sort_order: str = Query("asc", description="Sort order", regex="^(asc|desc)$"),
+    sort_by: str = Query("tag_id", description="Sort by field", pattern="^(tag_id|species|status|total_detections|last_detected_at)$"),
+    sort_order: str = Query("asc", description="Sort order", pattern="^(asc|desc)$"),
     skip: int = Query(0, description="Pagination offset", ge=0),
     limit: int = Query(20, description="Maximum results", ge=1, le=100),
     db: AsyncSession = Depends(get_db)
@@ -498,3 +334,169 @@ async def text_search_animals(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to perform text search"
         )
+
+
+@router.get(
+    "/{animal_id}",
+    response_model=AnimalResponse,
+    summary="Get animal by ID",
+    description="Retrieve a single animal by its database ID.",
+    responses={
+        200: {"description": "Animal found"},
+        404: {"description": "Animal not found"},
+    },
+)
+async def get_animal(
+    animal_id: int,
+    service: AnimalService = Depends(get_animal_service),
+) -> AnimalResponse:
+    """
+    Get a single animal by ID.
+    
+    Args:
+        animal_id: Primary key of the animal
+    """
+    return await service.get_animal(animal_id)
+
+
+@router.get(
+    "/",
+    response_model=AnimalListResponse,
+    summary="List all animals",
+    description="""
+    Get a paginated list of animals with optional filtering.
+    
+    **Filtering:**
+    - `species`: Filter by species (cattle, sheep, goat, horse, other)
+    - `status`: Filter by status (active, quarantine, sick, sold, deceased, transferred)
+    
+    **Pagination:**
+    - `skip`: Number of records to skip (default: 0)
+    - `limit`: Maximum records to return (default: 10, max: 100)
+    """,
+    responses={
+        200: {"description": "List of animals"},
+    },
+)
+async def list_animals(
+    skip: int = Query(
+        default=0,
+        ge=0,
+        description="Number of records to skip",
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of records to return",
+    ),
+    species: Optional[str] = Query(
+        default=None,
+        description="Filter by species (e.g., 'cattle', 'sheep')",
+    ),
+    status: Optional[str] = Query(
+        default=None,
+        description="Filter by status (e.g., 'active', 'sold')",
+    ),
+    service: AnimalService = Depends(get_animal_service),
+) -> AnimalListResponse:
+    """
+    Get paginated list of animals.
+    
+    Returns list with pagination metadata.
+    """
+    return await service.get_animals(
+        skip=skip,
+        limit=limit,
+        species=species,
+        status=status,
+    )
+
+
+@router.patch(
+    "/{animal_id}",
+    response_model=AnimalResponse,
+    summary="Update animal",
+    description="""
+    Partially update an animal record.
+    
+    **Business Rules:**
+    - Only provided fields will be updated (partial update)
+    - Cannot update archived animals (status: SOLD or DECEASED)
+    - If updating tag_id, new tag must be unique
+    """,
+    responses={
+        200: {"description": "Animal updated successfully"},
+        400: {
+            "description": (
+                "Cannot modify archived animal or tag_id conflict"
+            ),
+        },
+        404: {"description": "Animal not found"},
+        422: {"description": "Invalid request data"},
+    },
+)
+async def update_animal(
+    animal_id: int,
+    update_data: AnimalUpdate,
+    service: AnimalService = Depends(get_animal_service),
+) -> AnimalResponse:
+    """
+    Update an existing animal (partial update).
+    
+    Only non-null fields in the request body will be updated.
+    """
+    return await service.update_animal(animal_id, update_data)
+
+
+@router.delete(
+    "/{animal_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete animal",
+    description="""
+    Delete an animal record.
+    
+    **Business Rule:**
+    - Cannot delete archived animals (status: SOLD or DECEASED)
+    - Archived animals must be preserved for audit trail
+    """,
+    responses={
+        204: {"description": "Animal deleted successfully"},
+        400: {"description": "Cannot delete archived animal"},
+        404: {"description": "Animal not found"},
+    },
+)
+async def delete_animal(
+    animal_id: int,
+    service: AnimalService = Depends(get_animal_service),
+) -> None:
+    """
+    Delete an animal.
+    
+    Returns 204 No Content on success.
+    """
+    await service.delete_animal(animal_id)
+    # FastAPI automatically returns 204 with no body
+
+
+@router.get(
+    "/tag/{tag_id}",
+    response_model=AnimalResponse,
+    summary="Get animal by tag ID",
+    description="Retrieve a single animal by its tag identifier (case-insensitive).",
+    responses={
+        200: {"description": "Animal found"},
+        404: {"description": "Animal not found"},
+    },
+)
+async def get_animal_by_tag(
+    tag_id: str,
+    service: AnimalService = Depends(get_animal_service),
+) -> AnimalResponse:
+    """
+    Get a single animal by tag ID.
+    
+    Args:
+        tag_id: Unique tag identifier (e.g., "JNV-001")
+    """
+    return await service.get_animal_by_tag(tag_id)
