@@ -278,7 +278,7 @@ class DetectionPipeline:
         # STEP 1: YOLO Detection
         t0 = time.monotonic()
         try:
-            inference_result = await self.yolo.detect(frame)
+            inference_result = await self.yolo.detect(frame.frame)
             detections = inference_result.detections
         except Exception as e:
             logger.error(f"YOLO inference failed: {e}")

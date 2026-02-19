@@ -71,3 +71,4 @@ reportlab
 
 # scikit-learn (cosine similarity, future: KNN classifier)
 scikit-learn==1.4.0
+celery[redis]==5.3.6

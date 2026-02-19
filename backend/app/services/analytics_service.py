@@ -275,12 +275,12 @@ class AnalyticsService:
         try:
             # ===== Detections by hour =====
             hour_query = select(
-                func.extract('hour', Detection.detected_at).label('hour'),
+                func.extract('hour', Detection.timestamp).label('hour'),
                 func.count(Detection.id).label('count')
             ).where(
                 and_(
-                    func.date(Detection.detected_at) >= date_from,
-                    func.date(Detection.detected_at) <= date_to
+                    func.date(Detection.timestamp) >= date_from,
+                    func.date(Detection.timestamp) <= date_to
                 )
             ).group_by('hour').order_by('hour')
             
@@ -295,12 +295,12 @@ class AnalyticsService:
             
             # ===== Detections by day =====
             day_query = select(
-                func.date(Detection.detected_at).label('date'),
+                func.date(Detection.timestamp).label('date'),
                 func.count(Detection.id).label('count')
             ).where(
                 and_(
-                    func.date(Detection.detected_at) >= date_from,
-                    func.date(Detection.detected_at) <= date_to
+                    func.date(Detection.timestamp) >= date_from,
+                    func.date(Detection.timestamp) <= date_to
                 )
             ).group_by('date').order_by('date')
             
@@ -322,8 +322,8 @@ class AnalyticsService:
                 func.avg(Detection.confidence_score).label('avg_confidence')
             ).where(
                 and_(
-                    func.date(Detection.detected_at) >= date_from,
-                    func.date(Detection.detected_at) <= date_to
+                    func.date(Detection.timestamp) >= date_from,
+                    func.date(Detection.timestamp) <= date_to
                 )
             ).group_by(Detection.camera_id).order_by(desc('count'))
             
@@ -348,8 +348,8 @@ class AnalyticsService:
                 Animal, Detection.animal_id == Animal.id
             ).where(
                 and_(
-                    func.date(Detection.detected_at) >= date_from,
-                    func.date(Detection.detected_at) <= date_to
+                    func.date(Detection.timestamp) >= date_from,
+                    func.date(Detection.timestamp) <= date_to
                 )
             ).group_by(Animal.id, Animal.tag_id, Animal.species).order_by(
                 desc('detection_count')
@@ -452,7 +452,7 @@ class AnalyticsService:
                 Animal.tag_id,
                 Animal.species,
                 func.count(Detection.id).label('detection_count'),
-                func.max(Detection.detected_at).label('last_detection')
+                func.max(Detection.timestamp).label('last_detection')
             ).select_from(Animal).outerjoin(
                 Detection, Animal.id == Detection.animal_id
             ).where(
@@ -575,7 +575,7 @@ class AnalyticsService:
                 ).where(
                     and_(
                         Detection.camera_id == cam_id,
-                        Detection.detected_at >= date_from
+                        Detection.timestamp >= date_from
                     )
                 )
                 
@@ -672,9 +672,9 @@ class AnalyticsService:
         query = select(func.count(Detection.id))
         
         if date_from is not None:
-            query = query.where(func.date(Detection.detected_at) >= date_from)
+            query = query.where(func.date(Detection.timestamp) >= date_from)
         if date_to is not None:
-            query = query.where(func.date(Detection.detected_at) <= date_to)
+            query = query.where(func.date(Detection.timestamp) <= date_to)
         
         result = await db.execute(query)
         return result.scalar() or 0
@@ -739,7 +739,7 @@ class AnalyticsService:
             "total": health["total_cameras"],
             "running": health["running_cameras"],
             "healthy": health["healthy_cameras"],
-            "status": "healthy" if health["all_healthy"] else "degraded"
+            "status": "healthy" if health["healthy_cameras"] == health["total_cameras"] else "degraded"
         }
     
     async def _get_recent_detections(
@@ -750,7 +750,7 @@ class AnalyticsService:
         """Get recent detection activity."""
         query = select(Detection).options(
             selectinload(Detection.animal)
-        ).order_by(desc(Detection.detected_at)).limit(limit)
+        ).order_by(desc(Detection.timestamp)).limit(limit)
         
         result = await db.execute(query)
         detections = result.scalars().all()
@@ -760,7 +760,7 @@ class AnalyticsService:
                 "animal_tag": d.animal.tag_id if d.animal else "Unknown",
                 "camera_id": d.camera_id,
                 "confidence": round(d.confidence_score, 3),
-                "detected_at": d.detected_at.isoformat()
+                "detected_at": d.timestamp.isoformat()
             }
             for d in detections
         ]
