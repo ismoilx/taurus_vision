@@ -1,69 +1,64 @@
 """
-Celery Application Configuration.
+Celery Application Configuration — Sprint 6
 
-Beat schedule — barcha scheduled tasklar shu yerda.
+Beat schedule:
+  00:30 UTC  — Kunlik ADI hisoblash (barcha aktiv jonivorlar)
+  Har soat   — Ko'rinmayotgan jonivorlarni tekshirish
+  Dushanba 02:00 — O'sish to'xtagan jonivorlar
+  Yakshanba 03:00 — Eski alertlarni tozalash
 """
 
 from celery import Celery
 from celery.schedules import crontab
 
 celery_app = Celery("taurus_vision")
-
 celery_app.config_from_object("workers.celery_config")
 
-# ------------------------------------------------------------------ #
-# BEAT SCHEDULE                                                        #
-# ------------------------------------------------------------------ #
+# ── Beat Schedule ─────────────────────────────────────────────────────────────
 
 celery_app.conf.beat_schedule = {
 
-    # ---- ADI ---------------------------------------------------- #
-
-    # Kunlik ADI: har kecha 00:30 UTC
     "daily-adi-calculation": {
         "task":     "adi.calculate_daily",
         "schedule": crontab(hour=0, minute=30),
-        "kwargs":   {
-            "target_date":       None,   # None = bugun
-            "force_recalculate": False,
-        },
-        "options": {"queue": "adi"},
+        "kwargs":   {"target_date": None, "force_recalculate": False},
+        "options":  {"queue": "adi"},
     },
 
-    # Ko'rinmayotganlar: har soat
     "check-missing-animals": {
         "task":     "adi.check_missing_animals",
-        "schedule": crontab(minute=0),   # Har soat boshida
+        "schedule": crontab(minute=0),        # Har soat
         "options":  {"queue": "adi"},
     },
 
-    # O'sish tekshiruvi: har Dushanba 02:00 UTC
     "check-growth-stagnation": {
         "task":     "adi.check_growth_stagnation",
-        "schedule": crontab(hour=2, minute=0, day_of_week=1),
+        "schedule": crontab(hour=2, minute=0, day_of_week=1),  # Dushanba
         "options":  {"queue": "adi"},
     },
 
-    # Alert tozalash: har Yakshanba 03:00 UTC
     "cleanup-old-alerts": {
         "task":     "adi.cleanup_old_alerts",
-        "schedule": crontab(hour=3, minute=0, day_of_week=0),
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),  # Yakshanba
         "kwargs":   {"keep_days": 90},
         "options":  {"queue": "maintenance"},
     },
 }
 
 celery_app.conf.task_routes = {
-    "adi.*":         {"queue": "adi"},
-    "detection.*":   {"queue": "detection"},
-    "notification.*":{"queue": "notification"},
-    "*.cleanup*":    {"queue": "maintenance"},
+    "adi.*":          {"queue": "adi"},
+    "detection.*":    {"queue": "detection"},
+    "notification.*": {"queue": "notification"},
+    "*.cleanup*":     {"queue": "maintenance"},
 }
 
-# Import tasks — Celery autodiscover uchun
-celery_app.autodiscover_tasks([
-    "workers.tasks.adi_tasks",
-    "workers.tasks.detection_tasks",
-    "workers.tasks.analysis_tasks",
-    "workers.tasks.notification_tasks",
-])
+# ── Task Registration ─────────────────────────────────────────────────────────
+# autodiscover_tasks() paketlar uchun mo'ljallangan.
+# Biz modul yo'llarini to'g'ridan-to'g'ri import qilamiz.
+
+from workers.tasks import (  # noqa: E402, F401
+    adi_tasks,
+    analysis_tasks,
+    detection_tasks,
+    notification_tasks,
+)

@@ -500,3 +500,64 @@ async def get_animal_by_tag(
         tag_id: Unique tag identifier (e.g., "JNV-001")
     """
     return await service.get_animal_by_tag(tag_id)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Animal Detection Tarixi  (Sprint 3 qo'shimcha)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/{animal_id}/detections",
+    summary="Get detection history for an animal",
+    description="Return the most recent YOLO detections linked to a specific animal.",
+)
+async def get_animal_detections(
+    animal_id: int,
+    limit: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """
+    Return detection records for one animal (newest first).
+
+    Args:
+        animal_id: Animal primary key
+        limit:     Max records to return (default 20)
+        db:        DB session
+
+    Returns:
+        List of detection dicts with id, camera_id, timestamp,
+        confidence, class_name.
+
+    Raises:
+        HTTPException 404: If animal not found
+    """
+    from sqlalchemy import select, desc
+    from app.models.animal import Animal
+    from app.models.detection import Detection
+
+    # Jonivor mavjudligini tekshirish
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Animal {animal_id} not found",
+        )
+
+    result = await db.execute(
+        select(Detection)
+        .where(Detection.animal_id == animal_id)
+        .order_by(desc(Detection.timestamp))
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+
+    return [
+        {
+            "id":         d.id,
+            "camera_id":  d.camera_id,
+            "timestamp":  d.timestamp.isoformat(),
+            "confidence": round(d.confidence, 3),
+            "class_name": d.class_name,
+            "bbox":       d.bbox,
+        }
+        for d in rows
+    ]

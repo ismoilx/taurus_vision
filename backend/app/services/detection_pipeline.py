@@ -48,7 +48,11 @@ from app.core.database import AsyncSessionLocal
 from app.models.animal import Animal
 from app.models.detection import Detection
 from app.models.alert import Alert, AlertType, AlertStatus
+from app.models.weight_measurement import WeightMeasurement
 from app.utils.image_utils import extract_muzzle_region
+
+# Minimal confidence — past bo'lsa WeightMeasurement yaratilmaydi
+WEIGHT_CONFIDENCE_THRESHOLD = 0.70
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +346,8 @@ class DetectionPipeline:
 
         # STEP 3: DB ga saqlash
         try:
-            saved_detection = await self._save_detection(
+            animal_tag_id: Optional[str] = None
+            saved_detection, animal_tag_id = await self._save_detection(
                 db=           db,
                 detection=    detection,
                 animal_id=    animal_id,
@@ -372,8 +377,9 @@ class DetectionPipeline:
         if self.ws_manager and saved_detection:
             try:
                 await self._broadcast_detection(
-                    detection=  saved_detection,
-                    animal_id=  animal_id,
+                    detection=     saved_detection,
+                    animal_id=     animal_id,
+                    animal_tag_id= animal_tag_id,
                 )
             except Exception as e:
                 logger.warning(f"WebSocket broadcast failed: {e}")
@@ -423,46 +429,85 @@ class DetectionPipeline:
         detection:    YOLODetection,
         animal_id:    Optional[int],
         inference_ms: float,
-    ) -> Optional[Detection]:
+    ) -> tuple[Optional[Detection], Optional[str]]:
         """
-        Detection ni DB ga saqlash va
-        Animal.last_detected_at ni yangilash.
+        Detection + WeightMeasurement DB ga saqlash.
+
+        PIPELINE:
+            1. Detection → detections jadvali (har doim)
+            2. WeightMeasurement → weight_measurements jadvali
+               FAQAT: animal tanilgan + confidence >= WEIGHT_CONFIDENCE_THRESHOLD
+            3. Animal.last_detected_at yangilash
 
         Returns:
-            Saqlangan Detection ORM obyekti
+            (Saqlangan Detection ORM obyekti, animal tag_id yoki None)
         """
-        # Detection yozuvi
+        now = datetime.now(timezone.utc)
+
+        # Bbox dict va vazn taxmin
+        bbox_dict = {
+            "x": detection.bbox.x,
+            "y": detection.bbox.y,
+            "w": detection.bbox.w,
+            "h": detection.bbox.h,
+        }
+        w, h = detection.bbox.w, detection.bbox.h
+        estimated_weight_kg = round(
+            max(50.0, min(800.0, (w * h * 4000) + 80)), 1
+        )
+
+        # ── 1. Detection yozuvi ──────────────────────────────────
         det_record = Detection(
-            animal_id=       animal_id,
-            camera_id=       self.camera.camera_id,
-            timestamp=       datetime.now(timezone.utc),
-            confidence=      detection.confidence,
-            class_id=        detection.class_id,
-            class_name=      detection.class_name,
-            bbox=            {
-                "x": detection.bbox.x,
-                "y": detection.bbox.y,
-                "w": detection.bbox.w,
-                "h": detection.bbox.h,
-            },
-            frame_number=    getattr(detection, "frame_number", None),
+            animal_id=        animal_id,
+            camera_id=        self.camera.camera_id,
+            timestamp=        now,
+            confidence=       detection.confidence,
+            class_id=         detection.class_id,
+            class_name=       detection.class_name,
+            bbox=             bbox_dict,
+            estimated_weight= estimated_weight_kg,
+            frame_number=     getattr(detection, "frame_number", None),
             inference_time_ms=inference_ms,
         )
         db.add(det_record)
 
-        # Animal.last_detected_at yangilash
+        # ── 2. Animal + WeightMeasurement ───────────────────────
+        animal_tag_id: Optional[str] = None
         if animal_id:
-            stmt = select(Animal).where(Animal.id == animal_id)
+            stmt   = select(Animal).where(Animal.id == animal_id)
             result = await db.execute(stmt)
             animal = result.scalar_one_or_none()
 
             if animal:
-                animal.mark_detected(det_record.timestamp)
+                animal.mark_detected(now)
+                animal_tag_id = animal.tag_id
+
+                # Yuqori confidence → WeightMeasurement yaratish
+                if detection.confidence >= WEIGHT_CONFIDENCE_THRESHOLD:
+                    weight_record = WeightMeasurement(
+                        animal_id=          animal_id,
+                        timestamp=          now,
+                        estimated_weight_kg=estimated_weight_kg,
+                        confidence_score=   round(detection.confidence, 3),
+                        camera_id=          self.camera.camera_id,
+                        raw_ai_data={
+                            "bbox":         bbox_dict,
+                            "class_name":   detection.class_name,
+                            "class_id":     detection.class_id,
+                            "inference_ms": round(inference_ms, 1),
+                            "source":       "yolo_pipeline",
+                        },
+                    )
+                    db.add(weight_record)
+                    logger.debug(
+                        f"WeightMeasurement | animal={animal_tag_id} | "
+                        f"weight={estimated_weight_kg}kg | "
+                        f"conf={detection.confidence:.2f}"
+                    )
 
         await db.commit()
         await db.refresh(det_record)
-
-        return det_record
+        return det_record, animal_tag_id
 
     # ================================================================ #
     # ADI INTEGRATSIYA                                                   #
@@ -529,26 +574,40 @@ class DetectionPipeline:
 
     async def _broadcast_detection(
         self,
-        detection: Detection,
-        animal_id: Optional[int],
+        detection:     Detection,
+        animal_id:     Optional[int],
+        animal_tag_id: Optional[str],
     ) -> None:
         """
         Real vaqt yangilanishni WebSocket orqali yuborish.
 
-        Payload frontend dashboard uchun optimallashtirilgan.
+        Payload frontend LiveFeed uchun optimallashtirilgan.
+        Frontend LiveWeightUpdate formatiga mos keladi.
         """
         if not self.ws_manager:
             return
 
+        # Bbox dan og'irlik taxminiy hisoblash (mvp formula)
+        # w * h * konstantа — real model tayyor bo'lgunga qadar
+        bbox = detection.bbox or {}
+        w = bbox.get("w", 0.1)
+        h = bbox.get("h", 0.2)
+        estimated_weight_kg = round(
+            max(50.0, min(800.0, (w * h * 4000) + 80)), 1
+        )
+
         payload = {
-            "type":        "detection",
-            "timestamp":   detection.timestamp.isoformat(),
-            "camera_id":   detection.camera_id,
-            "animal_id":   animal_id,
-            "class_name":  detection.class_name,
-            "confidence":  round(detection.confidence, 3),
-            "bbox":        detection.bbox,
-            "identified":  animal_id is not None,
+            "type":                 "detection",
+            "timestamp":            detection.timestamp.isoformat(),
+            "camera_id":            detection.camera_id,
+            "animal_id":            animal_id,
+            "animal_tag_id":        animal_tag_id or "UNKNOWN",
+            "class_name":           detection.class_name,
+            "confidence":           round(detection.confidence, 3),
+            "confidence_score":     round(detection.confidence, 3),
+            "estimated_weight_kg":  estimated_weight_kg,
+            "bbox":                 detection.bbox,
+            "identified":           animal_id is not None,
             "pipeline_stats": {
                 "fps":    self.stats.fps,
                 "frames": self.stats.processed_frames,

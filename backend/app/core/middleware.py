@@ -180,3 +180,92 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             )
         
         return response
+
+# ============================================================================
+# Rate Limiting Middleware — Sprint 6
+# ============================================================================
+
+import time
+from collections import defaultdict
+from threading import Lock
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    In-memory rate limiting middleware.
+
+    Sliding window algoritmi — IP boshiga so'rovlar sonini cheklaydi.
+    Production da Redis-based rate limiting (FastAPI-limiter) tavsiya etiladi.
+
+    Limits:
+        /api/v1/detection/*  — 60 req/min  (kamera so'rovlari)
+        /api/v1/animals/*    — 120 req/min (CRUD)
+        /api/v1/analytics/*  — 30  req/min (og'ir so'rovlar)
+        Boshqa /api/*        — 200 req/min
+
+    Returns:
+        429 Too Many Requests — limit oshganda
+    """
+
+    # Route-specific limits (requests per minute)
+    LIMITS: dict[str, int] = {
+        "/api/v1/detection":  60,
+        "/api/v1/analytics":  30,
+        "/api/v1/reports":    20,
+        "/api/v1/export":     10,
+        "/api/v1/animals":   120,
+        "/api/v1/weights":   120,
+    }
+    DEFAULT_LIMIT = 200   # req/min
+    WINDOW = 60           # seconds
+
+    def __init__(self, app, enabled: bool = True):
+        super().__init__(app)
+        self._enabled  = enabled
+        self._requests: dict[str, list[float]] = defaultdict(list)
+        self._lock = Lock()
+
+    def _get_limit(self, path: str) -> int:
+        for prefix, limit in self.LIMITS.items():
+            if path.startswith(prefix):
+                return limit
+        return self.DEFAULT_LIMIT
+
+    def _is_limited(self, key: str, limit: int) -> bool:
+        """Sliding window rate check. Thread-safe."""
+        now = time.monotonic()
+        window_start = now - self.WINDOW
+        with self._lock:
+            # Eski so'rovlarni tozalash
+            self._requests[key] = [
+                ts for ts in self._requests[key] if ts > window_start
+            ]
+            if len(self._requests[key]) >= limit:
+                return True
+            self._requests[key].append(now)
+            return False
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Health check, metrics, WebSocket — limit qo'llanilmaydi
+        path = request.url.path
+        if not self._enabled or path in ("/health", "/health/live", "/metrics"):
+            return await call_next(request)
+
+        if path.startswith("/api/"):
+            ip    = request.client.host if request.client else "unknown"
+            key   = f"{ip}:{path.split('/')[3] if len(path.split('/')) > 3 else 'api'}"
+            limit = self._get_limit(path)
+
+            if self._is_limited(key, limit):
+                return Response(
+                    content='{"detail":"Too Many Requests. Iltimos, biroz kuting."}',
+                    status_code=429,
+                    media_type="application/json",
+                    headers={
+                        "Retry-After": str(self.WINDOW),
+                        "X-RateLimit-Limit":  str(limit),
+                        "X-RateLimit-Reset":  str(int(time.time()) + self.WINDOW),
+                    },
+                )
+
+        return await call_next(request)

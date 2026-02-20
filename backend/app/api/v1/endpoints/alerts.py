@@ -16,7 +16,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -70,14 +70,12 @@ async def list_alerts(
             offset=   offset,
         )
         # Barcha status uchun alohida query
-        from sqlalchemy import and_, func
         conditions = []
         if animal_id:
             conditions.append(Alert.animal_id == animal_id)
         if severity:
             conditions.append(Alert.severity == severity)
 
-        from sqlalchemy import select
         count_stmt = select(func.count(Alert.id))
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
@@ -374,4 +372,3 @@ async def check_missing_animals(
         "alerts_created": len(alerts),
         "alert_ids": [a.id for a in alerts],
     }
-

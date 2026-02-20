@@ -135,7 +135,7 @@ services:
         condition: service_healthy
     networks:
       - taurus-network
-    command: /opt/venv/bin/celery -A workers.celery_app beat --loglevel=info
+    command: /opt/venv/bin/celery -A workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     mem_limit: 512m
     memswap_limit: 512m
 

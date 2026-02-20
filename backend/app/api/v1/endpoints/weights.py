@@ -2,14 +2,25 @@
 API endpoints for Weight Measurement resources.
 
 Handles CRUD operations and statistics for weight measurements.
+
+ENDPOINTS:
+    POST /weights/              — Yangi o'lchov yaratish (kamera/AI dan)
+    GET  /weights/              — Barcha o'lchovlar ro'yxati (paginated)
+    GET  /weights/recent        — Oxirgi o'lchovlar (barcha jonivorlar)
+    GET  /weights/{id}          — Bitta o'lchov
+    GET  /weights/animal/{id}   — Jonivor o'lchovlari
+    GET  /weights/animal/{id}/stats — Jonivor statistikasi
 """
 
 from typing import Optional
 from fastapi import APIRouter, Depends, status, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
-import logging # Loglarni ko'rish uchun qo'shildi
+from sqlalchemy import select, func, desc
+import logging
 
 from app.core.database import get_db
+from app.models.weight_measurement import WeightMeasurement
+from app.models.animal import Animal
 from app.services.weight_measurement import WeightMeasurementService
 from app.api.v1.websocket import get_ws_manager
 from app.schemas.weight_measurement import (
@@ -19,7 +30,6 @@ from app.schemas.weight_measurement import (
     WeightStatsResponse,
 )
 
-# Logger sozlash
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -33,17 +43,20 @@ def get_weight_service(
 ) -> WeightMeasurementService:
     """
     Dependency injection for WeightMeasurementService.
-    
+
     Automatically injects WebSocket manager for real-time updates.
     """
     try:
         ws_manager = get_ws_manager()
     except RuntimeError:
-        # WebSocket not initialized (e.g., during tests)
         ws_manager = None
-    
+
     return WeightMeasurementService(db, ws_manager)
 
+
+# ============================================================================
+# CREATE
+# ============================================================================
 
 @router.post(
     "/",
@@ -52,68 +65,128 @@ def get_weight_service(
     summary="Create weight measurement",
     description="""
     Create a new weight measurement from AI camera.
-    
+
     **Business Rules:**
     - Animal must exist
     - Confidence score should be >= 0.5 (warning if lower)
     - Automatically broadcasts to WebSocket clients
-    
-    **Real-time Broadcasting:**
-    All connected dashboard clients will receive this measurement instantly.
     """,
-    responses={
-        201: {"description": "Measurement created and broadcasted"},
-        404: {"description": "Animal not found"},
-        422: {"description": "Invalid data"},
-    },
 )
 async def create_measurement(
     measurement_data: WeightMeasurementCreate,
     service: WeightMeasurementService = Depends(get_weight_service),
 ) -> WeightMeasurementResponse:
-    """
-    Create new weight measurement.
-    
-    This endpoint is typically called by AI cameras or edge devices
-    after performing weight estimation.
-    """
-    # 1. Avval ma'lumotni Service orqali bazaga saqlaymiz (Eski kod)
+    """Create new weight measurement and broadcast via WebSocket."""
     result = await service.create_measurement(measurement_data)
 
-    # 2. --- YANGI QISM: Majburiy Broadcast (Arxitekturani buzmasdan) ---
+    # WebSocket broadcast
     try:
         ws_manager = get_ws_manager()
-        
-        # Frontend kutayotgan aniq formatda ma'lumot tayyorlaymiz
         broadcast_data = {
-            "animal_id": result.animal_id,
-            "animal_tag_id": getattr(result, "animal_tag_id", "UNKNOWN"), # Pydantic modeldan olish
+            "animal_id":           result.animal_id,
+            "animal_tag_id":       getattr(result, "animal_tag_id", "UNKNOWN"),
             "estimated_weight_kg": result.estimated_weight_kg,
-            "confidence_score": result.confidence_score,
-            "camera_id": result.camera_id,
-            "timestamp": result.timestamp.isoformat() if result.timestamp else None
+            "confidence_score":    result.confidence_score,
+            "camera_id":           result.camera_id,
+            "timestamp":           result.timestamp.isoformat() if result.timestamp else None,
         }
-        
-        # Barchaga yuborish
         await ws_manager.broadcast(broadcast_data)
         logger.info(f"📡 Broadcast sent for Animal {broadcast_data['animal_tag_id']}")
-        
     except Exception as e:
-        # Agar WebSocket ishlamasa ham, API 201 qaytarishi kerak (muhim!)
-        logger.error(f"⚠️ WebSocket broadcast failed inside endpoint: {e}")
-    # -------------------------------------------------------------------
+        logger.error(f"⚠️ WebSocket broadcast failed: {e}")
 
     return result
 
+
+# ============================================================================
+# LIST ALL (Dashboard uchun)
+# ============================================================================
+
+@router.get(
+    "/",
+    response_model=WeightMeasurementListResponse,
+    summary="List all weight measurements",
+    description="""
+    Get paginated list of ALL weight measurements across all animals.
+
+    **Sorted by:** timestamp descending (newest first)
+
+    **Use case:** Dashboard "Oxirgi O'lchovlar" widget.
+    """,
+)
+async def list_measurements(
+    skip:  int = Query(default=0,   ge=0,  description="Offset"),
+    limit: int = Query(default=20,  ge=1,  le=200, description="Max results"),
+    animal_id: Optional[int] = Query(default=None, description="Filter by animal"),
+    db: AsyncSession = Depends(get_db),
+) -> WeightMeasurementListResponse:
+    """
+    Return paginated weight measurements with animal tag info.
+
+    Args:
+        skip:      Pagination offset
+        limit:     Max results to return
+        animal_id: Optional animal filter
+        db:        Database session
+
+    Returns:
+        WeightMeasurementListResponse with items list and total count
+    """
+    # Base query
+    count_q = select(func.count(WeightMeasurement.id))
+    items_q = (
+        select(WeightMeasurement)
+        .order_by(desc(WeightMeasurement.timestamp))
+        .offset(skip)
+        .limit(limit)
+    )
+
+    if animal_id is not None:
+        count_q = count_q.where(WeightMeasurement.animal_id == animal_id)
+        items_q = items_q.where(WeightMeasurement.animal_id == animal_id)
+
+    total  = await db.scalar(count_q) or 0
+    result = await db.execute(items_q)
+    rows   = result.scalars().all()
+
+    return WeightMeasurementListResponse(
+        items=list(rows),
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+# ============================================================================
+# RECENT (LiveFeed uchun)
+# ============================================================================
+
+@router.get(
+    "/recent",
+    response_model=list[WeightMeasurementResponse],
+    summary="Get recent measurements (all animals)",
+    description="Get most recent weight measurements across all animals. Useful for live feed.",
+)
+async def get_recent_measurements(
+    limit: int = Query(default=50, ge=1, le=200),
+    min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
+    service: WeightMeasurementService = Depends(get_weight_service),
+) -> list[WeightMeasurementResponse]:
+    """Get recent measurements across all animals, newest first."""
+    return await service.get_recent_measurements(
+        limit=limit,
+        min_confidence=min_confidence,
+    )
+
+
+# ============================================================================
+# GET ONE
+# ============================================================================
 
 @router.get(
     "/{measurement_id}",
     response_model=WeightMeasurementResponse,
     summary="Get measurement by ID",
-    responses={
-        200: {"description": "Measurement found"},
-        404: {"description": "Measurement not found"},
-    },
 )
 async def get_measurement(
     measurement_id: int = Path(..., gt=0),
@@ -123,45 +196,24 @@ async def get_measurement(
     return await service.get_measurement(measurement_id)
 
 
+# ============================================================================
+# BY ANIMAL
+# ============================================================================
+
 @router.get(
     "/animal/{animal_id}",
     response_model=WeightMeasurementListResponse,
     summary="Get measurements for an animal",
-    description="""
-    Get paginated list of weight measurements for a specific animal.
-    
-    **Filtering:**
-    - `min_confidence`: Only return measurements above this confidence threshold
-    - `days`: Only return measurements from the last N days
-    
-    **Pagination:**
-    - `skip`: Number of records to skip
-    - `limit`: Maximum records to return (max 1000)
-    """,
 )
 async def get_animal_measurements(
     animal_id: int = Path(..., gt=0),
-    skip: int = Query(default=0, ge=0),
+    skip:  int = Query(default=0,   ge=0),
     limit: int = Query(default=100, ge=1, le=1000),
-    min_confidence: Optional[float] = Query(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description="Minimum confidence threshold",
-    ),
-    days: Optional[int] = Query(
-        default=None,
-        ge=1,
-        le=365,
-        description="Only get measurements from last N days",
-    ),
+    min_confidence: Optional[float] = Query(default=None, ge=0.0, le=1.0),
+    days: Optional[int] = Query(default=None, ge=1, le=365),
     service: WeightMeasurementService = Depends(get_weight_service),
 ) -> WeightMeasurementListResponse:
-    """
-    Get weight measurements for a specific animal.
-    
-    Returns paginated list with time-series data.
-    """
+    """Get weight measurements for a specific animal (paginated)."""
     return await service.get_animal_measurements(
         animal_id=animal_id,
         skip=skip,
@@ -175,80 +227,16 @@ async def get_animal_measurements(
     "/animal/{animal_id}/stats",
     response_model=WeightStatsResponse,
     summary="Get weight statistics for an animal",
-    description="""
-    Calculate weight statistics and trends for an animal.
-    
-    **Metrics:**
-    - Total measurements
-    - Average weight
-    - Latest weight
-    - Weight trend (increasing/decreasing/stable)
-    - Average confidence score
-    
-    **Parameters:**
-    - `days`: Analysis period (default 30)
-    - `min_confidence`: Only use measurements above this threshold
-    """,
 )
 async def get_animal_stats(
     animal_id: int = Path(..., gt=0),
-    days: int = Query(
-        default=30,
-        ge=1,
-        le=365,
-        description="Analysis period in days",
-    ),
-    min_confidence: float = Query(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Minimum confidence threshold",
-    ),
+    days: int = Query(default=30, ge=1, le=365),
+    min_confidence: float = Query(default=0.7, ge=0.0, le=1.0),
     service: WeightMeasurementService = Depends(get_weight_service),
 ) -> WeightStatsResponse:
-    """
-    Get weight statistics and trend analysis.
-    
-    Useful for analytics dashboard and health monitoring.
-    """
+    """Get weight statistics and trend analysis for an animal."""
     return await service.get_animal_weight_stats(
         animal_id=animal_id,
         days=days,
-        min_confidence=min_confidence,
-    )
-
-
-@router.get(
-    "/recent",
-    response_model=list[WeightMeasurementResponse],
-    summary="Get recent measurements (all animals)",
-    description="""
-    Get most recent weight measurements across all animals.
-    
-    Useful for live feed dashboard showing all recent activity.
-    """,
-)
-async def get_recent_measurements(
-    limit: int = Query(
-        default=50,
-        ge=1,
-        le=200,
-        description="Maximum measurements to return",
-    ),
-    min_confidence: float = Query(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description="Minimum confidence threshold",
-    ),
-    service: WeightMeasurementService = Depends(get_weight_service),
-) -> list[WeightMeasurementResponse]:
-    """
-    Get recent measurements across all animals.
-    
-    Returns newest measurements first.
-    """
-    return await service.get_recent_measurements(
-        limit=limit,
         min_confidence=min_confidence,
     )

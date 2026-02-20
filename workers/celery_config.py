@@ -35,3 +35,4 @@ task_default_retry_delay = 60  # 1 daqiqa
 
 # Result expiry
 result_expires = 60 * 60 * 24  # 24 soat
+broker_connection_retry_on_startup = True

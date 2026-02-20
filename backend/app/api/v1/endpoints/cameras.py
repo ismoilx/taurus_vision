@@ -58,7 +58,9 @@ class CameraResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
-# Endpoints
+# =========================================================================
+# 1. ANIQ (STATIC) ENDPOINTLAR (Tepada turishi shart!)
+# =========================================================================
 
 @router.post("/cameras/", response_model=CameraResponse, status_code=status.HTTP_201_CREATED)
 async def register_camera(config: CameraConfig):
@@ -118,6 +120,74 @@ async def register_camera(config: CameraConfig):
         )
 
 
+@router.get("/cameras/", response_model=List[str])
+async def list_cameras():
+    """
+    List all registered cameras.
+    
+    Returns list of camera IDs.
+    """
+    return camera_manager.list_cameras()
+
+
+@router.get("/cameras/stats/all")
+async def get_all_camera_stats():
+    """
+    Get statistics for all cameras.
+    
+    Returns dictionary mapping camera_id to statistics.
+    """
+    return camera_manager.get_all_stats()
+
+
+@router.post("/cameras/start-all", response_model=CameraResponse)
+async def start_all_cameras():
+    """
+    Start all registered cameras.
+    
+    Returns number of cameras started successfully.
+    """
+    count = camera_manager.start_all()
+    total = len(camera_manager.list_cameras())
+    
+    return CameraResponse(
+        success=True,
+        message=f"Started {count}/{total} cameras",
+        data={"started": count, "total": total},
+    )
+
+
+@router.post("/cameras/stop-all", response_model=CameraResponse)
+async def stop_all_cameras():
+    """
+    Stop all registered cameras.
+    
+    Returns number of cameras stopped successfully.
+    """
+    count = camera_manager.stop_all()
+    total = len(camera_manager.list_cameras())
+    
+    return CameraResponse(
+        success=True,
+        message=f"Stopped {count}/{total} cameras",
+        data={"stopped": count, "total": total},
+    )
+
+
+@router.get("/cameras/status")
+async def get_camera_status():
+    """
+    Get overall camera system health status.
+    
+    Returns summary of camera system health including counts and percentages.
+    """
+    return camera_manager.get_health_status()
+
+
+# =========================================================================
+# 2. O'ZGARUVCHAN (DYNAMIC) ENDPOINTLAR (Eng pastda turishi kerak!)
+# =========================================================================
+
 @router.delete("/cameras/{camera_id}", response_model=CameraResponse)
 async def unregister_camera(camera_id: str):
     """
@@ -140,16 +210,6 @@ async def unregister_camera(camera_id: str):
     )
 
 
-@router.get("/cameras/", response_model=List[str])
-async def list_cameras():
-    """
-    List all registered cameras.
-    
-    Returns list of camera IDs.
-    """
-    return camera_manager.list_cameras()
-
-
 @router.get("/cameras/{camera_id}/stats")
 async def get_camera_stats(camera_id: str):
     """
@@ -166,16 +226,6 @@ async def get_camera_stats(camera_id: str):
         )
     
     return stats
-
-
-@router.get("/cameras/stats/all")
-async def get_all_camera_stats():
-    """
-    Get statistics for all cameras.
-    
-    Returns dictionary mapping camera_id to statistics.
-    """
-    return camera_manager.get_all_stats()
 
 
 @router.post("/cameras/{camera_id}/start", response_model=CameraResponse)
@@ -220,47 +270,3 @@ async def stop_camera(camera_id: str):
         message=f"Camera {camera_id} stopped successfully",
         camera_id=camera_id,
     )
-
-
-@router.post("/cameras/start-all", response_model=CameraResponse)
-async def start_all_cameras():
-    """
-    Start all registered cameras.
-    
-    Returns number of cameras started successfully.
-    """
-    count = camera_manager.start_all()
-    total = len(camera_manager.list_cameras())
-    
-    return CameraResponse(
-        success=True,
-        message=f"Started {count}/{total} cameras",
-        data={"started": count, "total": total},
-    )
-
-
-@router.post("/cameras/stop-all", response_model=CameraResponse)
-async def stop_all_cameras():
-    """
-    Stop all registered cameras.
-    
-    Returns number of cameras stopped successfully.
-    """
-    count = camera_manager.stop_all()
-    total = len(camera_manager.list_cameras())
-    
-    return CameraResponse(
-        success=True,
-        message=f"Stopped {count}/{total} cameras",
-        data={"stopped": count, "total": total},
-    )
-
-
-@router.get("/cameras/health")
-async def get_camera_health():
-    """
-    Get overall camera system health status.
-    
-    Returns summary of camera system health including counts and percentages.
-    """
-    return camera_manager.get_health_status()

@@ -1,0 +1,193 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0" }
+  ],
+  "annotations": { "list": [] },
+  "description": "Taurus Vision — Ferma monitoring",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "content": "# 🐄 Taurus Vision — Real-time Farm Dashboard\nFerma monitoringi: Jonivorlar, Vazn o'lchovlari, Kameralar",
+        "mode": "markdown"
+      },
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "red",   "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "mappings": []
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 3 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["last"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "title": "Jonivorlar soni",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus" },
+          "expr": "taurus_animals_total",
+          "legendFormat": "Jonivorlar"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 3 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "background" },
+      "title": "Jami deteksiyalar",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "taurus_detections_total",
+          "legendFormat": "Deteksiyalar"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 3 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "background" },
+      "title": "Jami o'lchovlar",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "taurus_measurements_total",
+          "legendFormat": "O'lchovlar"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "red",   "value": 0.8 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 3 },
+      "id": 5,
+      "options": { "reduceOptions": { "calcs": ["mean"] }, "colorMode": "background" },
+      "title": "API O'rtacha javob vaqti",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "rate(taurus_http_request_duration_seconds_sum[5m]) / rate(taurus_http_request_duration_seconds_count[5m])",
+          "legendFormat": "Javob vaqti"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "title": "API So'rovlar tezligi (req/s)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(taurus_http_requests_total[1m])",
+          "legendFormat": "{{method}} {{path}}"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "id": 7,
+      "title": "Deteksiyalar (oxirgi 1 soat)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "increase(taurus_detections_total[5m])",
+          "legendFormat": "Deteksiyalar (5m)"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["taurus", "farm", "production"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Taurus Vision — Ferma Monitoring",
+  "uid": "taurus-overview-v1",
+  "version": 1
+}

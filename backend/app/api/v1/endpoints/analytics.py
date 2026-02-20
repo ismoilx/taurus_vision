@@ -28,7 +28,7 @@ from app.schemas.analytics import (
 logger = get_logger(__name__)
 
 # Create router
-router = APIRouter()
+router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # Initialize service (singleton pattern would be better in production)
 analytics_service = AnalyticsService()

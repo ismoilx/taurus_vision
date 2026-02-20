@@ -1,0 +1,51 @@
+# ============================================================
+# Taurus Vision — Prometheus Configuration
+# ============================================================
+
+global:
+  scrape_interval:     15s   # Har 15 soniyada metrikalar yig'ish
+  evaluation_interval: 15s
+  external_labels:
+    project: 'taurus-vision'
+    environment: 'production'
+
+# Alerting (kelajakda AlertManager bilan)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+scrape_configs:
+
+  # ── Prometheus o'zi ─────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ── Taurus Vision Backend ────────────────────────────────
+  - job_name: 'taurus-backend'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend:8000']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'taurus-backend'
+
+  # ── PostgreSQL ───────────────────────────────────────────
+  # postgres_exporter o'rnatilganda yoqing
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # ── Redis ────────────────────────────────────────────────
+  # redis_exporter o'rnatilganda yoqing
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+
+  # ── Nginx ────────────────────────────────────────────────
+  # nginx-exporter o'rnatilganda yoqing
+  # - job_name: 'nginx'
+  #   static_configs:
+  #     - targets: ['nginx-exporter:9113']

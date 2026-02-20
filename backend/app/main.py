@@ -17,7 +17,8 @@ from app.core.logging_config import setup_logging, get_logger
 from app.core.middleware import (
     RequestLoggingMiddleware,
     PerformanceMonitoringMiddleware,
-    SecurityHeadersMiddleware,  # Security headers
+    SecurityHeadersMiddleware,
+    RateLimitMiddleware,          # Sprint 6: Rate limiting
 )
 from app.core.validators import validate_environment, check_system_resources
 from app.core.database import get_db
@@ -70,6 +71,7 @@ app.add_middleware(
 
 # Security headers (Production-ready security)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware, enabled=not settings.DEBUG)  # Sprint 6
 
 # Request logging and performance monitoring
 app.add_middleware(RequestLoggingMiddleware)

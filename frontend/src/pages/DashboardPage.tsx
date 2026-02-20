@@ -155,9 +155,11 @@ export default function DashboardPage() {
 
       setStats({
         totalAnimals: animalsRes.total || 0,
-        totalDetections: analyticsRes.total_detections || 0,
+        totalDetections: analyticsRes?.detections?.total ?? analyticsRes?.total_detections ?? 0,
         avgWeight:
-          analyticsRes.average_weight > 0
+          analyticsRes?.weight?.average_kg > 0
+            ? analyticsRes.weight.average_kg.toFixed(1)
+            : analyticsRes?.average_weight > 0
             ? analyticsRes.average_weight.toFixed(1)
             : '—',
       });
@@ -168,10 +170,19 @@ export default function DashboardPage() {
 
   async function loadRecentMeasurements() {
     try {
-      const data = await apiFetch<LiveWeightUpdate[]>(
-        '/api/v1/weights/?limit=8&skip=0'
+      const data = await apiFetch<any>('/api/v1/weights/recent?limit=8&min_confidence=0.0');
+      // WeightMeasurementListResponse: { items: [...], total, skip, limit }
+      const items = Array.isArray(data) ? data : (data?.items ?? []);
+      setMeasurements(
+        items.map((m: any) => ({
+          animal_id: m.animal_id,
+          animal_tag_id: m.animal_tag_id ?? `#${m.animal_id}`,
+          estimated_weight_kg: m.estimated_weight_kg,
+          confidence_score: m.confidence_score,
+          camera_id: m.camera_id,
+          timestamp: m.timestamp,
+        }))
       );
-      setMeasurements(data);
     } catch (err) {
       console.error('Measurements error:', err);
     }

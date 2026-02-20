@@ -1,270 +1,182 @@
 """
-Global pytest fixtures and configuration.
+Global pytest fixtures — Taurus Vision
 
-Provides reusable fixtures for all tests:
-- Mock cameras
-- Test data
-- Database fixtures
-- API client
+Barcha testlar uchun umumiy fixture lar:
+  - In-memory SQLite DB (har test uchun yangi)
+  - FastAPI TestClient (sinxron)
+  - AsyncClient (asinxron API testlar uchun)
+  - Mock jonivor, detection, o'lchov yaratuvchilar
 """
 
 import pytest
 import asyncio
-from typing import AsyncGenerator, Generator
 import numpy as np
-from unittest.mock import Mock, MagicMock, patch
-from fastapi.testclient import TestClient
+from typing import AsyncGenerator
+from datetime import datetime, timezone
 
-from app.main import app
-from app.services.camera.camera_manager import camera_manager
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    AsyncSession,
+    async_sessionmaker,
+)
+from httpx import AsyncClient, ASGITransport
 
+
+# ── DB Fixture ────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    """Session-wide event loop."""
+    policy = asyncio.get_event_loop_policy()
+    loop   = policy.new_event_loop()
     yield loop
     loop.close()
 
 
-@pytest.fixture
-def test_client() -> Generator[TestClient, None, None]:
+@pytest.fixture(scope="function")
+async def db() -> AsyncGenerator[AsyncSession, None]:
     """
-    FastAPI test client.
-    
-    Provides synchronous HTTP client for API testing.
-    """
-    client = TestClient(app)
-    yield client
+    Har test uchun yangi in-memory SQLite DB.
 
+    - Test boshida jadvallar yaratiladi
+    - Test tugagach barcha ma'lumotlar yo'qoladi
+    - Testlar bir-birini buzmasligi kafolatlangan
+    """
+    from app.core.database import Base
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async_session = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async with async_session() as session:
+        yield session
+
+    await engine.dispose()
+
+
+# ── App + HTTP Clients ────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="session")
+def app():
+    """FastAPI app instance."""
+    from app.main import app as fastapi_app
+    return fastapi_app
+
+
+@pytest.fixture
+async def client(app, db) -> AsyncGenerator[AsyncClient, None]:
+    """
+    Async HTTP client — DB override bilan.
+
+    Har request haqiqiy DB o'rniga test DB ga boradi.
+    """
+    from app.core.database import get_db
+
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+# ── Model Factories ───────────────────────────────────────────────────────────
+
+@pytest.fixture
+async def sample_animal(db: AsyncSession):
+    """Test uchun bitta Animal yaratib beradi."""
+    from app.models.animal import Animal, AnimalSpecies, AnimalGender, AnimalStatus
+
+    animal = Animal(
+        tag_id="TEST-001",
+        species=AnimalSpecies.CATTLE,
+        gender=AnimalGender.FEMALE,
+        status=AnimalStatus.ACTIVE,
+        breed="Holstein",
+    )
+    db.add(animal)
+    await db.commit()
+    await db.refresh(animal)
+    return animal
+
+
+@pytest.fixture
+async def sample_animals(db: AsyncSession):
+    """Test uchun 3 ta Animal yaratib beradi."""
+    from app.models.animal import Animal, AnimalSpecies, AnimalGender, AnimalStatus
+
+    animals = [
+        Animal(tag_id="TEST-A01", species=AnimalSpecies.CATTLE,
+               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE),
+        Animal(tag_id="TEST-A02", species=AnimalSpecies.CATTLE,
+               gender=AnimalGender.MALE,   status=AnimalStatus.ACTIVE),
+        Animal(tag_id="TEST-A03", species=AnimalSpecies.GOAT,
+               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE),
+    ]
+    for a in animals:
+        db.add(a)
+    await db.commit()
+    for a in animals:
+        await db.refresh(a)
+    return animals
+
+
+@pytest.fixture
+async def sample_detection(db: AsyncSession, sample_animal):
+    """Test uchun bitta Detection yaratib beradi."""
+    from app.models.detection import Detection
+
+    det = Detection(
+        animal_id=        sample_animal.id,
+        camera_id=        "CAM-TEST-001",
+        timestamp=        datetime.now(timezone.utc),
+        confidence=       0.92,
+        class_id=         19,
+        class_name=       "cow",
+        bbox=             {"x": 0.3, "y": 0.2, "w": 0.25, "h": 0.35},
+        estimated_weight= 285.5,
+    )
+    db.add(det)
+    await db.commit()
+    await db.refresh(det)
+    return det
+
+
+@pytest.fixture
+async def sample_weight(db: AsyncSession, sample_animal):
+    """Test uchun bitta WeightMeasurement yaratib beradi."""
+    from app.models.weight_measurement import WeightMeasurement
+
+    w = WeightMeasurement(
+        animal_id=          sample_animal.id,
+        timestamp=          datetime.now(timezone.utc),
+        estimated_weight_kg=285.5,
+        confidence_score=   0.92,
+        camera_id=          "CAM-TEST-001",
+    )
+    db.add(w)
+    await db.commit()
+    await db.refresh(w)
+    return w
+
+
+# ── Mock Frame ────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def mock_frame() -> np.ndarray:
-    """
-    Generate mock camera frame.
-    
-    Returns 640x480 BGR image with random content.
-    """
+    """640x480 BGR tasodifiy kadr."""
     return np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-
-
-@pytest.fixture
-def mock_large_frame() -> np.ndarray:
-    """
-    Generate large mock frame (1920x1080).
-    """
-    return np.random.randint(0, 255, (1080, 1920, 3), dtype=np.uint8)
-
-
-@pytest.fixture
-def sample_camera_config() -> dict:
-    """
-    Sample camera configuration.
-    """
-    return {
-        "camera_id": "TEST-CAM-001",
-        "type": "simulated",
-        "fps": 10,
-        "width": 640,
-        "height": 480,
-        "auto_start": True,
-    }
-
-
-@pytest.fixture
-def sample_rtsp_config() -> dict:
-    """
-    Sample RTSP camera configuration.
-    """
-    return {
-        "camera_id": "RTSP-TEST-001",
-        "type": "rtsp",
-        "url": "rtsp://test:test@localhost:554/stream",
-        "fps": 25,
-        "width": 1920,
-        "height": 1080,
-        "reconnect_interval": 5,
-        "connection_timeout": 10,
-        "auto_start": False,
-    }
-
-
-@pytest.fixture
-def sample_usb_config() -> dict:
-    """
-    Sample USB camera configuration.
-    """
-    return {
-        "camera_id": "USB-TEST-001",
-        "type": "usb",
-        "device_index": 0,
-        "fps": 30,
-        "width": 640,
-        "height": 480,
-        "auto_reconnect": True,
-        "auto_start": False,
-    }
-
-
-@pytest.fixture
-def mock_opencv_capture():
-    """
-    Mock cv2.VideoCapture for testing without actual camera.
-    """
-    mock_cap = MagicMock()
-    mock_cap.isOpened.return_value = True
-    mock_cap.get.return_value = 30.0  # FPS
-    mock_cap.read.return_value = (True, np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8))
-    return mock_cap
-
-
-@pytest.fixture
-def mock_opencv_capture_failed():
-    """
-    Mock failed cv2.VideoCapture.
-    """
-    mock_cap = MagicMock()
-    mock_cap.isOpened.return_value = False
-    mock_cap.read.return_value = (False, None)
-    return mock_cap
-
-
-@pytest.fixture(autouse=True)
-def cleanup_camera_manager():
-    """
-    Cleanup camera manager after each test.
-    
-    Ensures tests don't interfere with each other.
-    """
-    yield
-    # Cleanup all cameras after test
-    try:
-        camera_manager.stop_all()
-        for camera_id in list(camera_manager.list_cameras()):
-            camera_manager.unregister_camera(camera_id)
-    except Exception:
-        pass
-
-
-@pytest.fixture
-def mock_yolo_service():
-    """
-    Mock YOLO service for integration tests.
-    """
-    mock_service = MagicMock()
-    mock_service._initialized = True
-    mock_service.detect.return_value = {
-        "detections": [
-            {
-                "class_id": 19,  # cow
-                "class_name": "cow",
-                "confidence": 0.85,
-                "bbox": [100, 100, 300, 300],
-            }
-        ],
-        "count": 1,
-        "inference_time": 0.05,
-    }
-    return mock_service
-
-
-@pytest.fixture
-def mock_detection_result():
-    """
-    Mock detection result from YOLO.
-    """
-    return {
-        "detections": [
-            {
-                "class_id": 19,
-                "class_name": "cow",
-                "confidence": 0.85,
-                "bbox": [100, 100, 300, 300],
-            },
-            {
-                "class_id": 19,
-                "class_name": "cow",
-                "confidence": 0.78,
-                "bbox": [400, 150, 600, 350],
-            },
-        ],
-        "count": 2,
-        "inference_time": 0.05,
-    }
-
-
-# Performance measurement utilities
-
-class PerformanceMonitor:
-    """Helper class for performance testing."""
-    
-    def __init__(self):
-        self.measurements = []
-    
-    def measure(self, func, *args, **kwargs):
-        """Measure function execution time."""
-        import time
-        start = time.time()
-        result = func(*args, **kwargs)
-        duration = time.time() - start
-        self.measurements.append(duration)
-        return result, duration
-    
-    def average(self):
-        """Get average execution time."""
-        return sum(self.measurements) / len(self.measurements) if self.measurements else 0
-    
-    def max(self):
-        """Get maximum execution time."""
-        return max(self.measurements) if self.measurements else 0
-
-
-@pytest.fixture
-def performance_monitor():
-    """Performance monitoring fixture."""
-    return PerformanceMonitor()
-
-
-# Custom assertions
-
-def assert_valid_frame(frame: np.ndarray, width: int = None, height: int = None):
-    """
-    Assert frame is valid.
-    
-    Args:
-        frame: Frame to validate
-        width: Expected width (optional)
-        height: Expected height (optional)
-    """
-    assert frame is not None, "Frame is None"
-    assert isinstance(frame, np.ndarray), "Frame is not numpy array"
-    assert len(frame.shape) == 3, "Frame is not 3D array (HxWxC)"
-    assert frame.shape[2] == 3, "Frame does not have 3 channels (BGR)"
-    
-    if width is not None:
-        assert frame.shape[1] == width, f"Frame width {frame.shape[1]} != expected {width}"
-    
-    if height is not None:
-        assert frame.shape[0] == height, f"Frame height {frame.shape[0]} != expected {height}"
-
-
-def assert_camera_stats_valid(stats: dict):
-    """
-    Assert camera statistics are valid.
-    
-    Args:
-        stats: Camera statistics dictionary
-    """
-    required_keys = [
-        "camera_id", "type", "connected", "running",
-        "frame_count", "error_count", "fps", "resolution"
-    ]
-    
-    for key in required_keys:
-        assert key in stats, f"Missing key: {key}"
-    
-    assert isinstance(stats["frame_count"], int), "frame_count not int"
-    assert isinstance(stats["error_count"], int), "error_count not int"
-    assert isinstance(stats["fps"], (int, float)), "fps not numeric"
-    assert isinstance(stats["resolution"], (list, tuple)), "resolution not list/tuple"
-    assert len(stats["resolution"]) == 2, "resolution not (width, height)"

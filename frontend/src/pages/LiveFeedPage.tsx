@@ -34,12 +34,29 @@ export default function LiveFeedPage() {
 
   // Yangi xabar kelganda, uni measurements ro'yxatiga qo'shamiz
   useEffect(() => {
-    if (lastMessage) {
-      setMeasurements(prev => {
-        // Ekranda juda ko'payib qotib qolmasligi uchun faqat oxirgi 20 tasini ushlaymiz
-        return [lastMessage as unknown as LiveWeightUpdate, ...prev].slice(0, 20);
-      });
-    }
+    if (!lastMessage) return;
+
+    // Backend format: { type: "weight_update", data: { type: "detection", animal_id, ... } }
+    const raw = lastMessage as any;
+    const payload = raw?.data ?? raw;
+
+    // Faqat detection eventlarini qabul qilamiz
+    if (payload?.type !== 'detection') return;
+
+    // LiveWeightUpdate formatiga o'giramiz
+    const update: LiveWeightUpdate = {
+      animal_id:            payload.animal_id ?? 0,
+      animal_tag_id:        payload.animal_tag_id ?? payload.class_name ?? 'UNKNOWN',
+      estimated_weight_kg:  payload.estimated_weight_kg ?? 0,
+      confidence_score:     payload.confidence_score ?? payload.confidence ?? 0,
+      camera_id:            payload.camera_id ?? '',
+      timestamp:            payload.timestamp ?? new Date().toISOString(),
+    };
+
+    setMeasurements(prev =>
+      [update, ...prev].slice(0, 20)
+    );
+
   }, [lastMessage]);
 
   // ---------------------------------------------------------------------------

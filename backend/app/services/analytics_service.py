@@ -319,7 +319,7 @@ class AnalyticsService:
             camera_query = select(
                 Detection.camera_id,
                 func.count(Detection.id).label('count'),
-                func.avg(Detection.confidence_score).label('avg_confidence')
+                func.avg(Detection.confidence).label('avg_confidence')
             ).where(
                 and_(
                     func.date(Detection.timestamp) >= date_from,
@@ -571,7 +571,7 @@ class AnalyticsService:
                 # ===== Detection statistics =====
                 detection_query = select(
                     func.count(Detection.id).label('total_detections'),
-                    func.avg(Detection.confidence_score).label('avg_confidence')
+                    func.avg(Detection.confidence).label('avg_confidence')
                 ).where(
                     and_(
                         Detection.camera_id == cam_id,
@@ -668,14 +668,34 @@ class AnalyticsService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> int:
-        """Get detection count within date range."""
+        """
+        Get detection count within date range.
+
+        NOTE: Detection.timestamp is timestamptz (UTC).
+        We cast to DATE using PostgreSQL AT TIME ZONE 'UTC' to avoid
+        timezone mismatch when comparing with Python date objects.
+        """
+        from sqlalchemy import cast, Date, text
+        from datetime import datetime, timezone
+
         query = select(func.count(Detection.id))
-        
+
         if date_from is not None:
-            query = query.where(func.date(Detection.timestamp) >= date_from)
+            # timestamptz → date (UTC)
+            dt_from = datetime(
+                date_from.year, date_from.month, date_from.day,
+                tzinfo=timezone.utc
+            )
+            query = query.where(Detection.timestamp >= dt_from)
+
         if date_to is not None:
-            query = query.where(func.date(Detection.timestamp) <= date_to)
-        
+            from datetime import timedelta
+            dt_to = datetime(
+                date_to.year, date_to.month, date_to.day,
+                tzinfo=timezone.utc
+            ) + timedelta(days=1)  # exclusive upper bound
+            query = query.where(Detection.timestamp < dt_to)
+
         result = await db.execute(query)
         return result.scalar() or 0
     
@@ -759,7 +779,7 @@ class AnalyticsService:
             {
                 "animal_tag": d.animal.tag_id if d.animal else "Unknown",
                 "camera_id": d.camera_id,
-                "confidence": round(d.confidence_score, 3),
+                "confidence": round(d.confidence, 3),
                 "detected_at": d.timestamp.isoformat()
             }
             for d in detections
