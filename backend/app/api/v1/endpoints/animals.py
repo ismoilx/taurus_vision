@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(
+    redirect_slashes=False,
     prefix="/animals",
     tags=["animals"],
 )

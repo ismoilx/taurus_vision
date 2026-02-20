@@ -99,8 +99,16 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings
 from app.models.base import Base
-# Import all models so Alembic can detect them
-from app.models import Animal  # noqa
+# Import ALL models so Alembic autogenerate can detect every table
+from app.models import (  # noqa
+    Animal,
+    Detection,
+    AnimalEmbedding,
+    WeightMeasurement,
+    HealthRecord,
+    ADILog,
+    Alert,
+)
 
 # Alembic Config object
 config = context.config

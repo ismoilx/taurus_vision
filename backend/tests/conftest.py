@@ -42,7 +42,7 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     - Test tugagach barcha ma'lumotlar yo'qoladi
     - Testlar bir-birini buzmasligi kafolatlangan
     """
-    from app.core.database import Base
+    from app.models.base import Base
 
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -180,3 +180,68 @@ async def sample_weight(db: AsyncSession, sample_animal):
 def mock_frame() -> np.ndarray:
     """640x480 BGR tasodifiy kadr."""
     return np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+
+
+# ── Legacy Fixtures (test_cameras_api.py uchun) ──────────────────────────────
+
+@pytest.fixture
+def test_client(app):
+    """Sinxron TestClient — test_cameras_api.py legacy uchun."""
+    from fastapi.testclient import TestClient
+    return TestClient(app)
+
+
+@pytest.fixture
+def sample_camera_config():
+    return {
+        "camera_id": "TEST-CAM-001",
+        "type": "simulated",
+        "fps": 10,
+        "width": 640,
+        "height": 480,
+        "auto_start": True,
+    }
+
+
+@pytest.fixture
+def sample_rtsp_config():
+    return {
+        "camera_id": "RTSP-TEST-001",
+        "type": "rtsp",
+        "url": "rtsp://test:test@localhost:554/stream",
+        "fps": 25,
+        "width": 1920,
+        "height": 1080,
+        "reconnect_interval": 5,
+        "connection_timeout": 10,
+        "auto_start": False,
+    }
+
+
+@pytest.fixture
+def sample_usb_config():
+    return {
+        "camera_id": "USB-TEST-001",
+        "type": "usb",
+        "device_index": 0,
+        "fps": 30,
+        "width": 640,
+        "height": 480,
+        "auto_reconnect": True,
+        "auto_start": False,
+    }
+
+
+@pytest.fixture(autouse=True)
+def cleanup_camera_manager():
+    """Har test dan keyin camera manager ni tozalash."""
+    yield
+    try:
+        from app.services.camera.camera_manager import camera_manager
+        for camera_id in list(camera_manager.list_cameras()):
+            try:
+                camera_manager.unregister_camera(camera_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
