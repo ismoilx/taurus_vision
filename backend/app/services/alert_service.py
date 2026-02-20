@@ -1,5 +1,9 @@
 """
-Alert Service — Ogohlantirish tizimi biznes logikasi.
+Alert Service — Ogohlantirish tizimi biznes logikasi (Refactored).
+
+ARXITEKTURA O'ZGARISHI (Sprint 5):
+    Oldingi:  AlertService → self.db.execute(select...) to'g'ridan-to'g'ri
+    Yangi:    AlertService → AlertRepository → SQLAlchemy → PostgreSQL
 
 VAZIFALAR:
     1. ADI natijalariga asosida avtomatik alert yaratish
@@ -25,7 +29,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.animal import Animal, AnimalStatus
@@ -37,7 +41,7 @@ from app.models.alert import (
     ALERT_SEVERITY_MAP,
 )
 from app.models.adi_log import ADILog
-from app.models.detection import Detection
+from app.repositories.alert_repository import AlertRepository
 from app.schemas.alert import AlertCreateManual
 from app.core.exceptions import EntityNotFoundError, DatabaseError
 
@@ -47,16 +51,13 @@ logger = logging.getLogger(__name__)
 # Konstantalar                                                         #
 # ------------------------------------------------------------------ #
 
-# ADI keskin tushish threshold
 ADI_SHARP_DROP_THRESHOLD = 15.0     # Bir kunda shu balldan ko'p tushsa
 ADI_WARNING_THRESHOLD    = 50.0     # Warning kategoriya chegarasi
 ADI_CRITICAL_THRESHOLD   = 25.0     # Critical kategoriya chegarasi
 
-# Ko'rinmaslik thresholdlari
 MISSING_WARNING_HOURS    = 24       # 24 soat ko'rinmasa → warning
 MISSING_CRITICAL_HOURS   = 48       # 48 soat ko'rinmasa → critical
 
-# Oziqlanish to'xtash threshold
 FEEDING_STOPPED_VISITS   = 1        # Kuniga 1 dan kam tashrif = to'xtagan
 
 
@@ -65,15 +66,24 @@ class AlertService:
     Alert lifecycle boshqarish servisi.
 
     Barcha alert yaratish, yangilash va resolve logikasi.
+    DB bilan muloqot AlertRepository orqali amalga oshiriladi.
 
     Usage:
         service = AlertService(db)
-        await service.process_adi_result(animal_id=1, adi_score=22.0, prev_score=68.0)
-        await service.check_missing_animals()
+        await service.process_adi_result(
+            animal_id=1, adi_score=22.0, prev_score=68.0
+        )
     """
 
     def __init__(self, db: AsyncSession) -> None:
+        """
+        Initialize Alert service.
+
+        Args:
+            db: Async database session
+        """
         self.db = db
+        self._repo = AlertRepository(db)  # Repository pattern
 
     # ================================================================ #
     # ADI BASED ALERTS                                                   #
@@ -94,7 +104,7 @@ class AlertService:
         Args:
             animal_id:     Jonivor ID
             adi_score:     Bugungi ADI score
-            category:      Bugungi kategoriya
+            category:      Bugungi kategoriya (healthy/average/warning/critical)
             prev_score:    Kechagi ADI score (trend uchun)
             feeding_score: Oziqlanish komponenti score
 
@@ -115,9 +125,9 @@ class AlertService:
                     f"Zudlik bilan veterinar tekshiruvi talab etiladi."
                 ),
                 context={
-                    "adi_score":    adi_score,
-                    "category":     category,
-                    "threshold":    ADI_CRITICAL_THRESHOLD,
+                    "adi_score":  adi_score,
+                    "category":   category,
+                    "threshold":  ADI_CRITICAL_THRESHOLD,
                 },
             )
             if alert:
@@ -161,10 +171,10 @@ class AlertService:
                         f"Tez tekshirish zarur."
                     ),
                     context={
-                        "prev_score":   prev_score,
-                        "curr_score":   adi_score,
-                        "drop_amount":  round(drop, 2),
-                        "threshold":    ADI_SHARP_DROP_THRESHOLD,
+                        "prev_score":  prev_score,
+                        "curr_score":  adi_score,
+                        "drop_amount": round(drop, 2),
+                        "threshold":   ADI_SHARP_DROP_THRESHOLD,
                     },
                 )
                 if alert:
@@ -197,8 +207,8 @@ class AlertService:
 
     async def check_missing_animals(self) -> list[Alert]:
         """
-        So'nggi deteksiya vaqtiga qarab
-        ko'rinmayotgan jonivorlarni aniqlash.
+        So'nggi deteksiya vaqtiga qarab ko'rinmayotgan
+        jonivorlarni aniqlash.
 
         Celery scheduled task tomonidan har soatda chaqiriladi.
 
@@ -208,16 +218,17 @@ class AlertService:
         now = datetime.now(timezone.utc)
         created_alerts: list[Alert] = []
 
-        # Aktiv jonivorlarni olish
-        stmt = select(Animal).where(Animal.status == AnimalStatus.ACTIVE)
-        result = await self.db.execute(stmt)
+        # Aktiv jonivorlarni olish (to'g'ridan-to'g'ri, chunki
+        # animal_repository bu service ga inject qilinmagan)
+        result = await self.db.execute(
+            select(Animal).where(Animal.status == AnimalStatus.ACTIVE)
+        )
         animals = list(result.scalars().all())
 
         for animal in animals:
             if not animal.last_detected_at:
                 continue
 
-            # last_detected_at timezone-aware bo'lishini ta'minlash
             last_seen = animal.last_detected_at
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
@@ -232,14 +243,15 @@ class AlertService:
                     description=(
                         f"Jonivor {animal.tag_id} ({animal.species.value}) "
                         f"{int(hours_missing)} soatdan beri hech bir kamerada "
-                        f"ko'rinmadi. So'nggi ko'rinish: {last_seen.strftime('%Y-%m-%d %H:%M')} UTC. "
+                        f"ko'rinmadi. So'nggi ko'rinish: "
+                        f"{last_seen.strftime('%Y-%m-%d %H:%M')} UTC. "
                         f"Darhol tekshirish zarur."
                     ),
                     context={
-                        "tag_id":         animal.tag_id,
-                        "species":        animal.species.value,
-                        "last_seen_at":   last_seen.isoformat(),
-                        "hours_missing":  round(hours_missing, 1),
+                        "tag_id":          animal.tag_id,
+                        "species":         animal.species.value,
+                        "last_seen_at":    last_seen.isoformat(),
+                        "hours_missing":   round(hours_missing, 1),
                         "threshold_hours": MISSING_CRITICAL_HOURS,
                     },
                 )
@@ -254,7 +266,8 @@ class AlertService:
                     description=(
                         f"Jonivor {animal.tag_id} ({animal.species.value}) "
                         f"{int(hours_missing)} soatdan beri ko'rinmadi. "
-                        f"So'nggi ko'rinish: {last_seen.strftime('%Y-%m-%d %H:%M')} UTC."
+                        f"So'nggi ko'rinish: "
+                        f"{last_seen.strftime('%Y-%m-%d %H:%M')} UTC."
                     ),
                     context={
                         "tag_id":          animal.tag_id,
@@ -289,6 +302,9 @@ class AlertService:
         Args:
             camera_id: Kamera identifikatori
             is_online: True = online, False = offline
+
+        Returns:
+            Yangi alert yoki None
         """
         if not is_online:
             return await self._ensure_alert(
@@ -303,7 +319,6 @@ class AlertService:
                 camera_id=camera_id,
             )
         else:
-            # Kamera qaytib online bo'ldi
             await self._auto_resolve_camera_alerts(camera_id)
             return None
 
@@ -341,18 +356,15 @@ class AlertService:
                     alert_type=AlertType.HIGH_TEMPERATURE,
                     title=f"Harorat anomaliyasi: {temperature:.1f}°C",
                     description=(
-                        f"Jonivor tana harorati normal diapazondan "
-                        f"chiqdi: {temperature:.1f}°C "
-                        f"(normal: 38.0—39.5°C). "
+                        f"Jonivor tana harorati normal diapazondan chiqdi: "
+                        f"{temperature:.1f}°C (normal: 38.0—39.5°C). "
                         f"Isitma yoki gipotermiya belgisi bo'lishi mumkin."
                     ),
                     context={
-                        "temperature":     temperature,
-                        "normal_min":      38.0,
-                        "normal_max":      39.5,
-                        "deviation":       round(
-                            temperature - 38.75, 2
-                        ),
+                        "temperature": temperature,
+                        "normal_min":  38.0,
+                        "normal_max":  39.5,
+                        "deviation":   round(temperature - 38.75, 2),
                     },
                 )
                 if alert:
@@ -401,18 +413,18 @@ class AlertService:
     # MANUAL ALERT                                                        #
     # ================================================================ #
 
-    async def create_manual_alert(
-        self,
-        data: AlertCreateManual,
-    ) -> Alert:
+    async def create_manual_alert(self, data: AlertCreateManual) -> Alert:
         """
         Fermer tomonidan qo'lda alert yaratish.
 
         Args:
-            data: AlertCreateManual schema
+            data: AlertCreateManual Pydantic schema
 
         Returns:
             Yaratilgan Alert
+
+        Raises:
+            DatabaseError: DB xatosi
         """
         alert = Alert(
             animal_id=     data.animal_id,
@@ -427,14 +439,16 @@ class AlertService:
         )
 
         try:
-            self.db.add(alert)
+            created = await self._repo.create(alert)
             await self.db.commit()
-            await self.db.refresh(alert)
             logger.info(
                 f"Manual alert created: {alert.alert_type} "
                 f"for animal {alert.animal_id}"
             )
-            return alert
+            return created
+        except DatabaseError:
+            await self.db.rollback()
+            raise
         except Exception as e:
             await self.db.rollback()
             raise DatabaseError(f"Alert yaratishda xato: {e}") from e
@@ -443,13 +457,22 @@ class AlertService:
     # LIFECYCLE MANAGEMENT                                               #
     # ================================================================ #
 
-    async def mark_seen(
-        self,
-        alert_id: int,
-    ) -> Alert:
-        """Alertni ko'rilgan deb belgilash."""
+    async def mark_seen(self, alert_id: int) -> Alert:
+        """
+        Alertni ko'rilgan deb belgilash.
+
+        Args:
+            alert_id: Alert ID
+
+        Returns:
+            Yangilangan Alert
+
+        Raises:
+            EntityNotFoundError: Alert topilmasa
+        """
         alert = await self._get_alert(alert_id)
         alert.mark_seen()
+        await self._repo.save(alert)
         await self.db.commit()
         return alert
 
@@ -465,25 +488,33 @@ class AlertService:
         Args:
             alert_id:    Alert ID
             resolved_by: Hal etgan foydalanuvchi
-            note:        Qanday harakat qilindi
+            note:        Qanday harakat qilindi (ixtiyoriy)
+
+        Returns:
+            Yangilangan Alert
+
+        Raises:
+            EntityNotFoundError: Alert topilmasa
+            ValueError:          Alert allaqachon yopiq bo'lsa
+            DatabaseError:       DB xatosi
         """
         alert = await self._get_alert(alert_id)
 
         if not alert.is_open:
             raise ValueError(
-                f"Alert {alert_id} allaqachon "
-                f"{alert.status} holatida"
+                f"Alert {alert_id} allaqachon {alert.status} holatida"
             )
 
         alert.resolve(resolved_by=resolved_by, note=note)
 
         try:
+            await self._repo.save(alert)
             await self.db.commit()
-            await self.db.refresh(alert)
-            logger.info(
-                f"Alert {alert_id} resolved by {resolved_by}"
-            )
+            logger.info(f"Alert {alert_id} resolved by {resolved_by}")
             return alert
+        except DatabaseError:
+            await self.db.rollback()
+            raise
         except Exception as e:
             await self.db.rollback()
             raise DatabaseError(f"Alert resolve xatosi: {e}") from e
@@ -494,7 +525,22 @@ class AlertService:
         dismissed_by: str,
         reason: Optional[str] = None,
     ) -> Alert:
-        """Alertni noto'g'ri alarm deb bekor qilish."""
+        """
+        Alertni noto'g'ri alarm deb bekor qilish.
+
+        Args:
+            alert_id:     Alert ID
+            dismissed_by: Bekor qilgan foydalanuvchi
+            reason:       Bekor qilish sababi (ixtiyoriy)
+
+        Returns:
+            Yangilangan Alert
+
+        Raises:
+            EntityNotFoundError: Alert topilmasa
+            ValueError:          Alert allaqachon yopiq bo'lsa
+            DatabaseError:       DB xatosi
+        """
         alert = await self._get_alert(alert_id)
 
         if not alert.is_open:
@@ -505,113 +551,55 @@ class AlertService:
         alert.dismiss(dismissed_by=dismissed_by, reason=reason)
 
         try:
+            await self._repo.save(alert)
             await self.db.commit()
-            await self.db.refresh(alert)
             return alert
+        except DatabaseError:
+            await self.db.rollback()
+            raise
         except Exception as e:
             await self.db.rollback()
             raise DatabaseError(f"Alert dismiss xatosi: {e}") from e
 
     # ================================================================ #
-    # QUERY METHODS                                                       #
+    # QUERY METHODS (Repository orqali)                                  #
     # ================================================================ #
 
     async def get_open_alerts(
         self,
         animal_id: Optional[int] = None,
-        severity:  Optional[str] = None,
-        limit:     int = 50,
-        offset:    int = 0,
+        severity: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> tuple[list[Alert], int]:
         """
         Ochiq alertlarni olish.
 
+        Args:
+            animal_id: Jonivor filter (ixtiyoriy)
+            severity:  Jiddiylik filter (ixtiyoriy)
+            limit:     Sahifa hajmi
+            offset:    Sahifa ofseti
+
         Returns:
             (alerts, total_count)
         """
-        conditions = [
-            Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN])
-        ]
-
-        if animal_id is not None:
-            conditions.append(Alert.animal_id == animal_id)
-
-        if severity:
-            conditions.append(Alert.severity == severity)
-
-        # Total count
-        count_stmt = select(func.count(Alert.id)).where(and_(*conditions))
-        total = await self.db.scalar(count_stmt) or 0
-
-        # Data
-        stmt = (
-            select(Alert)
-            .where(and_(*conditions))
-            .order_by(
-                # Avval severity bo'yicha: critical → low
-                Alert.severity.desc(),
-                Alert.triggered_at.desc(),
-            )
-            .limit(limit)
-            .offset(offset)
+        return await self._repo.get_open_alerts(
+            animal_id=animal_id,
+            severity=severity,
+            limit=limit,
+            offset=offset,
         )
-        result = await self.db.execute(stmt)
-        alerts = list(result.scalars().all())
-
-        return alerts, total
 
     async def get_alert_stats(self) -> dict[str, Any]:
-        """Dashboard uchun alert statistikasi."""
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        """
+        Dashboard uchun alert statistikasi.
 
-        # Ochiq alertlar severity bo'yicha
-        open_stmt = (
-            select(Alert.severity, func.count(Alert.id))
-            .where(Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]))
-            .group_by(Alert.severity)
-        )
-        open_result = await self.db.execute(open_stmt)
-        open_by_severity: dict[str, int] = {}
-        for severity, count in open_result.fetchall():
-            open_by_severity[severity] = count
-
-        # Bugun hal etilganlar
-        resolved_today_stmt = select(func.count(Alert.id)).where(
-            and_(
-                Alert.status == AlertStatus.RESOLVED,
-                Alert.resolved_at >= today_start,
-            )
-        )
-        resolved_today = await self.db.scalar(resolved_today_stmt) or 0
-
-        # O'rtacha hal etish vaqti (daqiqada)
-        avg_resolution_stmt = select(
-            func.avg(
-                func.extract(
-                    "epoch",
-                    Alert.resolved_at - Alert.triggered_at,
-                ) / 60
-            )
-        ).where(
-            and_(
-                Alert.status == AlertStatus.RESOLVED,
-                Alert.resolved_at >= now - timedelta(days=7),
-            )
-        )
-        avg_resolution = await self.db.scalar(avg_resolution_stmt)
-
-        return {
-            "total_open":     sum(open_by_severity.values()),
-            "critical_open":  open_by_severity.get("critical", 0),
-            "high_open":      open_by_severity.get("high",     0),
-            "medium_open":    open_by_severity.get("medium",   0),
-            "low_open":       open_by_severity.get("low",      0),
-            "resolved_today": resolved_today,
-            "avg_resolution_minutes": (
-                round(avg_resolution, 1) if avg_resolution else None
-            ),
-        }
+        Returns:
+            {total_open, critical_open, high_open, medium_open, low_open,
+             resolved_today, avg_resolution_minutes}
+        """
+        return await self._repo.get_stats()
 
     # ================================================================ #
     # PRIVATE HELPERS                                                     #
@@ -632,39 +620,36 @@ class AlertService:
         Agar bu jonivor uchun bu turdagi ochiq alert
         allaqachon mavjud bo'lsa — yangilanadi, yangi yaratilmaydi.
 
+        Args:
+            animal_id:   Jonivor ID (None = system alert)
+            alert_type:  AlertType enum
+            title:       Alert sarlavhasi
+            description: Batafsil tavsif
+            context:     Qo'shimcha ma'lumotlar (JSON)
+            camera_id:   Kamera ID (faqat camera alertlari uchun)
+
         Returns:
-            Yangi yoki yangilangan Alert, yoki None (o'zgarish yo'q)
+            Alert yoki None (xato bo'lsa)
         """
-        # Mavjud ochiq alertni tekshirish
-        conditions = [
-            Alert.alert_type == alert_type.value,
-            Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]),
-        ]
-
-        if animal_id is not None:
-            conditions.append(Alert.animal_id == animal_id)
-        else:
-            conditions.append(Alert.animal_id.is_(None))
-
-        stmt = select(Alert).where(and_(*conditions)).limit(1)
-        result = await self.db.execute(stmt)
-        existing = result.scalar_one_or_none()
-
         try:
+            # Repository orqali ochiq alertni tekshirish
+            existing = await self._repo.get_open_by_animal_and_type(
+                animal_id=animal_id,
+                alert_type=alert_type,
+            )
+
             if existing:
                 # Mavjud alertni yangilash
-                existing.title       = title
-                existing.description = description
-                existing.context     = context
+                existing.title        = title
+                existing.description  = description
+                existing.context      = context
                 existing.triggered_at = datetime.now(timezone.utc)
+                await self._repo.save(existing)
                 await self.db.commit()
-                await self.db.refresh(existing)
                 return existing
             else:
                 # Yangi alert yaratish
-                severity = ALERT_SEVERITY_MAP.get(
-                    alert_type, AlertSeverity.MEDIUM
-                )
+                severity = ALERT_SEVERITY_MAP.get(alert_type, AlertSeverity.MEDIUM)
                 alert = Alert(
                     animal_id=     animal_id,
                     camera_id=     camera_id,
@@ -677,16 +662,15 @@ class AlertService:
                     triggered_at=  datetime.now(timezone.utc),
                     context=       context,
                 )
-                self.db.add(alert)
+                created = await self._repo.create(alert)
                 await self.db.commit()
-                await self.db.refresh(alert)
 
                 logger.info(
                     f"Alert created: {alert_type.value} "
                     f"| animal={animal_id} "
                     f"| severity={severity.value}"
                 )
-                return alert
+                return created
 
         except Exception as e:
             await self.db.rollback()
@@ -702,23 +686,13 @@ class AlertService:
         current_score: float,
     ) -> None:
         """
-        Jonivor holati yaxshilanganda
-        ADI alertlarini avtomatik yopish.
-        """
-        adi_alert_types = [
-            AlertType.ADI_CRITICAL.value,
-            AlertType.ADI_WARNING.value,
-        ]
+        Jonivor holati yaxshilanganda ADI alertlarini avtomatik yopish.
 
-        stmt = select(Alert).where(
-            and_(
-                Alert.animal_id == animal_id,
-                Alert.alert_type.in_(adi_alert_types),
-                Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]),
-            )
-        )
-        result = await self.db.execute(stmt)
-        alerts = list(result.scalars().all())
+        Args:
+            animal_id:     Jonivor ID
+            current_score: Joriy ADI score
+        """
+        alerts = await self._repo.get_adi_alerts_for_animal(animal_id)
 
         for alert in alerts:
             alert.resolve(
@@ -730,31 +704,20 @@ class AlertService:
             )
 
         if alerts:
+            await self._repo.bulk_save(alerts)
             await self.db.commit()
             logger.info(
-                f"Auto-resolved {len(alerts)} ADI alerts "
-                f"for animal {animal_id}"
+                f"Auto-resolved {len(alerts)} ADI alerts for animal {animal_id}"
             )
 
-    async def _auto_resolve_missing_alerts(
-        self,
-        animal_id: int,
-    ) -> None:
-        """Jonivor qaytib ko'ringanda missing alertlarni yopish."""
-        missing_types = [
-            AlertType.ANIMAL_MISSING.value,
-            AlertType.ANIMAL_MISSING_LONG.value,
-        ]
+    async def _auto_resolve_missing_alerts(self, animal_id: int) -> None:
+        """
+        Jonivor qaytib ko'ringanda missing alertlarni yopish.
 
-        stmt = select(Alert).where(
-            and_(
-                Alert.animal_id == animal_id,
-                Alert.alert_type.in_(missing_types),
-                Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]),
-            )
-        )
-        result = await self.db.execute(stmt)
-        alerts = list(result.scalars().all())
+        Args:
+            animal_id: Jonivor ID
+        """
+        alerts = await self._repo.get_missing_alerts_for_animal(animal_id)
 
         for alert in alerts:
             alert.resolve(
@@ -763,26 +726,20 @@ class AlertService:
             )
 
         if alerts:
+            await self._repo.bulk_save(alerts)
             await self.db.commit()
             logger.info(
-                f"Auto-resolved {len(alerts)} missing alerts "
-                f"for animal {animal_id}"
+                f"Auto-resolved {len(alerts)} missing alerts for animal {animal_id}"
             )
 
-    async def _auto_resolve_camera_alerts(
-        self,
-        camera_id: str,
-    ) -> None:
-        """Kamera online bo'lganda uning alertlarini yopish."""
-        stmt = select(Alert).where(
-            and_(
-                Alert.camera_id == camera_id,
-                Alert.alert_type == AlertType.CAMERA_OFFLINE.value,
-                Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]),
-            )
-        )
-        result = await self.db.execute(stmt)
-        alerts = list(result.scalars().all())
+    async def _auto_resolve_camera_alerts(self, camera_id: str) -> None:
+        """
+        Kamera online bo'lganda uning alertlarini yopish.
+
+        Args:
+            camera_id: Kamera identifikatori
+        """
+        alerts = await self._repo.get_open_by_camera(camera_id)
 
         for alert in alerts:
             alert.resolve(
@@ -791,17 +748,24 @@ class AlertService:
             )
 
         if alerts:
+            await self._repo.bulk_save(alerts)
             await self.db.commit()
 
     async def _get_alert(self, alert_id: int) -> Alert:
-        """Alert olish, topilmasa exception."""
-        stmt = select(Alert).where(Alert.id == alert_id)
-        result = await self.db.execute(stmt)
-        alert = result.scalar_one_or_none()
+        """
+        Alertni olish, topilmasa exception.
+
+        Args:
+            alert_id: Alert ID
+
+        Returns:
+            Alert ORM instance
+
+        Raises:
+            EntityNotFoundError: Alert topilmasa
+        """
+        alert = await self._repo.get_by_id(alert_id)
 
         if not alert:
-            raise EntityNotFoundError(
-                entity="Alert",
-                identifier=alert_id,
-            )
+            raise EntityNotFoundError(entity="Alert", identifier=alert_id)
         return alert

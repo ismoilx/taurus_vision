@@ -1,7 +1,14 @@
 """
-Animal Development Index (ADI) Service.
+Animal Development Index (ADI) Service — Refactored with Repository Pattern.
 
-ADI hisoblashning to'liq biznes logikasi shu yerda.
+ARXITEKTURA O'ZGARISHI (Sprint 5):
+    Oldingi:  ADIService → self.db.execute(select...) to'g'ridan-to'g'ri
+    Yangi:    ADIService → ADIRepository → SQLAlchemy → PostgreSQL
+
+JAVOBGARLIK:
+    - ADI algoritm logikasi (8 komponent hisoblash)
+    - Repository orqali DB bilan muloqot
+    - Celery task va API endpoint bilan integratsiya
 
 ALGORITM:
     Har bir jonivor uchun so'nggi 24 soatlik ma'lumotlar
@@ -38,6 +45,7 @@ from app.models.animal import Animal, AnimalStatus
 from app.models.detection import Detection
 from app.models.adi_log import ADILog, ADICategory
 from app.models.health_record import HealthRecord
+from app.repositories.adi_repository import ADIRepository
 from app.core.exceptions import EntityNotFoundError, DatabaseError
 
 logger = logging.getLogger(__name__)
@@ -71,7 +79,7 @@ MISSING_THRESHOLD_HOURS          = 24    # Shu soatdan ko'p ko'rinmasa — muamm
 
 # Bbox zona identifikatsiyasi uchun (normalized koordinatalar)
 # Ferma rejasiga qarab sozlanadi — hozir umumiy qiymatlar
-FEEDING_ZONE = {"x_min": 0.0, "x_max": 0.4, "y_min": 0.6, "y_max": 1.0}
+FEEDING_ZONE  = {"x_min": 0.0, "x_max": 0.4, "y_min": 0.6, "y_max": 1.0}
 DRINKING_ZONE = {"x_min": 0.6, "x_max": 1.0, "y_min": 0.6, "y_max": 1.0}
 
 
@@ -90,7 +98,7 @@ class DetectionSummary:
     feeding_dwell_sec:  float = 0.0
     drinking_visits:    int   = 0
     drinking_dwell_sec: float = 0.0
-    co_detection_count: int   = 0   # Boshqa jonivorlar bilan birga ko'ringan
+    co_detection_count: int   = 0
     bbox_sizes:         list[float] = field(default_factory=list)
     bbox_velocities:    list[float] = field(default_factory=list)
     hourly_counts:      dict[int, int] = field(default_factory=dict)
@@ -99,9 +107,9 @@ class DetectionSummary:
 @dataclass
 class ComponentResult:
     """Bitta komponent hisoblash natijasi."""
-    score:    Optional[float]       # 0.0 — 100.0, None = ma'lumot yo'q
-    weight:   float                 # Og'irlik koeffitsienti
-    detail:   dict[str, Any]        # Debug ma'lumotlari
+    score:    Optional[float]   # 0.0 — 100.0, None = ma'lumot yo'q
+    weight:   float             # Og'irlik koeffitsienti
+    detail:   dict[str, Any]    # Debug ma'lumotlari
     has_data: bool = True
 
 
@@ -128,13 +136,15 @@ class ADIService:
     Animal Development Index hisoblash servisi.
 
     Barcha hisoblash logikasi shu klassda.
+    DB bilan muloqot ADIRepository orqali amalga oshiriladi.
+
     Celery task va API endpoint tomonidan ishlatiladi.
 
     Usage:
         service = ADIService(db)
         result = await service.calculate_for_animal(
             animal_id=1,
-            target_date="2025-01-15"
+            target_date="2026-02-20"
         )
     """
 
@@ -143,9 +153,10 @@ class ADIService:
         Initialize ADI service.
 
         Args:
-            db: Async database session
+            db: Async database session (FastAPI Depends orqali keladi)
         """
         self.db = db
+        self._repo = ADIRepository(db)  # Repository pattern
 
     # ================================================================ #
     # PUBLIC API                                                         #
@@ -183,29 +194,29 @@ class ADIService:
             extra={"animal_id": animal_id, "date": date_str},
         )
 
-        # 3. Mavjud yozuvni tekshirish
+        # 3. Mavjud yozuvni tekshirish (Repository orqali)
         if not force_recalculate:
-            existing = await self._get_existing_log(animal_id, date_str)
+            existing = await self._repo.get_by_animal_and_date(animal_id, date_str)
             if existing:
                 logger.debug(
                     f"ADI already calculated for animal {animal_id} on {date_str}"
                 )
                 return self._adi_log_to_result(existing)
 
-        # 4. Ma'lumotlarni yig'ish
+        # 4. Force recalculate bo'lsa — eskisini o'chirish (Repository orqali)
+        if force_recalculate:
+            await self._repo.delete_by_animal_and_date(animal_id, date_str)
+
+        # 5. Ma'lumotlarni yig'ish
         period_start, period_end = self._get_period_bounds(date_str)
         summary = await self._collect_detection_summary(
             animal_id, period_start, period_end
         )
-        historical_bbox = await self._collect_historical_bbox(
-            animal_id, date_str
-        )
-        latest_health = await self._get_latest_health_record(animal_id)
-        sensor_data = await self._get_sensor_data(
-            animal_id, period_start, period_end
-        )
+        historical_bbox = await self._collect_historical_bbox(animal_id, date_str)
+        latest_health   = await self._get_latest_health_record(animal_id)
+        sensor_data     = await self._get_sensor_data(animal_id, period_start, period_end)
 
-        # 5. Komponentlarni hisoblash
+        # 6. Komponentlarni hisoblash (pure logic, DB yo'q)
         components = self._compute_all_components(
             summary=summary,
             historical_bbox=historical_bbox,
@@ -215,19 +226,17 @@ class ADIService:
             date_str=date_str,
         )
 
-        # 6. Yakuniy score
+        # 7. Yakuniy score
         adi_score, data_quality = self._compute_final_score(components)
         category = ADICategory.from_score(adi_score)
 
-        # 7. Izoh generatsiya
+        # 8. Izoh generatsiya
         notes = self._generate_notes(components, adi_score, summary)
 
-        # 8. raw_data yig'ish
-        raw_data = self._build_raw_data(
-            summary, components, historical_bbox, sensor_data
-        )
+        # 9. raw_data yig'ish
+        raw_data = self._build_raw_data(summary, components, historical_bbox, sensor_data)
 
-        # 9. Natija
+        # 10. Natija
         result = ADIResult(
             animal_id=animal_id,
             calculation_date=date_str,
@@ -240,17 +249,17 @@ class ADIService:
             notes=notes,
         )
 
-        # 10. DB ga saqlash
-        await self._save_result(result, force_recalculate)
+        # 11. DB ga saqlash (Repository orqali)
+        await self._save_result(result)
 
         logger.info(
             "ADI calculation complete",
             extra={
-                "animal_id": animal_id,
-                "date": date_str,
-                "score": result.adi_score,
-                "category": result.category,
-                "quality": result.data_quality,
+                "animal_id":  animal_id,
+                "date":       date_str,
+                "score":      result.adi_score,
+                "category":   result.category,
+                "quality":    result.data_quality,
             },
         )
 
@@ -272,23 +281,29 @@ class ADIService:
         Returns:
             Barcha natijalar ro'yxati
         """
-        # Aktiv jonivorlar ID larini olish
-        stmt = select(Animal.id).where(
-            Animal.status == AnimalStatus.ACTIVE
-        )
-        result = await self.db.execute(stmt)
-        animal_ids = [row[0] for row in result.fetchall()]
+        # Aktiv jonivorlar ID larini olish (Repository orqali)
+        date_str = target_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        # Faqat ADI hisoblanmagan jonivorlar (samarali strategiya)
+        if not force_recalculate:
+            animal_ids = await self._repo.get_animals_without_adi_today()
+        else:
+            # Barcha aktiv jonivorlar
+            result = await self.db.execute(
+                select(Animal.id).where(Animal.status == AnimalStatus.ACTIVE)
+            )
+            animal_ids = [row[0] for row in result.fetchall()]
 
         logger.info(f"Starting batch ADI calculation for {len(animal_ids)} animals")
 
         results: list[ADIResult] = []
-        errors: list[tuple[int, str]] = []
+        errors:  list[tuple[int, str]] = []
 
         for animal_id in animal_ids:
             try:
                 adi_result = await self.calculate_for_animal(
                     animal_id=animal_id,
-                    target_date=target_date,
+                    target_date=date_str,
                     force_recalculate=force_recalculate,
                 )
                 results.append(adi_result)
@@ -320,22 +335,7 @@ class ADIService:
         Returns:
             ADILog ro'yxati, yangi → eski tartibda
         """
-        from_date = (
-            datetime.now(timezone.utc) - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
-
-        stmt = (
-            select(ADILog)
-            .where(
-                and_(
-                    ADILog.animal_id == animal_id,
-                    ADILog.calculation_date >= from_date,
-                )
-            )
-            .order_by(ADILog.calculation_date.desc())
-        )
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())
+        return await self._repo.get_trend_for_animal(animal_id, days)
 
     async def get_farm_summary(
         self,
@@ -353,56 +353,45 @@ class ADIService:
         """
         date_str = target_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        # Bugungi barcha ADI yozuvlari
-        stmt = select(ADILog).where(ADILog.calculation_date == date_str)
-        result = await self.db.execute(stmt)
-        logs = list(result.scalars().all())
+        # Repository orqali
+        avg_score = await self._repo.get_farm_avg_score(date_str)
 
-        if not logs:
+        if avg_score is None:
             return {
-                "date": date_str,
+                "date":         date_str,
                 "total_animals": 0,
-                "message": "Bugun uchun ADI hali hisoblanmagan",
+                "message":      "Bugun uchun ADI hali hisoblanmagan",
             }
 
-        # Kategoriya bo'yicha hisoblash
-        counts: dict[str, int] = {
-            "healthy": 0, "average": 0, "warning": 0, "critical": 0
-        }
-        scores = []
+        counts = await self._repo.get_farm_category_counts(date_str)
+        concerning = await self._repo.get_concerning_animals(date_str)
 
-        for log in logs:
-            counts[log.category] = counts.get(log.category, 0) + 1
-            scores.append(log.adi_score)
-
-        total = len(logs)
-        avg_score = sum(scores) / total if scores else 0.0
+        total = sum(counts.values())
 
         return {
-            "date": date_str,
-            "total_animals": total,
-            "farm_adi_score": round(avg_score, 2),
-            "healthy_count":  counts["healthy"],
-            "average_count":  counts["average"],
-            "warning_count":  counts["warning"],
-            "critical_count": counts["critical"],
-            "healthy_pct":  round(counts["healthy"]  / total * 100, 1),
-            "average_pct":  round(counts["average"]  / total * 100, 1),
-            "warning_pct":  round(counts["warning"]  / total * 100, 1),
-            "critical_pct": round(counts["critical"] / total * 100, 1),
+            "date":            date_str,
+            "total_animals":   total,
+            "farm_adi_score":  avg_score,
+            "healthy_count":   counts["healthy"],
+            "average_count":   counts["average"],
+            "warning_count":   counts["warning"],
+            "critical_count":  counts["critical"],
+            "healthy_pct":  round(counts["healthy"]  / total * 100, 1) if total else 0,
+            "average_pct":  round(counts["average"]  / total * 100, 1) if total else 0,
+            "warning_pct":  round(counts["warning"]  / total * 100, 1) if total else 0,
+            "critical_pct": round(counts["critical"] / total * 100, 1) if total else 0,
             "needs_attention": [
                 {
                     "animal_id": log.animal_id,
                     "adi_score": log.adi_score,
                     "category":  log.category,
                 }
-                for log in logs
-                if log.category in ("warning", "critical")
+                for log in concerning
             ],
         }
 
     # ================================================================ #
-    # KOMPONENT HISOBLASH (private)                                      #
+    # KOMPONENT HISOBLASH (private, pure logic — DB yo'q)               #
     # ================================================================ #
 
     def _compute_all_components(
@@ -427,16 +416,18 @@ class ADIService:
             "veterinary": self._compute_veterinary(health_record),
         }
 
-    def _compute_activity(
-        self,
-        summary: DetectionSummary,
-    ) -> ComponentResult:
+    def _compute_activity(self, summary: DetectionSummary) -> ComponentResult:
         """
         Faollik score hisoblash.
 
         Normaga nisbatan deteksiya soni.
-        Sigmoid funksiya orqali 0-100 ga o'tkaziladi —
-        ekstremal qiymatlarda jazo yumshoq bo'lsin.
+        Sigmoid funksiya orqali 0-100 ga o'tkaziladi.
+
+        Args:
+            summary: 24 soatlik deteksiya xulosasi
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if summary.total_count == 0:
             return ComponentResult(
@@ -447,29 +438,31 @@ class ADIService:
             )
 
         ratio = summary.total_count / ACTIVITY_NORM_DETECTIONS_PER_DAY
-        # Sigmoid: 1 ta deteksiya ham 0 bermaydi, norm = 75 ball
         score = self._sigmoid_score(ratio, midpoint=1.0, steepness=3.0)
 
         return ComponentResult(
             score=round(score, 2),
             weight=WEIGHTS["activity"],
             detail={
-                "detections_today":  summary.total_count,
-                "norm":              ACTIVITY_NORM_DETECTIONS_PER_DAY,
-                "ratio":             round(ratio, 3),
-                "hourly_breakdown":  summary.hourly_counts,
+                "detections_today": summary.total_count,
+                "norm":             ACTIVITY_NORM_DETECTIONS_PER_DAY,
+                "ratio":            round(ratio, 3),
+                "hourly_breakdown": summary.hourly_counts,
             },
         )
 
-    def _compute_feeding(
-        self,
-        summary: DetectionSummary,
-    ) -> ComponentResult:
+    def _compute_feeding(self, summary: DetectionSummary) -> ComponentResult:
         """
         Ovqatlanish score hisoblash.
 
         Ozuqa zonasiga tashrif soni va u yerda o'tkazilgan
         vaqt kombinatsiyasi asosida.
+
+        Args:
+            summary: 24 soatlik deteksiya xulosasi
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if summary.total_count == 0:
             return ComponentResult(
@@ -479,13 +472,8 @@ class ADIService:
                 has_data=False,
             )
 
-        # Tashrif soni (50%) + dwell vaqti (50%)
-        visit_ratio = min(
-            summary.feeding_visits / FEEDING_NORM_VISITS_PER_DAY, 1.5
-        )
-        dwell_ratio = min(
-            summary.feeding_dwell_sec / FEEDING_ZONE_DWELL_SECONDS, 1.5
-        )
+        visit_ratio = min(summary.feeding_visits / FEEDING_NORM_VISITS_PER_DAY, 1.5)
+        dwell_ratio = min(summary.feeding_dwell_sec / FEEDING_ZONE_DWELL_SECONDS, 1.5)
 
         visit_score = self._sigmoid_score(visit_ratio, midpoint=0.8, steepness=4.0)
         dwell_score = self._sigmoid_score(dwell_ratio, midpoint=0.8, steepness=4.0)
@@ -496,23 +484,26 @@ class ADIService:
             score=round(score, 2),
             weight=WEIGHTS["feeding"],
             detail={
-                "feeding_visits":    summary.feeding_visits,
-                "norm_visits":       FEEDING_NORM_VISITS_PER_DAY,
-                "dwell_seconds":     round(summary.feeding_dwell_sec, 1),
-                "norm_dwell":        FEEDING_ZONE_DWELL_SECONDS,
-                "visit_score":       round(visit_score, 2),
-                "dwell_score":       round(dwell_score, 2),
+                "feeding_visits": summary.feeding_visits,
+                "norm_visits":    FEEDING_NORM_VISITS_PER_DAY,
+                "dwell_seconds":  round(summary.feeding_dwell_sec, 1),
+                "norm_dwell":     FEEDING_ZONE_DWELL_SECONDS,
+                "visit_score":    round(visit_score, 2),
+                "dwell_score":    round(dwell_score, 2),
             },
         )
 
-    def _compute_drinking(
-        self,
-        summary: DetectionSummary,
-    ) -> ComponentResult:
+    def _compute_drinking(self, summary: DetectionSummary) -> ComponentResult:
         """
         Suv ichish score hisoblash.
 
         Suv zonasiga tashrif va dwell vaqti asosida.
+
+        Args:
+            summary: 24 soatlik deteksiya xulosasi
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if summary.total_count == 0:
             return ComponentResult(
@@ -522,12 +513,8 @@ class ADIService:
                 has_data=False,
             )
 
-        visit_ratio = min(
-            summary.drinking_visits / DRINKING_NORM_VISITS_PER_DAY, 1.5
-        )
-        dwell_ratio = min(
-            summary.drinking_dwell_sec / DRINKING_ZONE_DWELL_SECONDS, 1.5
-        )
+        visit_ratio = min(summary.drinking_visits / DRINKING_NORM_VISITS_PER_DAY, 1.5)
+        dwell_ratio = min(summary.drinking_dwell_sec / DRINKING_ZONE_DWELL_SECONDS, 1.5)
 
         visit_score = self._sigmoid_score(visit_ratio, midpoint=0.8, steepness=4.0)
         dwell_score = self._sigmoid_score(dwell_ratio, midpoint=0.8, steepness=4.0)
@@ -538,24 +525,27 @@ class ADIService:
             score=round(score, 2),
             weight=WEIGHTS["drinking"],
             detail={
-                "drinking_visits":  summary.drinking_visits,
-                "norm_visits":      DRINKING_NORM_VISITS_PER_DAY,
-                "dwell_seconds":    round(summary.drinking_dwell_sec, 1),
-                "norm_dwell":       DRINKING_ZONE_DWELL_SECONDS,
-                "visit_score":      round(visit_score, 2),
-                "dwell_score":      round(dwell_score, 2),
+                "drinking_visits": summary.drinking_visits,
+                "norm_visits":     DRINKING_NORM_VISITS_PER_DAY,
+                "dwell_seconds":   round(summary.drinking_dwell_sec, 1),
+                "norm_dwell":      DRINKING_ZONE_DWELL_SECONDS,
+                "visit_score":     round(visit_score, 2),
+                "dwell_score":     round(dwell_score, 2),
             },
         )
 
-    def _compute_movement(
-        self,
-        summary: DetectionSummary,
-    ) -> ComponentResult:
+    def _compute_movement(self, summary: DetectionSummary) -> ComponentResult:
         """
         Harakat sifati score hisoblash.
 
         Bbox orasidagi o'rtacha tezlik va barqarorlik asosida.
         Juda sekin (kasal) yoki juda tez (hayajonlangan) = past ball.
+
+        Args:
+            summary: 24 soatlik deteksiya xulosasi
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if len(summary.bbox_velocities) < 3:
             return ComponentResult(
@@ -568,23 +558,15 @@ class ADIService:
         avg_velocity = sum(summary.bbox_velocities) / len(summary.bbox_velocities)
         velocity_std = self._std_dev(summary.bbox_velocities)
 
-        # Normal harakat: o'rtacha tezlik 0.01-0.05 (normalized)
-        # Juda sekin < 0.005 yoki juda tez > 0.1 = muammo
         if avg_velocity < 0.005:
-            # Harakatsiz — kasal yoki uxlayapti
-            velocity_score = 30.0
+            velocity_score = 30.0      # Harakatsiz — kasal yoki uxlayapti
         elif avg_velocity > 0.1:
-            # Juda tez — hayajonlangan yoki qo'rqinchli
-            velocity_score = 50.0
+            velocity_score = 50.0      # Juda tez — hayajonlangan
         else:
-            # Normal diapazon — yuqori ball
-            normalized = (avg_velocity - 0.005) / (0.1 - 0.005)
+            normalized     = (avg_velocity - 0.005) / (0.1 - 0.005)
             velocity_score = 60.0 + normalized * 30.0
 
-        # Barqarorlik: std past = tekis harakat = yaxshi
-        stability_score = max(0.0, 100.0 - velocity_std * 500.0)
-        stability_score = min(100.0, stability_score)
-
+        stability_score = max(0.0, min(100.0, 100.0 - velocity_std * 500.0))
         score = velocity_score * 0.6 + stability_score * 0.4
 
         return ComponentResult(
@@ -611,34 +593,31 @@ class ADIService:
         Yosh bilan kutilgan o'sish normaliga taqqoslanadi.
 
         Args:
-            historical_bbox: [(date_str, avg_bbox_size), ...]
+            historical_bbox: [(date_str, avg_bbox_size), ...] eski → yangi
             animal:          Yosh va tur ma'lumotlari uchun
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if len(historical_bbox) < GROWTH_MIN_DATAPOINTS:
             return ComponentResult(
                 score=None,
                 weight=WEIGHTS["growth"],
                 detail={
-                    "reason": "Insufficient historical data",
+                    "reason":     "Insufficient historical data",
                     "datapoints": len(historical_bbox),
-                    "required": GROWTH_MIN_DATAPOINTS,
+                    "required":   GROWTH_MIN_DATAPOINTS,
                 },
                 has_data=False,
             )
 
         sizes = [s for _, s in historical_bbox]
-
-        # Linear regression: slope hisoblash
         slope = self._linear_regression_slope(sizes)
 
-        # Yosh asosida kutilgan o'sish
-        age_months = animal.age_months or 12.0
-        expected_slope = self._expected_growth_slope(
-            age_months, animal.species.value
-        )
+        age_months     = animal.age_months or 12.0
+        expected_slope = self._expected_growth_slope(age_months, animal.species.value)
 
         if expected_slope == 0:
-            # O'sish to'xtagan yosh — stable bo'lsa yaxshi
             if abs(slope) < 0.0001:
                 score = 85.0
             elif slope < 0:
@@ -646,7 +625,6 @@ class ADIService:
             else:
                 score = 85.0
         else:
-            # O'sish davri — trend kutilgan yo'nalishda bo'lsa yaxshi
             ratio = slope / expected_slope
             if ratio >= 0.8:
                 score = 90.0 + min(10.0, (ratio - 0.8) * 50)
@@ -655,7 +633,6 @@ class ADIService:
             elif ratio >= 0.0:
                 score = 40.0 + ratio * 60.0
             else:
-                # Salbiy trend — kichrayish
                 score = max(0.0, 40.0 + ratio * 40.0)
 
         score = max(0.0, min(100.0, score))
@@ -674,15 +651,18 @@ class ADIService:
             },
         )
 
-    def _compute_social(
-        self,
-        summary: DetectionSummary,
-    ) -> ComponentResult:
+    def _compute_social(self, summary: DetectionSummary) -> ComponentResult:
         """
         Ijtimoiy indeks score hisoblash.
 
         Deteksiyalarning qancha qismi boshqa
         jonivorlar bilan birga bo'lganini o'lchaydi.
+
+        Args:
+            summary: 24 soatlik deteksiya xulosasi
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if summary.total_count == 0:
             return ComponentResult(
@@ -703,10 +683,10 @@ class ADIService:
             score=round(score, 2),
             weight=WEIGHTS["social"],
             detail={
-                "total_detections":    summary.total_count,
-                "co_detections":       summary.co_detection_count,
-                "co_ratio":            round(co_ratio, 3),
-                "norm_co_ratio":       SOCIAL_NORM_CODETECTION_RATIO,
+                "total_detections": summary.total_count,
+                "co_detections":    summary.co_detection_count,
+                "co_ratio":         round(co_ratio, 3),
+                "norm_co_ratio":    SOCIAL_NORM_CODETECTION_RATIO,
             },
         )
 
@@ -717,15 +697,16 @@ class ADIService:
         """
         IoT sensor score hisoblash.
 
-        Hozir simulyatsiya. Real sensorlar
-        qo'shilganda bu metod yangilanadi.
+        Hozir simulyatsiya. Real sensorlar qo'shilganda yangilanadi.
+        Normal diapazonlar (qoramol): Harorat 38.0-39.5°C, HR 40-80 bpm.
 
-        Normal diapazonlar (qoramol uchun):
-            Harorat: 38.0 — 39.5 °C
-            Yurak urishi: 40 — 80 bpm
+        Args:
+            sensor_data: {"temperature": float, "heart_rate": float} yoki None
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if not sensor_data:
-            # Sensor yo'q — simulyatsiya rejimida o'rtacha ball
             return ComponentResult(
                 score=70.0,
                 weight=WEIGHTS["sensor"],
@@ -736,7 +717,6 @@ class ADIService:
         scores: list[float] = []
         detail: dict[str, Any] = {"mode": "real"}
 
-        # Harorat (38.0 — 39.5 normal)
         if "temperature" in sensor_data:
             temp = sensor_data["temperature"]
             if 38.0 <= temp <= 39.5:
@@ -747,7 +727,6 @@ class ADIService:
                 scores.append(10.0)
             detail["temperature"] = temp
 
-        # Yurak urishi (40-80 bpm normal)
         if "heart_rate" in sensor_data:
             hr = sensor_data["heart_rate"]
             if 40 <= hr <= 80:
@@ -775,6 +754,12 @@ class ADIService:
 
         So'nggi veterinar tekshiruv natijasi asosida.
         Ma'lumot yo'q bo'lsa — neytral ball (50).
+
+        Args:
+            health_record: HealthRecord ORM instance yoki None
+
+        Returns:
+            ComponentResult — score va tafsilotlar
         """
         if not health_record:
             return ComponentResult(
@@ -784,32 +769,28 @@ class ADIService:
                 has_data=False,
             )
 
-        # Davolanishda bo'lsa — past ball
         if health_record.treatment and not health_record.resolved_at:
-            score = 20.0
+            score  = 20.0
             status = "under_treatment"
-        # So'nggi tekshiruv 30 kundan eski bo'lsa
         elif health_record.recorded_at:
-            days_ago = (
-                datetime.now(timezone.utc) - health_record.recorded_at
-            ).days
+            days_ago = (datetime.now(timezone.utc) - health_record.recorded_at).days
             if days_ago > 30:
-                score = 55.0
+                score  = 55.0
                 status = "checkup_overdue"
             else:
-                score = 85.0
+                score  = 85.0
                 status = "recently_checked"
         else:
-            score = 50.0
+            score  = 50.0
             status = "unknown"
 
         return ComponentResult(
             score=round(score, 2),
             weight=WEIGHTS["veterinary"],
             detail={
-                "status":       status,
-                "last_record":  str(health_record.recorded_at)
-                                if health_record.recorded_at else None,
+                "status":      status,
+                "last_record": str(health_record.recorded_at)
+                               if health_record.recorded_at else None,
             },
         )
 
@@ -828,22 +809,20 @@ class ADIService:
         uning og'irligi boshqa mavjud komponentlarga
         proporsional taqsimlanadi (partial data handling).
 
+        Args:
+            components: 8 ta ComponentResult dict
+
         Returns:
-            (adi_score, data_quality)
+            (adi_score 0-100, data_quality 0-1)
         """
-        available = {
-            k: v for k, v in components.items()
-            if v.score is not None
-        }
+        available = {k: v for k, v in components.items() if v.score is not None}
 
         if not available:
             return 0.0, 0.0
 
-        # Data quality: mavjud komponentlar og'irliklarining yig'indisi
         total_available_weight = sum(v.weight for v in available.values())
-        data_quality = total_available_weight  # 0.0 — 1.0
+        data_quality = total_available_weight
 
-        # Qayta normallashtirish va og'irlikli o'rtacha
         weighted_sum = sum(
             v.score * (v.weight / total_available_weight)  # type: ignore[operator]
             for v in available.values()
@@ -852,7 +831,7 @@ class ADIService:
         return round(weighted_sum, 4), round(data_quality, 4)
 
     # ================================================================ #
-    # DATA COLLECTION (private)                                          #
+    # DATA COLLECTION (private, DB calls)                                #
     # ================================================================ #
 
     async def _collect_detection_summary(
@@ -862,7 +841,15 @@ class ADIService:
         period_end: datetime,
     ) -> DetectionSummary:
         """
-        24 soatlik deteksiya ma'lumotlarini yig'ish va qayta ishlash.
+        24 soatlik deteksiya ma'lumotlarini yig'ish.
+
+        Args:
+            animal_id:    Jonivor ID
+            period_start: Period boshi (UTC)
+            period_end:   Period oxiri (UTC)
+
+        Returns:
+            DetectionSummary — barcha hisoblash uchun zarur ma'lumotlar
         """
         stmt = (
             select(Detection)
@@ -889,40 +876,35 @@ class ADIService:
 
         for det in detections:
             bbox = det.bbox or {}
-            cx = bbox.get("x", 0.5)
-            cy = bbox.get("y", 0.5)
-            bw = bbox.get("w", 0.0)
-            bh = bbox.get("h", 0.0)
+            cx   = bbox.get("x", 0.5)
+            cy   = bbox.get("y", 0.5)
+            bw   = bbox.get("w", 0.0)
+            bh   = bbox.get("h", 0.0)
 
-            # Bbox hajmi
             bbox_size = bw * bh
             if bbox_size > 0:
                 summary.bbox_sizes.append(bbox_size)
 
-            # Harakat tezligi
             if prev_bbox_cx is not None and prev_timestamp is not None:
                 dt_sec = (det.timestamp - prev_timestamp).total_seconds()
-                if 0 < dt_sec <= 300:  # 5 daqiqa ichida
+                if 0 < dt_sec <= 300:
                     velocity = abs(cx - prev_bbox_cx) / dt_sec
                     summary.bbox_velocities.append(velocity)
 
-            prev_bbox_cx = cx
+            prev_bbox_cx   = cx
             prev_timestamp = det.timestamp
 
-            # Soatlik taqsimot
             hour = det.timestamp.hour
             summary.hourly_counts[hour] = summary.hourly_counts.get(hour, 0) + 1
 
-            # Zona aniqlash
             if self._in_zone(cx, cy, FEEDING_ZONE):
-                summary.feeding_visits += 1
-                summary.feeding_dwell_sec += 5.0  # Har deteksiya ~5 sekund
+                summary.feeding_visits    += 1
+                summary.feeding_dwell_sec += 5.0
 
             if self._in_zone(cx, cy, DRINKING_ZONE):
-                summary.drinking_visits += 1
+                summary.drinking_visits    += 1
                 summary.drinking_dwell_sec += 5.0
 
-        # Boshqa jonivorlar bilan birgalikda deteksiya
         summary.co_detection_count = await self._count_co_detections(
             animal_id, period_start, period_end
         )
@@ -937,15 +919,16 @@ class ADIService:
         """
         30 kunlik kunlik o'rtacha bbox o'lchamlarini olish.
 
+        Args:
+            animal_id:   Jonivor ID
+            target_date: YYYY-MM-DD
+
         Returns:
             [(date_str, avg_bbox_size), ...] eski → yangi tartibda
         """
-        end_date = datetime.strptime(target_date, "%Y-%m-%d").replace(
-            tzinfo=timezone.utc
-        )
+        end_date   = datetime.strptime(target_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         start_date = end_date - timedelta(days=GROWTH_WINDOW_DAYS)
 
-        # Kunlik o'rtacha bbox area hisoblash
         stmt = text("""
             SELECT
                 DATE(timestamp AT TIME ZONE 'UTC') AS det_date,
@@ -971,7 +954,6 @@ class ADIService:
             },
         )
         rows = result.fetchall()
-
         return [(str(row[0]), float(row[1])) for row in rows]
 
     async def _count_co_detections(
@@ -981,11 +963,18 @@ class ADIService:
         period_end: datetime,
     ) -> int:
         """
-        Boshqa jonivorlar bilan birgalikda
-        ko'ringan deteksiyalar soni.
+        Boshqa jonivorlar bilan birgalikda ko'ringan deteksiyalar soni.
 
         Bir xil kamera, bir xil vaqt (±10 sekund) oralig'ida
         boshqa jonivorning deteksiyasi bo'lsa — co-detection.
+
+        Args:
+            animal_id:    Jonivor ID
+            period_start: Period boshi
+            period_end:   Period oxiri
+
+        Returns:
+            Co-detection soni
         """
         stmt = text("""
             SELECT COUNT(DISTINCT d1.id)
@@ -1003,28 +992,30 @@ class ADIService:
 
         result = await self.db.execute(
             stmt,
-            {
-                "animal_id": animal_id,
-                "start":     period_start,
-                "end":       period_end,
-            },
+            {"animal_id": animal_id, "start": period_start, "end": period_end},
         )
         row = result.fetchone()
         return int(row[0]) if row else 0
 
     async def _get_latest_health_record(
-        self,
-        animal_id: int,
+        self, animal_id: int
     ) -> Optional[Any]:
-        """So'nggi veterinar yozuvini olish."""
+        """
+        So'nggi veterinar yozuvini olish.
+
+        Args:
+            animal_id: Jonivor ID
+
+        Returns:
+            HealthRecord yoki None
+        """
         try:
-            stmt = (
+            result = await self.db.execute(
                 select(HealthRecord)
                 .where(HealthRecord.animal_id == animal_id)
                 .order_by(HealthRecord.recorded_at.desc())
                 .limit(1)
             )
-            result = await self.db.execute(stmt)
             return result.scalar_one_or_none()
         except Exception:
             return None
@@ -1040,65 +1031,59 @@ class ADIService:
 
         Hozir simulyatsiya — real sensor integratsiyasi
         kelajakda shu yerga qo'shiladi.
+
+        Args:
+            animal_id:    Jonivor ID
+            period_start: Period boshi
+            period_end:   Period oxiri
+
+        Returns:
+            Sensor data dict yoki None
         """
-        # TODO: Real IoT sensor jadvalidan olish
-        # Hozir None qaytaramiz — sensor yo'q deb hisoblanadi
-        # va _compute_sensor simulyatsiya rejimida ishlaydi
+        # TODO: Real IoT sensor jadvalidan olish (Sprint 17-20)
         return None
 
-    async def _get_existing_log(
-        self,
-        animal_id: int,
-        date_str: str,
-    ) -> Optional[ADILog]:
-        """Mavjud ADI yozuvini tekshirish."""
-        stmt = select(ADILog).where(
-            and_(
-                ADILog.animal_id == animal_id,
-                ADILog.calculation_date == date_str,
-            )
-        )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def _get_animal(self, animal_id: int) -> Animal:
-        """Jonivorni olish, topilmasa exception."""
-        stmt = select(Animal).where(Animal.id == animal_id)
-        result = await self.db.execute(stmt)
+        """
+        Jonivorni olish, topilmasa exception.
+
+        Args:
+            animal_id: Jonivor ID
+
+        Returns:
+            Animal ORM instance
+
+        Raises:
+            EntityNotFoundError: Jonivor topilmasa
+        """
+        result = await self.db.execute(
+            select(Animal).where(Animal.id == animal_id)
+        )
         animal = result.scalar_one_or_none()
 
         if not animal:
-            raise EntityNotFoundError(
-                entity="Animal",
-                identifier=animal_id,
-            )
+            raise EntityNotFoundError(entity="Animal", identifier=animal_id)
         return animal
 
     # ================================================================ #
-    # SAVE                                                               #
+    # SAVE (Repository orqali)                                           #
     # ================================================================ #
 
-    async def _save_result(
-        self,
-        result: ADIResult,
-        force_recalculate: bool,
-    ) -> None:
-        """ADI natijasini DB ga saqlash."""
-        try:
-            # Mavjud yozuvni o'chirish (force mode)
-            if force_recalculate:
-                existing = await self._get_existing_log(
-                    result.animal_id, result.calculation_date
-                )
-                if existing:
-                    await self.db.delete(existing)
-                    await self.db.flush()
+    async def _save_result(self, result: ADIResult) -> None:
+        """
+        ADI natijasini DB ga saqlash (Repository orqali).
 
+        Args:
+            result: Hisoblangan ADIResult
+
+        Raises:
+            DatabaseError: DB xatosi
+        """
+        try:
             comp = result.components
-            log = ADILog(
-                animal_id=        result.animal_id,
+
+            log_data = dict(
                 calculated_at=    result.calculated_at,
-                calculation_date= result.calculation_date,
                 adi_score=        result.adi_score,
                 category=         result.category,
                 activity_score=   comp["activity"].score,
@@ -1114,16 +1099,25 @@ class ADIService:
                 notes=            result.notes,
             )
 
-            self.db.add(log)
+            log = ADILog(
+                animal_id=        result.animal_id,
+                calculation_date= result.calculation_date,
+                **log_data,
+            )
+
+            await self._repo.create(log)
             await self.db.commit()
 
+        except DatabaseError:
+            await self.db.rollback()
+            raise
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Failed to save ADI result: {e}", exc_info=True)
             raise DatabaseError(f"ADI saqlashda xato: {e}") from e
 
     # ================================================================ #
-    # UTILITY METHODS (private)                                          #
+    # UTILITY METHODS (pure static, no DB)                               #
     # ================================================================ #
 
     @staticmethod
@@ -1135,19 +1129,21 @@ class ADIService:
         """
         Sigmoid funksiya orqali 0-100 ga o'tkazish.
 
-        x = 0       → ~5
+        x = 0        → ~5
         x = midpoint → ~75
-        x = 2       → ~95+
+        x = 2        → ~95+
 
         Args:
             x:          Kiruvchi qiymat (nisbiy, >=0)
             midpoint:   Bu qiymatda ~75 ball
             steepness:  Egri chiziq qiyaligi
+
+        Returns:
+            Score 0.0-100.0
         """
         shifted = x - midpoint
         sigmoid = 1.0 / (1.0 + math.exp(-steepness * shifted))
-        # 0.5 → 75 bo'lsin (past asimptota 5, yuqori 95)
-        score = 5.0 + sigmoid * 90.0
+        score   = 5.0 + sigmoid * 90.0
         return max(0.0, min(100.0, score))
 
     @staticmethod
@@ -1155,6 +1151,12 @@ class ADIService:
         """
         Oddiy chiziqli regressiya — slope hisoblash.
         O'sish trendini aniqlash uchun.
+
+        Args:
+            values: Vaqt bo'yicha tartibga solingan qiymatlar
+
+        Returns:
+            Slope qiymati (manfiy = kamayish, musbat = o'sish)
         """
         n = len(values)
         if n < 2:
@@ -1166,30 +1168,26 @@ class ADIService:
         numerator   = sum((i - x_mean) * (v - y_mean) for i, v in enumerate(values))
         denominator = sum((i - x_mean) ** 2 for i in range(n))
 
-        if denominator == 0:
-            return 0.0
-
-        return numerator / denominator
+        return 0.0 if denominator == 0 else numerator / denominator
 
     @staticmethod
-    def _expected_growth_slope(
-        age_months: float,
-        species: str,
-    ) -> float:
+    def _expected_growth_slope(age_months: float, species: str) -> float:
         """
         Yosh va turga qarab kutilgan bbox o'sish tezligi.
 
-        Bbox o'lchami jonivorning kamera ko'rinishidagi
-        nisbiy hajmini ifodalaydi (0.0—1.0).
+        Args:
+            age_months: Jonivor yoshi (oyda)
+            species:    Tur: cattle | sheep | ...
+
+        Returns:
+            Kutilgan slope qiymati
         """
-        # Qoramol (cattle) uchun o'sish egri chizig'i
         cattle_growth = {
-            (0,   6):  0.0008,   # Buzoq: tez o'sish
-            (6,  18):  0.0005,   # O'smir: o'rtacha o'sish
-            (18, 36):  0.0002,   # Yosh: sekin o'sish
-            (36, 999): 0.0000,   # Katta: o'sish to'xtagan
+            (0,   6):  0.0008,
+            (6,  18):  0.0005,
+            (18, 36):  0.0002,
+            (36, 999): 0.0000,
         }
-        # Qo'y (sheep)
         sheep_growth = {
             (0,   4):  0.0010,
             (4,  12):  0.0005,
@@ -1197,10 +1195,9 @@ class ADIService:
             (24, 999): 0.0000,
         }
 
-        growth_map = {
-            "cattle": cattle_growth,
-            "sheep":  sheep_growth,
-        }.get(species, cattle_growth)
+        growth_map = {"cattle": cattle_growth, "sheep": sheep_growth}.get(
+            species, cattle_growth
+        )
 
         for (min_age, max_age), slope in growth_map.items():
             if min_age <= age_months < max_age:
@@ -1209,17 +1206,16 @@ class ADIService:
         return 0.0
 
     @staticmethod
-    def _in_zone(
-        cx: float,
-        cy: float,
-        zone: dict[str, float],
-    ) -> bool:
+    def _in_zone(cx: float, cy: float, zone: dict[str, float]) -> bool:
         """
         Bbox markazi zonada ekanligini tekshirish.
 
         Args:
-            cx, cy: Normalized bbox center (0.0—1.0)
+            cx, cy: Normalized bbox center (0.0-1.0)
             zone:   {x_min, x_max, y_min, y_max}
+
+        Returns:
+            True agar zonada bo'lsa
         """
         return (
             zone["x_min"] <= cx <= zone["x_max"]
@@ -1228,19 +1224,28 @@ class ADIService:
 
     @staticmethod
     def _std_dev(values: list[float]) -> float:
-        """Standart og'ish hisoblash."""
+        """
+        Standart og'ish hisoblash.
+
+        Args:
+            values: Raqamlar ro'yxati
+
+        Returns:
+            Standart og'ish qiymati
+        """
         if len(values) < 2:
             return 0.0
-        mean = sum(values) / len(values)
+        mean     = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
         return math.sqrt(variance)
 
     @staticmethod
-    def _get_period_bounds(
-        date_str: str,
-    ) -> tuple[datetime, datetime]:
+    def _get_period_bounds(date_str: str) -> tuple[datetime, datetime]:
         """
         YYYY-MM-DD dan 24 soatlik UTC oraliq hisoblash.
+
+        Args:
+            date_str: YYYY-MM-DD format
 
         Returns:
             (period_start, period_end) UTC datetime
@@ -1256,6 +1261,14 @@ class ADIService:
     ) -> Optional[str]:
         """
         ADI natijasiga asosida avtomatik izoh yaratish.
+
+        Args:
+            components: 8 ta ComponentResult
+            adi_score:  Yakuniy score
+            summary:    Deteksiya xulosasi
+
+        Returns:
+            Izoh matni yoki None
         """
         issues: list[str] = []
 
@@ -1290,15 +1303,26 @@ class ADIService:
         historical_bbox: list[tuple[str, float]],
         sensor_data: Optional[dict[str, float]],
     ) -> dict[str, Any]:
-        """Debug va retraining uchun to'liq ma'lumot yig'ish."""
+        """
+        Debug va retraining uchun to'liq ma'lumot yig'ish.
+
+        Args:
+            summary:         Deteksiya xulosasi
+            components:      8 ta ComponentResult
+            historical_bbox: O'sish uchun tarixiy data
+            sensor_data:     IoT sensor ma'lumoti
+
+        Returns:
+            JSON-serializable raw data dict
+        """
         return {
             "detection_summary": {
-                "total_count":        summary.total_count,
-                "feeding_visits":     summary.feeding_visits,
-                "drinking_visits":    summary.drinking_visits,
-                "co_detections":      summary.co_detection_count,
-                "bbox_count":         len(summary.bbox_sizes),
-                "velocity_samples":   len(summary.bbox_velocities),
+                "total_count":      summary.total_count,
+                "feeding_visits":   summary.feeding_visits,
+                "drinking_visits":  summary.drinking_visits,
+                "co_detections":    summary.co_detection_count,
+                "bbox_count":       len(summary.bbox_sizes),
+                "velocity_samples": len(summary.bbox_velocities),
             },
             "components": {
                 name: {
@@ -1316,9 +1340,15 @@ class ADIService:
 
     @staticmethod
     def _adi_log_to_result(log: ADILog) -> ADIResult:
-        """ADILog DB modelidan ADIResult ga o'tkazish."""
-        from app.models.adi_log import ADICategory
+        """
+        ADILog DB modelidan ADIResult ga o'tkazish.
 
+        Args:
+            log: ADILog ORM instance
+
+        Returns:
+            ADIResult dataclass instance
+        """
         components = {
             name: ComponentResult(
                 score=getattr(log, f"{name}_score"),
@@ -1340,4 +1370,3 @@ class ADIService:
             raw_data=         log.raw_data or {},
             notes=            log.notes,
         )
-
