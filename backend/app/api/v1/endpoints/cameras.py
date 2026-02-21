@@ -83,7 +83,7 @@ async def register_camera(config: CameraConfig):
         camera = CameraFactory.create_camera(config.dict())
         if camera is None:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to create camera instance"
             )
         
@@ -96,7 +96,7 @@ async def register_camera(config: CameraConfig):
         
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to register camera"
             )
         
@@ -174,7 +174,7 @@ async def stop_all_cameras():
     )
 
 
-@router.get("/cameras/status")
+@router.get("/cameras/health")
 async def get_camera_status():
     """
     Get overall camera system health status.

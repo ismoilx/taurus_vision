@@ -26,8 +26,12 @@ class AlertCreateManual(BaseModel):
         description="Jonivor ID. None = umumiy ferma muammosi")
     alert_type:  AlertType     = Field(...,
         description="Alert turi")
-    severity:    AlertSeverity = Field(...,
-        description="Jiddiylik darajasi")
+    # String o'rniga dinamik ravishda birinchi Enum qiymatini (odatda LOW/MEDIUM) biriktiramiz.
+    # Bu '.value' chaqirilganda 'str' xatolik berishining oldini oladi.
+    severity:    AlertSeverity = Field(
+        default_factory=lambda: list(AlertSeverity)[0],
+        description="Jiddiylik darajasi"
+    )
     title:       str           = Field(..., min_length=3, max_length=200)
     description: str           = Field(..., min_length=10)
     context:     Optional[dict[str, Any]] = None
@@ -116,14 +120,19 @@ class AlertResponse(BaseModel):
         animal_tag_id: Optional[str] = None,
     ) -> "AlertResponse":
         """Alert ORM obyektidan Response yaratish."""
+        
+        # Helper: Enum bo'lsa qulay o'qish, bo'lmasa o'zini qaytarish
+        def _get_val(val):
+            return val.value if hasattr(val, "value") else val
+
         return cls(
             id=obj.id,
             animal_id=obj.animal_id,
             animal_tag_id=animal_tag_id,
             camera_id=obj.camera_id,
-            alert_type=obj.alert_type,
-            severity=obj.severity,
-            status=obj.status,
+            alert_type=_get_val(obj.alert_type),
+            severity=_get_val(obj.severity),
+            status=_get_val(obj.status),
             title=obj.title,
             description=obj.description,
             auto_generated=obj.auto_generated,

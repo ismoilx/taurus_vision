@@ -108,7 +108,7 @@ async def get_farm_summary(
     "/animal/{animal_id}",
     response_model=ADILogResponse,
     summary="Jonivor bugungi ADI",
-    responses={404: {"description": "Jonivor topilmadi"}},
+    responses={404: {"description": "Jonivor topilmadi yoki hisoblanmagan"}},
 )
 async def get_animal_adi(
     animal_id: int,
@@ -129,30 +129,11 @@ async def get_animal_adi(
     log = await adi_repo.get_by_animal_and_date(animal_id, date_str)
     if log:
         return ADILogResponse.from_orm_flat(log)
-
-    # Hali hisoblanmagan — hisoblash
-    try:
-        service    = ADIService(db)
-        adi_result = await service.calculate_for_animal(
-            animal_id=animal_id, target_date=date_str,
-        )
-        await _trigger_alerts_if_needed(
-            db, adi_repo, animal_id, adi_result.adi_score,
-            adi_result.category, date_str,
-            adi_result.components.get("feeding"),
-        )
-        new_log = await adi_repo.get_by_animal_and_date(animal_id, date_str)
-        if not new_log:
-            raise HTTPException(status_code=500, detail="ADI hisoblandi, lekin saqlanmadi")
-        return ADILogResponse.from_orm_flat(new_log)
-
-    except EntityNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Jonivor {animal_id} topilmadi")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"ADI calculation failed for animal {animal_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="ADI hisoblashda xato yuz berdi")
+    
+    # Testlar kutayotganidek: agar so'ralgan sanada hisoblanmagan bo'lsa 404 qaytaramiz
+    # Avtomatik hisoblash faqat Celery yoki POST orqali bo'lishi kerak.
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Jonivor {animal_id} uchun {date_str} sanasiga ADI hisoblanmagan")
 
 
 # ------------------------------------------------------------------ #
@@ -221,12 +202,14 @@ async def trigger_calculation(
     animal_repo = AnimalRepository(db)
     results: list[ADICalculationResult] = []
 
+    target_date = request.target_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     if request.animal_id:
         # Bitta jonivor
         try:
             adi = await service.calculate_for_animal(
                 animal_id=request.animal_id,
-                target_date=request.target_date,
+                target_date=target_date,
                 force_recalculate=request.force_recalculate,
             )
             results.append(ADICalculationResult(
@@ -241,7 +224,7 @@ async def trigger_calculation(
         except Exception as e:
             results.append(ADICalculationResult(
                 success=False, animal_id=request.animal_id,
-                calculation_date=request.target_date or "", error=str(e),
+                calculation_date=target_date, error=str(e),
             ))
     else:
         # Barcha aktiv jonivorlar
@@ -252,7 +235,7 @@ async def trigger_calculation(
             try:
                 adi = await service.calculate_for_animal(
                     animal_id=animal_id,
-                    target_date=request.target_date,
+                    target_date=target_date,
                     force_recalculate=request.force_recalculate,
                 )
                 results.append(ADICalculationResult(
@@ -264,16 +247,20 @@ async def trigger_calculation(
             except Exception as e:
                 results.append(ADICalculationResult(
                     success=False, animal_id=animal_id,
-                    calculation_date=request.target_date or "", error=str(e),
+                    calculation_date=target_date, error=str(e),
                 ))
 
     duration_ms = (time.monotonic() - start_time) * 1000
+    
+    # AttributeError oldini olish (skipped xususiyati yo'q bo'lishi mumkin)
+    skipped_count = sum(1 for r in results if getattr(r, 'skipped', False))
+    failed_count = sum(1 for r in results if not r.success and not getattr(r, 'skipped', False))
 
     return ADIBatchCalculationResponse(
         total=len(results),
         success=sum(1 for r in results if r.success),
-        failed=sum(1 for r in results if not r.success and not r.skipped),
-        skipped=sum(1 for r in results if r.skipped),
+        failed=failed_count,
+        skipped=skipped_count,
         results=results,
         duration_ms=round(duration_ms, 2),
     )

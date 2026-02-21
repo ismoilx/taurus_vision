@@ -43,24 +43,39 @@ class DatabaseTask(Task):
     Base task classi — async DB session ni sync Celery bilan ko'prik.
 
     Celery sync muhitda ishlaydi, bizning servislar async.
-    asyncio.run() orqali ko'prik quramiz.
+
+    PYTHON 3.12 MUAMMO:
+        asyncio.get_event_loop() — deprecated va ishonchsiz.
+        ThreadPoolExecutor ichida asyncio.run() — deadlock xavfi.
+
+    TO'G'RI YECHIM:
+        Har doim alohida thread yaratib, u yerda asyncio.run() chaqirish.
+        Bu Celery worker thread dan to'liq izolyatsiyani ta'minlaydi.
     """
     abstract = True
 
-    def run_async(self, coro):
-        """Async coroutine ni sync muhitda ishlatish."""
+    def run_async(self, coro) -> object:
+        """
+        Async coroutine ni sync Celery muhitda xavfsiz ishlatish.
+
+        Har doim yangi thread + yangi event loop ishlatiladi.
+        Bu Python 3.10+ va 3.12 da to'liq xavfsiz.
+
+        Args:
+            coro: Await qilinadigan coroutine
+
+        Returns:
+            Coroutine natijasi
+
+        Raises:
+            Exception: Coroutine ichidagi har qanday xato yuqoriga uzatiladi
+        """
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, coro)
-                    return future.result()
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            return asyncio.run(coro)
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, coro)
+            return future.result()
 
 
 # ================================================================ #

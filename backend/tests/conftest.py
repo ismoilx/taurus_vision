@@ -98,7 +98,12 @@ async def client(app, db) -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 async def sample_animal(db: AsyncSession):
-    """Test uchun bitta Animal yaratib beradi."""
+    """
+    Test uchun bitta Animal yaratib beradi.
+
+    acquisition_date: Animal modelida NOT NULL — shuning uchun
+    majburiy ravishda berilishi kerak (DB default yo'q).
+    """
     from app.models.animal import Animal, AnimalSpecies, AnimalGender, AnimalStatus
 
     animal = Animal(
@@ -107,6 +112,7 @@ async def sample_animal(db: AsyncSession):
         gender=AnimalGender.FEMALE,
         status=AnimalStatus.ACTIVE,
         breed="Holstein",
+        acquisition_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
     db.add(animal)
     await db.commit()
@@ -116,16 +122,23 @@ async def sample_animal(db: AsyncSession):
 
 @pytest.fixture
 async def sample_animals(db: AsyncSession):
-    """Test uchun 3 ta Animal yaratib beradi."""
+    """
+    Test uchun 3 ta Animal yaratib beradi.
+
+    Har birida acquisition_date majburiy — NOT NULL constraint.
+    """
     from app.models.animal import Animal, AnimalSpecies, AnimalGender, AnimalStatus
 
     animals = [
         Animal(tag_id="TEST-A01", species=AnimalSpecies.CATTLE,
-               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE),
+               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE,
+               acquisition_date=datetime(2024, 1, 1, tzinfo=timezone.utc)),
         Animal(tag_id="TEST-A02", species=AnimalSpecies.CATTLE,
-               gender=AnimalGender.MALE,   status=AnimalStatus.ACTIVE),
+               gender=AnimalGender.MALE,   status=AnimalStatus.ACTIVE,
+               acquisition_date=datetime(2024, 2, 1, tzinfo=timezone.utc)),
         Animal(tag_id="TEST-A03", species=AnimalSpecies.GOAT,
-               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE),
+               gender=AnimalGender.FEMALE, status=AnimalStatus.ACTIVE,
+               acquisition_date=datetime(2024, 3, 1, tzinfo=timezone.utc)),
     ]
     for a in animals:
         db.add(a)
@@ -234,8 +247,16 @@ def sample_usb_config():
 
 @pytest.fixture(autouse=True)
 def cleanup_camera_manager():
-    """Har test dan keyin camera manager ni tozalash."""
-    yield
+    """
+    Har test OLDIN va KEYIN camera manager ni tozalash.
+
+    autouse=True — barcha testlarga avtomatik qo'llanadi.
+
+    Sabab: camera_manager singleton bo'lgani uchun bir test qoldirgan
+    kameralar keyingi testga o'tib ketishi mumkin. Ikki taraflama tozalash
+    test izolyatsiyasini kafolatlaydi.
+    """
+    # ── Test oldidan tozalash ─────────────────────────────────────────
     try:
         from app.services.camera.camera_manager import camera_manager
         for camera_id in list(camera_manager.list_cameras()):
@@ -245,3 +266,159 @@ def cleanup_camera_manager():
                 pass
     except Exception:
         pass
+
+    yield
+
+    # ── Test keyin tozalash ───────────────────────────────────────────
+    try:
+        from app.services.camera.camera_manager import camera_manager
+        for camera_id in list(camera_manager.list_cameras()):
+            try:
+                camera_manager.unregister_camera(camera_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+# ── Camera Test Helpers ───────────────────────────────────────────────────────
+
+def assert_camera_stats_valid(stats: dict) -> None:
+    """
+    Kamera statistika dict to'g'ri strukturaga ega ekanligini tekshiradi.
+
+    Barcha kamera implementatsiyalari (Simulated, USB, RTSP) bir xil
+    get_stats() formatini qaytarishi shart. Shu helper shu kontraktni
+    test ichida tekshiradi.
+
+    Args:
+        stats: get_stats() tomonidan qaytarilgan dict
+
+    Raises:
+        AssertionError: Agar birorta majburiy kalit yetishmasa yoki
+                        qiymati noto'g'ri turdagi bo'lsa
+    """
+    assert isinstance(stats, dict), \
+        f"stats dict bo'lishi kerak, {type(stats)} keldi"
+
+    required_keys = {
+        "camera_id": str,
+        "running":   bool,
+        "fps":       (int, float),
+    }
+
+    for key, expected_type in required_keys.items():
+        assert key in stats, f"stats da '{key}' kaliti yo'q"
+        assert isinstance(stats[key], expected_type), (
+            f"stats['{key}'] = {stats[key]!r} "
+            f"({expected_type.__name__} kutilgan)"
+        )
+
+    # frame_count bo'lsa — manfiy bo'lmasin
+    if "frame_count" in stats:
+        assert stats["frame_count"] >= 0, \
+            f"frame_count manfiy bo'lmasligi kerak: {stats['frame_count']}"
+
+    # fps manfiy bo'lmasin
+    assert stats["fps"] >= 0, \
+        f"fps manfiy bo'lmasligi kerak: {stats['fps']}"
+
+
+def assert_valid_frame(frame, width: int = None, height: int = None) -> None:
+    """
+    CameraFrame yoki numpy array to'g'ri strukturaga ega ekanligini tekshiradi.
+
+    Ikkita tur qabul qilinadi:
+    - CameraFrame dataclass (SimulatedCameraService, RTSPCameraService)
+    - numpy.ndarray (SimulatedCamera, eski API)
+
+    Args:
+        frame:  CameraFrame instance yoki numpy ndarray
+        width:  Kutilgan kadr kengligi (None = tekshirilmaydi)
+        height: Kutilgan kadr balandligi (None = tekshirilmaydi)
+
+    Raises:
+        AssertionError: Agar frame invalid bo'lsa
+    """
+    assert frame is not None, "frame None bo'lmasligi kerak"
+
+    # numpy array holati (SimulatedCamera klass)
+    if isinstance(frame, np.ndarray):
+        assert frame.ndim == 3, \
+            f"frame 3-o'lchamli bo'lishi kerak (H,W,C), {frame.ndim}-o'lchamli keldi"
+        assert frame.shape[2] == 3, \
+            f"frame 3 kanal (BGR) bo'lishi kerak, {frame.shape[2]} keldi"
+        if height is not None:
+            assert frame.shape[0] == height, \
+                f"Balandlik {height} kutilgan, {frame.shape[0]} keldi"
+        if width is not None:
+            assert frame.shape[1] == width, \
+                f"Kenglik {width} kutilgan, {frame.shape[1]} keldi"
+        return
+
+    # CameraFrame dataclass holati (SimulatedCameraService va boshqalar)
+    assert hasattr(frame, "frame"),       "frame.frame numpy array bo'lishi kerak"
+    assert hasattr(frame, "camera_id"),   "frame.camera_id bo'lishi kerak"
+    assert hasattr(frame, "timestamp"),   "frame.timestamp bo'lishi kerak"
+    assert hasattr(frame, "resolution"),  "frame.resolution bo'lishi kerak"
+
+    assert isinstance(frame.frame, np.ndarray), \
+        f"frame.frame np.ndarray bo'lishi kerak, {type(frame.frame)} keldi"
+    assert frame.frame.ndim == 3, \
+        f"frame.frame 3-o'lchamli bo'lishi kerak (H,W,C), {frame.frame.ndim}-o'lchamli keldi"
+    assert frame.frame.shape[2] == 3, \
+        f"frame.frame 3 kanal (BGR) bo'lishi kerak, {frame.frame.shape[2]} keldi"
+
+    if width is not None:
+        assert frame.resolution[0] == width, \
+            f"Kenglik {width} kutilgan, {frame.resolution[0]} keldi"
+    if height is not None:
+        assert frame.resolution[1] == height, \
+            f"Balandlik {height} kutilgan, {frame.resolution[1]} keldi"
+
+
+# ── Performance Test Helper ───────────────────────────────────────────────────
+
+class PerformanceMonitor:
+    """
+    Funksiya bajarilish vaqtini o'lchash uchun yordamchi klass.
+    test_performance_fps va shunga o'xshash testlarda ishlatiladi.
+    """
+
+    def __init__(self) -> None:
+        self._times: list[float] = []
+
+    def measure(self, func) -> float:
+        """
+        Funksiyani bajarish va vaqtini yozib olish.
+
+        Args:
+            func: Vaqti o'lchanadigan callable (arg yo'q)
+
+        Returns:
+            Bajarilish vaqti (soniyada)
+        """
+        import time
+        start = time.perf_counter()
+        func()
+        elapsed = time.perf_counter() - start
+        self._times.append(elapsed)
+        return elapsed
+
+    def average(self) -> float:
+        """O'rtacha bajarilish vaqti (soniyada)."""
+        if not self._times:
+            return 0.0
+        return sum(self._times) / len(self._times)
+
+    def max(self) -> float:
+        """Maksimal bajarilish vaqti (soniyada)."""
+        return max(self._times) if self._times else 0.0
+
+    def reset(self) -> None:
+        self._times.clear()
+
+
+@pytest.fixture
+def performance_monitor() -> PerformanceMonitor:
+    """Har test uchun yangi PerformanceMonitor instance."""
+    return PerformanceMonitor()

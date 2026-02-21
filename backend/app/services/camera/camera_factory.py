@@ -63,8 +63,15 @@ class CameraFactory:
             if not camera_type:
                 raise ValueError("type is required")
             
-            # Common parameters
-            fps = config.get('fps', 10)
+            # Common parameters — type-safe extraction
+            fps_raw = config.get('fps', 10)
+            try:
+                fps = int(fps_raw)
+                if fps <= 0:
+                    raise ValueError(f"fps must be positive, got: {fps}")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid fps value: {fps_raw!r}") from exc
+
             width = config.get('width', 1920)
             height = config.get('height', 1080)
             

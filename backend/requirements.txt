@@ -32,29 +32,12 @@ Pillow==10.2.0
 # WebSocket
 websockets==12.0
 
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-httpx==0.25.1
-
-# Dev tools
-black==23.11.0
-flake8==6.1.0
-mypy==1.7.1
-
 # System monitoring
 psutil==5.9.8
 
 # Video streaming
-av
+av==12.3.0                # PyAV — FFmpeg Python bindings
 imageio-ffmpeg==0.4.9
-
-# Testing coverage
-pytest-cov
-
-# ============================================================================== 
-# NEW DEPENDENCIES - Sprint 3
-# ==============================================================================
 
 # PDF Generation (Reports)
 reportlab==4.0.7
@@ -63,12 +46,23 @@ reportlab==4.0.7
 pandas==2.1.4
 openpyxl==3.1.2
 
-reportlab
-
-# ==============================================================================
-# Sprint 2 — Identification Dependencies
-# ==============================================================================
-
-# scikit-learn (cosine similarity, future: KNN classifier)
-scikit-learn==1.4.0
+# Celery (background tasks + beat scheduler)
 celery[redis]==5.3.6
+
+# scikit-learn (cosine similarity)
+scikit-learn==1.4.0
+
+# ==============================================================================
+# Testing Dependencies
+# ==============================================================================
+
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov
+httpx==0.25.1
+aiosqlite                 # SQLite async driver — test DB uchun
+
+# Dev tools
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1

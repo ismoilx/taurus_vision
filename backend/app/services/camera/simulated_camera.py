@@ -98,30 +98,34 @@ class SimulatedCamera:
             
             # Add random colored rectangles (simulate animals)
             num_objects = np.random.randint(1, 5)
-            for _ in range(num_objects):
-                x1 = np.random.randint(0, self.width - 100)
-                y1 = np.random.randint(0, self.height - 100)
-                x2 = x1 + np.random.randint(50, 200)
-                y2 = y1 + np.random.randint(50, 200)
-                
-                color = (
-                    np.random.randint(0, 255),
-                    np.random.randint(0, 255),
-                    np.random.randint(0, 255),
+
+            # Faqat yetarli katta kadrda tasodifiy to'rtburchaklar chizish.
+            # 100×100 dan kichik o'lchamda (masalan 1×1 test rejimi) bu qadamni o'tkazib yuboramiz.
+            if self.width >= 100 and self.height >= 100:
+                for _ in range(num_objects):
+                    x1 = np.random.randint(0, self.width - 100)
+                    y1 = np.random.randint(0, self.height - 100)
+                    x2 = x1 + np.random.randint(50, 200)
+                    y2 = y1 + np.random.randint(50, 200)
+
+                    color = (
+                        np.random.randint(0, 255),
+                        np.random.randint(0, 255),
+                        np.random.randint(0, 255),
+                    )
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
+
+            # Matn faqat kenglik 50+ bo'lganda chiziladi (kichik o'lchamlarda putText xato beradi)
+            if self.width >= 50 and self.height >= 40:
+                cv2.putText(
+                    frame,
+                    f"Frame: {self._frame_count}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (255, 255, 255),
+                    2,
                 )
-                
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, -1)
-            
-            # Add frame counter text
-            cv2.putText(
-                frame,
-                f"Frame: {self._frame_count}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255, 255, 255),
-                2,
-            )
             
             self._frame_count += 1
             return frame

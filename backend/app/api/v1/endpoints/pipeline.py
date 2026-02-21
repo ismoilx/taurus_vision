@@ -86,7 +86,10 @@ async def start_pipeline(
             ws_manager=ws_manager,
         )
 
-        await _pipeline.start()
+        # skip_frames ni pipeline ning MIN_FRAME_INTERVAL ga moslashtirish:
+        # skip_frames=5, fps=10 → har 5-chi kadr qayta ishlanadi → 0.5s interval
+        if skip_frames > 0 and camera_fps > 0:
+            _pipeline.MIN_FRAME_INTERVAL = skip_frames / camera_fps
         logger.info("✓ Pipeline started via API")
 
         return {

@@ -43,7 +43,7 @@ router = APIRouter(prefix="/alerts", tags=["Alerts"])
 # ------------------------------------------------------------------ #
 
 @router.get(
-    "",
+    "/",
     response_model=AlertListResponse,
     summary="Alertlar ro'yxati",
 )
@@ -185,7 +185,7 @@ async def get_alert(
 # ------------------------------------------------------------------ #
 
 @router.post(
-    "",
+    "/",
     response_model=AlertResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Qo'lda alert yaratish",

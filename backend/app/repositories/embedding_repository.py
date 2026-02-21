@@ -285,7 +285,11 @@ class EmbeddingRepository:
 
             # animal_id → embedding vektorlar ro'yxati
             embedding_map: dict[int, list[list[float]]] = {}
-            for animal_id, embedding_vector, _ in rows:
+            for row in rows:
+                # Testdagi Mock'lar va SQLAlchemy'da barqaror ishlashi uchun attribute orqali o'qish:
+                animal_id = row.animal_id
+                embedding_vector = row.embedding
+                
                 if animal_id not in embedding_map:
                     embedding_map[animal_id] = []
                 embedding_map[animal_id].append(embedding_vector)

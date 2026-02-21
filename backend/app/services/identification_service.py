@@ -34,8 +34,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.animal import Animal
 from app.models.animal_embedding import AnimalEmbedding
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.utils.image_utils import compute_cosine_similarity, preprocess_for_mobilenet
@@ -150,6 +152,7 @@ class IdentificationService:
             IdentificationResult
         """
         # Single query — barcha embedding lar bir yo'la (N+1 query yo'q)
+        # Format: {animal_id: [[embedding1], [embedding2], ...]}
         stored = await self._repo.get_all_active_embeddings()
 
         if not stored:
@@ -158,32 +161,31 @@ class IdentificationService:
                 animal_id=None, similarity_score=0.0, is_identified=False,
             )
 
-        # Group by animal (multi-embedding strategy)
-        animal_embeddings: dict[int, list[dict]] = {}
-        for row in stored:
-            aid = row["animal_id"]
-            if aid not in animal_embeddings:
-                animal_embeddings[aid] = []
-            animal_embeddings[aid].append(row)
-
         best_animal_id:    Optional[int] = None
         best_score:        float         = 0.0
         best_embedding_id: Optional[int] = None
         best_tag_id:       Optional[str] = None
 
-        for animal_id, emb_rows in animal_embeddings.items():
-            for row in emb_rows:
-                stored_vec = row["embedding_array"]
-                score      = compute_cosine_similarity(embedding, stored_vec)
+        for animal_id, emb_list in stored.items():
+            for stored_vec in emb_list:
+                # Ro'yxatdagi qiymatni numpy massiviga o'giramiz
+                stored_vec_np = np.array(stored_vec, dtype=np.float32)
+                score = compute_cosine_similarity(embedding, stored_vec_np)
                 if score > best_score:
                     best_score        = score
                     best_animal_id    = animal_id
-                    best_embedding_id = row["id"]
-                    best_tag_id       = row["tag_id"]
+                    best_embedding_id = None 
 
         is_identified = best_score >= threshold
 
-        if is_identified:
+        if is_identified and best_animal_id:
+            # Endi haqiqiy tag_id ni bazadan so'raymiz
+            animal = await self.db.scalar(select(Animal).where(Animal.id == best_animal_id))
+            if animal:
+                best_tag_id = animal.tag_id
+            else:
+                best_tag_id = f"ID-{best_animal_id}"
+                
             logger.info(
                 f"✓ Animal identified: {best_tag_id} (similarity={best_score:.3f})"
             )
@@ -235,7 +237,7 @@ class IdentificationService:
         # Repository orqali limit bilan qo'shish (FIFO, reference ni saqlaydi)
         record = await self._repo.add_with_limit_check(
             animal_id=    animal_id,
-            embedding=    embedding_vec.tolist(),
+            embedding_vector= embedding_vec.tolist(),
             is_reference= is_reference,
             source=       source,
             quality_score=quality_score,

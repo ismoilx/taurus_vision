@@ -62,7 +62,7 @@ class TestWeightPipeline:
         )
 
         # Session ni yangilaymiz (inject boshqa transaction da bo'ldi)
-        await db.expire_all()
+        db.expunge_all()
         after_fresh = await db.scalar(
             select(func.count(WeightMeasurement.id)).where(
                 WeightMeasurement.animal_id == sample_animal.id
@@ -93,7 +93,7 @@ class TestWeightPipeline:
         })
         assert r.status_code == 200
 
-        await db.expire_all()
+        db.expunge_all()
 
         # So'nggi yaratilgan o'lchovni olamiz
         stmt = (
@@ -143,7 +143,7 @@ class TestWeightPipeline:
         })
         assert r.status_code == 200
 
-        await db.expire_all()
+        db.expunge_all()
 
         # Detection yaratilgan bo'lishi kerak
         det_after = await db.scalar(
@@ -186,7 +186,7 @@ class TestWeightPipeline:
         assert r.status_code == 200
         assert r.json()["injected"] == 3
 
-        await db.expire_all()
+        db.expunge_all()
 
         weight_count = await db.scalar(
             select(func.count(WeightMeasurement.id)).where(
@@ -222,7 +222,7 @@ class TestWeightPipeline:
         })
         assert r.status_code == 200
 
-        await db.expire_all()
+        db.expunge_all()
 
         after = await db.scalar(
             select(func.count(WeightMeasurement.id))
@@ -252,7 +252,7 @@ class TestWeightPipeline:
         })
         assert r.status_code == 200
 
-        await db.expire_all()
+        db.expunge_all()
 
         stmt = select(Animal).where(Animal.id == sample_animal.id)
         result = await db.execute(stmt)

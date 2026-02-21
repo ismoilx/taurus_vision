@@ -144,17 +144,18 @@ class DetectionPipeline:
     # Minimum kadrlar orasidagi interval (sekund)
     # 0.5 = sekundiga max 2 kadr qayta ishlash
     MIN_FRAME_INTERVAL = 0.5
-    ###################################################################
-    def get_stats(self):
-        # Bu vaqtinchalik yechim (Frontend xato bermasligi uchun)
-        # Keyinroq buni haqiqiy statistika bilan almashtirasiz
-        return {
-            "status": "running",
-            "processed_frames": 0,
-            "active_cameras": 0,
-            "detections_count": 0
-        }
-    ####################################################################
+    def get_stats(self) -> dict:
+        """
+        Pipeline real vaqt statistikasini qaytaradi.
+
+        Returns:
+            PipelineStats dan olingan to'liq statistika dict,
+            qo'shimcha status va camera_id ma'lumotlari bilan.
+        """
+        base = self.stats.to_dict()
+        base["status"]    = "running" if self._running else "stopped"
+        base["camera_id"] = self.camera.camera_id
+        return base
     def __init__(
         self,
         camera_service: CameraServiceInterface,

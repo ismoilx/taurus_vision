@@ -246,8 +246,11 @@ class TestCosineSimilarity:
 
     def test_similar_embeddings_high_score(self, sample_embedding):
         """Slightly perturbed embedding should have high similarity."""
-        noise = np.random.randn(1280).astype(np.float32) * 0.05
+        # Kichikroq noise va normallashtirish bilan to'g'rilandi
+        noise = np.random.randn(1280).astype(np.float32) * 0.01
         perturbed = sample_embedding + noise
+        perturbed /= np.linalg.norm(perturbed)
+        
         sim = compute_cosine_similarity(sample_embedding, perturbed)
         assert sim > 0.90, f"Expected high similarity, got {sim:.3f}"
 

@@ -59,7 +59,8 @@ def get_animal_service(
     """,
     responses={
         201: {"description": "Animal created successfully"},
-        400: {"description": "Tag ID already exists or validation error"},
+        400: {"description": "Validation error"},
+        409: {"description": "Tag ID already exists"},
         422: {"description": "Invalid request data"},
     },
 )
@@ -72,7 +73,18 @@ async def create_animal(
     
     Returns the created animal with generated ID and timestamps.
     """
-    return await service.create_animal(animal_data)
+    try:
+        return await service.create_animal(animal_data)
+    except ValueError as e:
+        if "already exists" in str(e) or "duplicate" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(e)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
     # ============================================================================

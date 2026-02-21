@@ -147,29 +147,35 @@ class TestCameraEdgeCases:
         camera.stop()
     
     def test_concurrent_camera_managers(self):
-        """Test concurrent access to camera manager."""
+        """Test concurrent access to camera manager.
+
+        BUG FIX: thread.ident reuse muammosi.
+        Linux da Python threadlari tez tugasa, ident qayta ishlatilishi mumkin.
+        Shuning uchun uuid4 ishlatamiz — har thread uchun kafolatlangan unique ID.
+        """
+        import uuid
         results = []
         errors = []
-        
+
         def register_and_get():
             try:
-                camera_id = f"CAM-CONC-{threading.current_thread().ident}"
+                camera_id = f"CAM-CONC-{uuid.uuid4().hex[:12]}"
                 camera = SimulatedCamera(camera_id, fps=10)
                 camera_manager.register_camera(camera_id, camera, auto_start=False)
-                
+
                 cam = camera_manager.get_camera(camera_id)
                 results.append(cam is not None)
             except Exception as e:
                 errors.append(str(e))
-        
+
         threads = [threading.Thread(target=register_and_get) for _ in range(20)]
-        
+
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
-        assert len(errors) == 0
+
+        assert len(errors) == 0, f"Xatolar: {errors}"
         assert all(results)
     
     def test_camera_without_stop_cleanup(self):
