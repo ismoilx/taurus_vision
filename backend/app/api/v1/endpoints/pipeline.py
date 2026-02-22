@@ -28,6 +28,7 @@ from app.models.detection import Detection
 from app.models.weight_measurement import WeightMeasurement
 
 WEIGHT_CONFIDENCE_THRESHOLD = 0.70
+from app.services.data_simulator import get_simulator
 from app.services.detection_pipeline import DetectionPipeline
 from app.services.camera.simulated_camera import SimulatedCameraService
 from app.services.ai.yolo_service import get_yolo_service
@@ -100,6 +101,12 @@ async def start_pipeline(
         logger.info("✓ Pipeline started via API (random mode)")
 
         asyncio.create_task(_pipeline.start())
+
+        # Simulator ham ishga tushadi
+        sim = get_simulator()
+        if not sim.is_running:
+            asyncio.create_task(sim.start())
+        logger.info("✅ DataSimulator started with pipeline")
 
         return {
             "status": "started",
@@ -232,6 +239,12 @@ async def start_video_pipeline(
         )
         asyncio.create_task(_pipeline.start())
 
+        # Simulator ham ishga tushadi
+        sim = get_simulator()
+        if not sim.is_running:
+            asyncio.create_task(sim.start())
+        logger.info("✅ DataSimulator started with pipeline")
+
         return {
             "status": "started",
             "message": f"Video pipeline muvaffaqiyatli ishga tushdi: {video_filename}",
@@ -278,7 +291,10 @@ async def stop_pipeline() -> dict:
     try:
         stats = _pipeline.get_stats()
         await _pipeline.stop()
-        logger.info("✓ Pipeline stopped via API")
+        sim = get_simulator()
+        if sim.is_running:
+            await sim.stop()
+        logger.info("✓ Pipeline + Simulator stopped via API")
 
         return {
             "status": "stopped",

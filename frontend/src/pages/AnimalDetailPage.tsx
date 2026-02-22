@@ -51,8 +51,8 @@ interface ADILog {
 }
 
 interface ADITrend {
-  trend: string;   // improving | declining | stable | insufficient_data
-  points: { date: string; score: number; category: string }[];
+  trend: { date: string; score: number; category: string }[];
+  avg_score?: number; min_score?: number; max_score?: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -172,12 +172,12 @@ export default function AnimalDetailPage() {
       try {
         const trend = await apiFetch<ADITrend>(`/api/v1/adi/animal/${id}/trend?days=30`);
         setAdiTrend(trend);
-        if (trend.points?.length) {
-          const last = trend.points[trend.points.length - 1];
+        if (trend.trend?.length) {
+          const last = trend.trend[trend.trend.length - 1];
           setAdiToday({ id: 0, animal_id: Number(id),
             calculation_date: last.date, adi_score: last.score, category: last.category });
         }
-        setAdiLogs(trend.points?.map((p, i) => ({
+        setAdiLogs(trend.trend?.map((p, i) => ({
           id: i, animal_id: Number(id),
           calculation_date: p.date, adi_score: p.score, category: p.category,
         })) ?? []);
@@ -261,9 +261,16 @@ export default function AnimalDetailPage() {
   const adiCfg   = adiToday
     ? (CATEGORY_CONFIG[adiToday.category as keyof typeof CATEGORY_CONFIG] || CATEGORY_CONFIG.average)
     : null;
-  const trendCfg = adiTrend
-    ? (TREND_CONFIG[adiTrend.trend as keyof typeof TREND_CONFIG] || TREND_CONFIG.stable)
-    : null;
+  const trendDirection = (() => {
+    if (!adiTrend?.trend?.length || adiTrend.trend.length < 3) return 'insufficient_data';
+    const arr   = adiTrend.trend;
+    const first = arr[0].score;
+    const last  = arr[arr.length - 1].score;
+    if (last - first > 5)  return 'improving';
+    if (last - first < -5) return 'declining';
+    return 'stable';
+  })();
+  const trendCfg = TREND_CONFIG[trendDirection as keyof typeof TREND_CONFIG] || TREND_CONFIG.stable;
 
   // ── Render helpers ────────────────────────────────────────────────────────
 

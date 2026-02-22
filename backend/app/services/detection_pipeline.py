@@ -37,6 +37,7 @@ from app.services.ai.yolo_service import YoloService
 from app.services.ai.base import Detection as YOLODetection
 from app.services.identification_service import IdentificationService
 from app.services.alert_service import AlertService
+from app.services.adi_service import ADIService
 from app.api.v1.websocket import ConnectionManager
 from app.config import settings
 from app.core.database import AsyncSessionLocal
@@ -396,7 +397,9 @@ class DetectionPipeline:
             "h": round(bb.height, 4),
         }
         estimated_weight_kg = round(
-            max(50.0, min(800.0, (bb.width * bb.height * 4000) + 80)), 1
+            max(150.0, min(700.0,
+                200.0 + (bb.width * bb.height * 1800)
+            )), 1
         )
 
         # Detection ORM yozuvi
@@ -458,9 +461,11 @@ class DetectionPipeline:
         animal_id: int,
     ) -> None:
         """
-        Deteksiyadan keyin missing alertlarni avtomatik yopish.
-        ADI hisoblanmaydi — bu Celery task vazifasi (00:30 UTC).
+        Deteksiyadan keyin:
+        1. Missing alertlarni yopish
+        2. Bugungi ADI ni hisoblash (yoki yangilash)
         """
+        # 1. Missing alertlarni yopish
         missing_types = [
             AlertType.ANIMAL_MISSING.value,
             AlertType.ANIMAL_MISSING_LONG.value,
@@ -487,6 +492,17 @@ class DetectionPipeline:
                 f"count={len(open_alerts)}"
             )
 
+        # 2. Bugungi ADI ni hisoblash
+        try:
+            adi_service = ADIService(db)
+            await adi_service.calculate_for_animal(
+                animal_id=animal_id,
+                force_recalculate=True,
+            )
+            logger.debug(f"ADI updated after detection | animal_id={animal_id}")
+        except Exception as e:
+            logger.warning(f"ADI calculation after detection failed: {e}")
+
     # ================================================================ #
     # WEBSOCKET BROADCAST                                                #
     # ================================================================ #
@@ -510,7 +526,9 @@ class DetectionPipeline:
         w    = bbox.get("w", 0.1)
         h    = bbox.get("h", 0.2)
         estimated_weight_kg = round(
-            max(50.0, min(800.0, (w * h * 4000) + 80)), 1
+            max(150.0, min(700.0,
+                200.0 + (w * h * 1800)
+            )), 1
         )
 
         payload = {
