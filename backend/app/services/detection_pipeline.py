@@ -4,30 +4,25 @@ Automated Detection Pipeline — ADI integratsiyasi bilan.
 PIPELINE FLOW:
     Camera Frame
         ↓
-    YOLO Detection
+    YOLO Detection      (YOLODetection dataclass — .bounding_box)
         ↓
     Animal Identification (muzzle embedding)
         ↓
-    Detection Log (DB)
+    Detection Log (DB)  (Detection ORM model — .bbox JSON dict)
         ↓
-    ADI Trigger Check      ← YANGI
+    ADI Trigger Check
         ↓
-    Alert Check            ← YANGI
+    Alert Check
         ↓
     WebSocket Broadcast
 
-ADI INTEGRATSIYA STRATEGIYASI:
-    Har deteksiyada ADI qayta hisoblanmaydi —
-    bu juda qimmat operatsiya.
-
-    Buning o'rniga:
-    1. Har deteksiyada animal.last_detected_at yangilanadi
-    2. Agar jonivor missing alert ostida bo'lsa — avtomatik yopiladi
-    3. Kunlik ADI Celery task orqali hisoblanadi (00:30 UTC)
-    4. Real vaqt ADI faqat so'rov bo'lganda hisoblanadi (on-demand)
+MUHIM FARQ:
+    - YOLODetection (ai/base.py dataclass): .bounding_box (BoundingBox obj)
+      → .bounding_box.x, .bounding_box.y, .bounding_box.width, .bounding_box.height
+    - Detection (models/detection.py ORM): .bbox (JSON dict)
+      → {"x": 0.5, "y": 0.6, "w": 0.3, "h": 0.4}
 """
 
-# detection_pipeline.py — TO'G'RI IMPORTLAR
 import asyncio
 import logging
 import time
@@ -134,41 +129,23 @@ class DetectionPipeline:
         - Bitta frame xatosi pipeline ni to'xtatmaydi
         - Har bir bosqich mustaqil try/except bilan o'ralgan
         - Xatolar logga yoziladi va statistikaga qo'shiladi
-
-    PERFORMANCE:
-        - Frame throttling: MIN_FRAME_INTERVAL soniya kutish
-        - Non-blocking DB writes
-        - Parallel identification (bir nechta detection uchun)
     """
 
-    # Minimum kadrlar orasidagi interval (sekund)
-    # 0.5 = sekundiga max 2 kadr qayta ishlash
     MIN_FRAME_INTERVAL = 0.5
-    def get_stats(self) -> dict:
-        """
-        Pipeline real vaqt statistikasini qaytaradi.
 
-        Returns:
-            PipelineStats dan olingan to'liq statistika dict,
-            qo'shimcha status va camera_id ma'lumotlari bilan.
-        """
-        base = self.stats.to_dict()
-        base["status"]    = "running" if self._running else "stopped"
-        base["camera_id"] = self.camera.camera_id
-        return base
     def __init__(
         self,
         camera_service: CameraServiceInterface,
         yolo_service:   YoloService,
         ws_manager:     Optional[ConnectionManager] = None,
     ) -> None:
-        self.camera    = camera_service
-        self.yolo      = yolo_service
+        self.camera     = camera_service
+        self.yolo       = yolo_service
         self.ws_manager = ws_manager
 
-        self._running  = False
-        self._task:    Optional[asyncio.Task] = None
-        self.stats     = PipelineStats()
+        self._running = False
+        self._task:   Optional[asyncio.Task] = None
+        self.stats    = PipelineStats()
 
         logger.info(
             f"DetectionPipeline initialized | "
@@ -212,36 +189,34 @@ class DetectionPipeline:
                 pass
 
         await self.camera.stop()
-
-        logger.info(
-            f"Pipeline stopped | stats={self.stats.to_dict()}"
-        )
+        logger.info(f"Pipeline stopped | stats={self.stats.to_dict()}")
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    def get_stats(self) -> dict:
+        """Pipeline real vaqt statistikasini qaytaradi."""
+        base = self.stats.to_dict()
+        base["status"]    = "running" if self._running else "stopped"
+        base["camera_id"] = self.camera.camera_id
+        return base
 
     # ================================================================ #
     # MAIN LOOP                                                          #
     # ================================================================ #
 
     async def _run_loop(self) -> None:
-        """
-        Asosiy tsikl — kameradan kadr olib qayta ishlaydi.
-        """
+        """Asosiy tsikl — kameradan kadr olib qayta ishlaydi."""
         last_frame_time = 0.0
 
         while self._running:
             try:
-                # Frame throttling
                 now = time.monotonic()
                 elapsed = now - last_frame_time
                 if elapsed < self.MIN_FRAME_INTERVAL:
-                    await asyncio.sleep(
-                        self.MIN_FRAME_INTERVAL - elapsed
-                    )
+                    await asyncio.sleep(self.MIN_FRAME_INTERVAL - elapsed)
 
-                # Kadr olish
                 frame = await self.camera.get_frame()
                 self.stats.total_frames += 1
 
@@ -250,8 +225,6 @@ class DetectionPipeline:
                     continue
 
                 last_frame_time = time.monotonic()
-
-                # Kadrni qayta ishlash
                 await self._process_frame(frame)
                 self.stats.processed_frames += 1
 
@@ -259,10 +232,7 @@ class DetectionPipeline:
                 break
             except Exception as e:
                 self.stats.errors += 1
-                logger.error(
-                    f"Pipeline loop error: {e}",
-                    exc_info=True,
-                )
+                logger.error(f"Pipeline loop error: {e}", exc_info=True)
                 await asyncio.sleep(1.0)
 
     # ================================================================ #
@@ -270,17 +240,7 @@ class DetectionPipeline:
     # ================================================================ #
 
     async def _process_frame(self, frame) -> None:
-        """
-        Bitta kadrni to'liq qayta ishlash.
-
-        Bosqichlar:
-            1. YOLO detection
-            2. Har bir detection uchun identifikatsiya
-            3. DB ga saqlash
-            4. ADI/Alert tekshiruvi
-            5. WebSocket broadcast
-        """
-        # STEP 1: YOLO Detection
+        """Bitta kadrni to'liq qayta ishlash."""
         t0 = time.monotonic()
         try:
             inference_result = await self.yolo.detect(frame.frame)
@@ -297,13 +257,12 @@ class DetectionPipeline:
         if not detections:
             return
 
-        # STEP 2-5: Har bir detection uchun
         async with AsyncSessionLocal() as db:
             for det in detections:
                 await self._process_single_detection(
-                    db=        db,
-                    detection= det,
-                    frame=     frame,
+                    db=          db,
+                    detection=   det,
+                    frame=       frame,
                     inference_ms=inference_ms,
                 )
 
@@ -314,45 +273,39 @@ class DetectionPipeline:
         frame,
         inference_ms: float,
     ) -> None:
-        """
-        Bitta YOLO detection ni qayta ishlash.
+        """Bitta YOLO detection ni qayta ishlash."""
 
-        Args:
-            db:           DB session
-            detection:    YOLO detection natijasi
-            frame:        Asl kadr (identification uchun)
-            inference_ms: YOLO latency
-        """
         # STEP 2: Identifikatsiya
+        # detection = YOLODetection dataclass → .bounding_box ishlatiladi
         t_identify = time.monotonic()
         animal_id: Optional[int] = None
 
         try:
-            animal_id = await self._identify_animal(
-                db=        db,
-                detection= detection,
-                frame=     frame,
-            )
-            identify_ms = (time.monotonic() - t_identify) * 1000
-            self.stats.total_identify_ms += identify_ms
+            animal_id = await self._identify_animal(db, detection, frame)
+            self.stats.total_identify_ms += (time.monotonic() - t_identify) * 1000
 
             if animal_id:
-                self.stats.identified += 1
+                self.stats.identified   += 1
+                logger.info(
+                    f"✓ Identified: animal_id={animal_id} | "
+                    f"conf={detection.confidence:.2f}"
+                )
             else:
                 self.stats.unidentified += 1
+                logger.debug(f"Unknown animal | conf={detection.confidence:.2f}")
 
         except Exception as e:
             logger.warning(f"Identification failed: {e}")
             self.stats.errors += 1
 
         # STEP 3: DB ga saqlash
+        # _save_detection qaytargan detection = Detection ORM model → .bbox dict
         try:
-            animal_tag_id: Optional[str] = None
             saved_detection, animal_tag_id = await self._save_detection(
-                db=           db,
-                detection=    detection,
-                animal_id=    animal_id,
-                inference_ms= inference_ms,
+                db=          db,
+                detection=   detection,
+                animal_id=   animal_id,
+                inference_ms=inference_ms,
             )
             self.stats.db_writes += 1
         except Exception as e:
@@ -363,18 +316,13 @@ class DetectionPipeline:
         # STEP 4: ADI / Alert tekshiruvi
         if animal_id:
             try:
-                await self._handle_adi_integration(
-                    db=        db,
-                    animal_id= animal_id,
-                )
+                await self._handle_adi_integration(db, animal_id)
                 self.stats.alert_checks += 1
             except Exception as e:
-                # Alert xatosi pipeline ni to'xtatmasin
-                logger.warning(
-                    f"ADI integration failed for animal {animal_id}: {e}"
-                )
+                logger.warning(f"ADI integration failed for animal {animal_id}: {e}")
 
         # STEP 5: WebSocket broadcast
+        # saved_detection = Detection ORM model → .bbox dict ishlatiladi
         if self.ws_manager and saved_detection:
             try:
                 await self._broadcast_detection(
@@ -392,31 +340,31 @@ class DetectionPipeline:
     async def _identify_animal(
         self,
         db:        AsyncSession,
-        detection: YOLODetection,
+        detection: YOLODetection,   # YOLODetection dataclass — .bounding_box
         frame,
     ) -> Optional[int]:
         """
-        Detected jonivorni bazadagi embeddinglar bilan taqqoslash.
+        YOLO detection dan muzzle kesib olib, DB embeddinglar bilan taqqoslash.
 
         Args:
-            db:        DB session
-            detection: YOLO detection (bbox ma'lumotlari bilan)
-            frame:     Asl kadr
-
-        Returns:
-            animal_id yoki None (tanilmasa)
+            detection: YOLODetection — .bounding_box.x/y/width/height
         """
-        # Muzzle regionni kesib olish
+        # YOLODetection.bounding_box — BoundingBox dataclass
+        bb = detection.bounding_box
         muzzle_crop = extract_muzzle_region(
-            frame=frame,
-            bbox=detection.bbox,
+            frame.frame,
+            bbox_x=bb.x,
+            bbox_y=bb.y,
+            bbox_w=bb.width,
+            bbox_h=bb.height,
+            normalized=True,
         )
         if muzzle_crop is None:
+            logger.debug("Muzzle crop failed — skipping identification")
             return None
 
-        # Identifikatsiya servisi
         id_service = IdentificationService(db)
-        result = await id_service.identify(muzzle_crop)
+        result = await id_service.identify_from_crop(muzzle_crop)
 
         return result.animal_id if result.is_identified else None
 
@@ -427,69 +375,61 @@ class DetectionPipeline:
     async def _save_detection(
         self,
         db:           AsyncSession,
-        detection:    YOLODetection,
+        detection:    YOLODetection,   # YOLODetection — .bounding_box
         animal_id:    Optional[int],
         inference_ms: float,
     ) -> tuple[Optional[Detection], Optional[str]]:
         """
         Detection + WeightMeasurement DB ga saqlash.
 
-        PIPELINE:
-            1. Detection → detections jadvali (har doim)
-            2. WeightMeasurement → weight_measurements jadvali
-               FAQAT: animal tanilgan + confidence >= WEIGHT_CONFIDENCE_THRESHOLD
-            3. Animal.last_detected_at yangilash
-
         Returns:
-            (Saqlangan Detection ORM obyekti, animal tag_id yoki None)
+            (Detection ORM instance, animal tag_id yoki None)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
 
-        # Bbox dict va vazn taxmin
+        # YOLODetection.bounding_box → JSON dict sifatida saqlaymiz
+        bb = detection.bounding_box
         bbox_dict = {
-            "x": detection.bbox.x,
-            "y": detection.bbox.y,
-            "w": detection.bbox.w,
-            "h": detection.bbox.h,
+            "x": round(bb.x, 4),
+            "y": round(bb.y, 4),
+            "w": round(bb.width, 4),
+            "h": round(bb.height, 4),
         }
-        w, h = detection.bbox.w, detection.bbox.h
         estimated_weight_kg = round(
-            max(50.0, min(800.0, (w * h * 4000) + 80)), 1
+            max(50.0, min(800.0, (bb.width * bb.height * 4000) + 80)), 1
         )
 
-        # ── 1. Detection yozuvi ──────────────────────────────────
+        # Detection ORM yozuvi
         det_record = Detection(
             animal_id=        animal_id,
             camera_id=        self.camera.camera_id,
             timestamp=        now,
-            confidence=       detection.confidence,
+            confidence=       round(detection.confidence, 4),
             class_id=         detection.class_id,
             class_name=       detection.class_name,
             bbox=             bbox_dict,
             estimated_weight= estimated_weight_kg,
             frame_number=     getattr(detection, "frame_number", None),
-            inference_time_ms=inference_ms,
+            inference_time_ms=round(inference_ms, 1),
         )
         db.add(det_record)
 
-        # ── 2. Animal + WeightMeasurement ───────────────────────
+        # Animal + WeightMeasurement
         animal_tag_id: Optional[str] = None
         if animal_id:
-            stmt   = select(Animal).where(Animal.id == animal_id)
-            result = await db.execute(stmt)
+            result = await db.execute(select(Animal).where(Animal.id == animal_id))
             animal = result.scalar_one_or_none()
 
             if animal:
                 animal.mark_detected(now)
                 animal_tag_id = animal.tag_id
 
-                # Yuqori confidence → WeightMeasurement yaratish
                 if detection.confidence >= WEIGHT_CONFIDENCE_THRESHOLD:
-                    weight_record = WeightMeasurement(
+                    db.add(WeightMeasurement(
                         animal_id=          animal_id,
                         timestamp=          now,
                         estimated_weight_kg=estimated_weight_kg,
-                        confidence_score=   round(detection.confidence, 3),
+                        confidence_score=   round(detection.confidence, 4),
                         camera_id=          self.camera.camera_id,
                         raw_ai_data={
                             "bbox":         bbox_dict,
@@ -498,12 +438,10 @@ class DetectionPipeline:
                             "inference_ms": round(inference_ms, 1),
                             "source":       "yolo_pipeline",
                         },
-                    )
-                    db.add(weight_record)
+                    ))
                     logger.debug(
                         f"WeightMeasurement | animal={animal_tag_id} | "
-                        f"weight={estimated_weight_kg}kg | "
-                        f"conf={detection.confidence:.2f}"
+                        f"weight={estimated_weight_kg}kg"
                     )
 
         await db.commit()
@@ -520,22 +458,9 @@ class DetectionPipeline:
         animal_id: int,
     ) -> None:
         """
-        Deteksiyadan keyin ADI bog'liq tekshiruvlar.
-
-        NIMA QILADI:
-            1. Jonivor "missing" alert ostida bo'lsa — avtomatik yopadi
-               (chunki jonivor ko'rindi — muammo hal bo'ldi)
-            2. Boshqa real vaqt triggerlar kelajakda qo'shiladi
-
-        NIMA QILMAYDI:
-            ADI ni hisoblmaydi — bu kunlik Celery task vazifasi.
-            Har kadrda ADI hisoblash:
-            - CPU intensive (30+ DB query)
-            - Rate: 2 FPS × 24h = 172,800 hisoblash/kun — qabul qilib bo'lmaydi
+        Deteksiyadan keyin missing alertlarni avtomatik yopish.
+        ADI hisoblanmaydi — bu Celery task vazifasi (00:30 UTC).
         """
-        alert_service = AlertService(db)
-
-        # Missing alertlarni tekshirish va yopish
         missing_types = [
             AlertType.ANIMAL_MISSING.value,
             AlertType.ANIMAL_MISSING_LONG.value,
@@ -546,27 +471,20 @@ class DetectionPipeline:
             Alert.alert_type.in_(missing_types),
             Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]),
         )
-        result = await db.execute(stmt)
-        open_missing = result.scalars().all()
+        result      = await db.execute(stmt)
+        open_alerts = result.scalars().all()
 
-        if open_missing:
-            # Jonivor qaytib ko'rindi — missing alertlarni yop
-            for alert in open_missing:
+        if open_alerts:
+            for alert in open_alerts:
                 alert.resolve(
                     resolved_by="pipeline",
-                    note=(
-                        f"Jonivor kamerada aniqlandi: "
-                        f"{self.camera.camera_id}. "
-                        f"Avtomatik yopildi."
-                    ),
+                    note=f"Jonivor kamerada aniqlandi: {self.camera.camera_id}.",
                 )
             await db.commit()
-            self.stats.missing_resolved += len(open_missing)
-
+            self.stats.missing_resolved += len(open_alerts)
             logger.info(
-                f"Missing alerts resolved for animal {animal_id} | "
-                f"camera={self.camera.camera_id} | "
-                f"count={len(open_missing)}"
+                f"Missing alerts resolved | animal_id={animal_id} | "
+                f"count={len(open_alerts)}"
             )
 
     # ================================================================ #
@@ -575,40 +493,38 @@ class DetectionPipeline:
 
     async def _broadcast_detection(
         self,
-        detection:     Detection,
+        detection:     Detection,       # Detection ORM model — .bbox JSON dict
         animal_id:     Optional[int],
         animal_tag_id: Optional[str],
     ) -> None:
         """
         Real vaqt yangilanishni WebSocket orqali yuborish.
 
-        Payload frontend LiveFeed uchun optimallashtirilgan.
-        Frontend LiveWeightUpdate formatiga mos keladi.
+        detection = Detection ORM model → .bbox {"x","y","w","h"} dict
         """
         if not self.ws_manager:
             return
 
-        # Bbox dan og'irlik taxminiy hisoblash (mvp formula)
-        # w * h * konstantа — real model tayyor bo'lgunga qadar
+        # ORM Detection.bbox — JSON dict {"x": 0.5, "y": 0.6, "w": 0.3, "h": 0.4}
         bbox = detection.bbox or {}
-        w = bbox.get("w", 0.1)
-        h = bbox.get("h", 0.2)
+        w    = bbox.get("w", 0.1)
+        h    = bbox.get("h", 0.2)
         estimated_weight_kg = round(
             max(50.0, min(800.0, (w * h * 4000) + 80)), 1
         )
 
         payload = {
-            "type":                 "detection",
-            "timestamp":            detection.timestamp.isoformat(),
-            "camera_id":            detection.camera_id,
-            "animal_id":            animal_id,
-            "animal_tag_id":        animal_tag_id or "UNKNOWN",
-            "class_name":           detection.class_name,
-            "confidence":           round(detection.confidence, 3),
-            "confidence_score":     round(detection.confidence, 3),
-            "estimated_weight_kg":  estimated_weight_kg,
-            "bbox":                 detection.bbox,
-            "identified":           animal_id is not None,
+            "type":                "detection",
+            "timestamp":           detection.timestamp.isoformat(),
+            "camera_id":           detection.camera_id,
+            "animal_id":           animal_id,
+            "animal_tag_id":       animal_tag_id or "UNKNOWN",
+            "class_name":          detection.class_name,
+            "confidence":          round(detection.confidence, 3),
+            "confidence_score":    round(detection.confidence, 3),
+            "estimated_weight_kg": estimated_weight_kg,
+            "bbox":                bbox,
+            "identified":          animal_id is not None,
             "pipeline_stats": {
                 "fps":    self.stats.fps,
                 "frames": self.stats.processed_frames,

@@ -66,6 +66,8 @@ services:
       - ./backend/ml:/app/ml
       - ./backend/tests:/app/tests
       - backend_data:/app/data
+      # Sprint 6: Test video fayllari uchun mount
+      - ./data/videos:/app/data/videos
     depends_on:
       postgres:
         condition: service_healthy

@@ -3,16 +3,23 @@ Detection Pipeline Control API.
 
 Provides endpoints to start/stop/monitor the automated detection pipeline.
 Development mode includes /inject endpoint for testing without real camera.
-"""
 
+SPRINT 6 ADDITION:
+    /start-video — Video fayl orqali pipeline ishga tushirish.
+    Real sigir rasmlari bilan muzzle embedding ro'yxatdan o'tkazilgandan
+    so'ng video pipeline uni tanishi mumkin.
+"""
+import asyncio
 import random
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import logging
+
 
 from app.core.database import get_db
 from app.api.v1.deps import get_current_active_user
@@ -42,7 +49,7 @@ _pipeline: Optional[DetectionPipeline] = None
     "/start",
     summary="Start automated detection pipeline",
     description="""
-    Start the automated detection pipeline.
+    Start the automated detection pipeline with simulated (random) camera.
 
     **Flow:**
     1. Camera captures frames
@@ -57,7 +64,7 @@ async def start_pipeline(
     camera_fps: int = 10,
     skip_frames: int = 5,
 ) -> dict:
-    """Start detection pipeline. Returns pipeline status."""
+    """Start detection pipeline with simulated random camera."""
     global _pipeline
 
     if _pipeline and _pipeline.is_running:
@@ -88,11 +95,11 @@ async def start_pipeline(
             ws_manager=ws_manager,
         )
 
-        # skip_frames ni pipeline ning MIN_FRAME_INTERVAL ga moslashtirish:
-        # skip_frames=5, fps=10 → har 5-chi kadr qayta ishlanadi → 0.5s interval
         if skip_frames > 0 and camera_fps > 0:
             _pipeline.MIN_FRAME_INTERVAL = skip_frames / camera_fps
-        logger.info("✓ Pipeline started via API")
+        logger.info("✓ Pipeline started via API (random mode)")
+
+        asyncio.create_task(_pipeline.start())
 
         return {
             "status": "started",
@@ -100,7 +107,8 @@ async def start_pipeline(
             "config": {
                 "camera_fps": camera_fps,
                 "skip_frames": skip_frames,
-                "note": "YOLO real hayvon rasmlarini talab qiladi. Test uchun /inject ishlatiling.",
+                "mode": "random",
+                "note": "Real test uchun POST /pipeline/start-video ishlatiling.",
             }
         }
 
@@ -109,6 +117,146 @@ async def start_pipeline(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start pipeline: {str(e)}"
+        )
+
+
+@router.post(
+    "/start-video",
+    summary="[Sprint 6] Start pipeline with video file",
+    description="""
+    **Sprint 6 — Real sigir testi uchun.**
+
+    Video fayl orqali detection pipeline ishga tushiradi.
+    Video Docker container ichida `/app/data/videos/` papkasida bo'lishi kerak.
+
+    **Oldindan bajarish kerak:**
+    1. Sigirni tizimga qo'shish: `POST /api/v1/animals/`
+    2. Muzzle embedding ro'yxatdan o'tkazish: `POST /api/v1/registration/{animal_id}/register`
+    3. Video faylni loyiha papkasiga ko'chirish: `~/taurus-vision/data/videos/`
+
+    **Parametrlar:**
+    - `video_filename`: `data/videos/` papkasidagi fayl nomi (masalan: `sigir_test.mp4`)
+    - `camera_fps`: Simulyatsiya FPS (10 tavsiya etiladi)
+    - `loop`: True = video tugagach boshidan qayta ishlaydi
+
+    **Natija:** YOLO sigirni aniqlaganda, muzzle embedding taqqoslanadi.
+    Agar cosine similarity >= 0.80 bo'lsa — animal_id biriktiriladi.
+    """,
+    tags=["pipeline", "sprint6"],
+)
+async def start_video_pipeline(
+    video_filename: str = "sigir_test.mp4",
+    camera_fps: int = 10,
+    skip_frames: int = 3,
+) -> dict:
+    """
+    Start detection pipeline using a video file.
+
+    Designed for Sprint 6 real-world testing with actual cattle footage.
+
+    Args:
+        video_filename: Video file name in /app/data/videos/ directory
+        camera_fps:     Frames per second for processing (10 recommended for CPU)
+        skip_frames:    Process every Nth frame (3 = good balance)
+
+    Returns:
+        Pipeline start confirmation with video info
+
+    Raises:
+        HTTPException 400: Pipeline already running
+        HTTPException 404: Video file not found in container
+        HTTPException 500: Failed to initialize pipeline
+    """
+    global _pipeline
+
+    if _pipeline and _pipeline.is_running:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Pipeline allaqachon ishlayapti. "
+                "Avval POST /pipeline/stop orqali to'xtating."
+            )
+        )
+
+    # Video faylni tekshirish — container ichidagi manzil
+    video_path = Path(f"/app/data/videos/{video_filename}")
+
+    if not video_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Video fayl topilmadi: {video_path}\n"
+                f"Mahalliy kompyuterda: ~/taurus-vision/data/videos/{video_filename}\n"
+                f"Tekshiring: ls -lh ~/taurus-vision/data/videos/"
+            )
+        )
+
+    # Fayl hajmini log ga yozamiz
+    file_size_mb = video_path.stat().st_size / (1024 * 1024)
+    logger.info(
+        f"[Sprint6] Video fayl topildi: {video_path} ({file_size_mb:.1f} MB)"
+    )
+
+    try:
+        yolo_service = get_yolo_service()
+
+        try:
+            ws_manager = get_ws_manager()
+        except RuntimeError:
+            ws_manager = None
+            logger.warning("WebSocket manager not available — WebSocket broadcast o'chirilgan")
+
+        # SimulatedCameraService video rejimida
+        # Bu klass allaqachon video fayldan kadrlarni o'qiy oladi
+        camera = SimulatedCameraService(
+            camera_id="VIDEO-TEST-001",
+            fps=camera_fps,
+            resolution=(1280, 720),  # HD — muzzle recognition uchun yaxshiroq
+            mode="video",
+            video_path=str(video_path),
+        )
+
+        _pipeline = DetectionPipeline(
+            camera_service=camera,
+            yolo_service=yolo_service,
+            ws_manager=ws_manager,
+        )
+
+        # skip_frames moslashtirish — har 3-chi kadrni qayta ishlash
+        if skip_frames > 0 and camera_fps > 0:
+            _pipeline.MIN_FRAME_INTERVAL = skip_frames / camera_fps
+
+        logger.info(
+            f"[Sprint6] ✓ Video pipeline started | "
+            f"file={video_filename} | fps={camera_fps} | skip={skip_frames}"
+        )
+        asyncio.create_task(_pipeline.start())
+
+        return {
+            "status": "started",
+            "message": f"Video pipeline muvaffaqiyatli ishga tushdi: {video_filename}",
+            "config": {
+                "video_file": video_filename,
+                "video_path_container": str(video_path),
+                "file_size_mb": round(file_size_mb, 1),
+                "camera_fps": camera_fps,
+                "skip_frames": skip_frames,
+                "resolution": "1280x720",
+                "mode": "video",
+            },
+            "next_steps": [
+                "Pipeline holatini kuzating: GET /pipeline/status",
+                "WebSocket ulanib deteksiyalarni real vaqtda ko'ring: ws://localhost:8000/api/v1/live/ws",
+                "Deteksiyalar ro'yxati: GET /api/v1/detections/",
+                "To'xtatish: POST /pipeline/stop",
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"[Sprint6] Video pipeline ishga tushirishda xato: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Video pipeline ishga tushirib bo'lmadi: {str(e)}"
         )
 
 

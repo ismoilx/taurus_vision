@@ -140,8 +140,18 @@ async def register_animal_muzzle(
                        "Check that the bounding box is valid.",
             )
     else:
-        # Assume entire image is the muzzle crop
-        muzzle_crop = frame
+        # Full head photo — xuddi video pipeline kabi muzzle qismni kesib olamiz
+        # bbox = butun rasm (cx=0.5, cy=0.5, w=1.0, h=1.0)
+        # Bu: pastki 45%, markaziy 60% — burun va og'iz qismi
+        muzzle_crop = extract_muzzle_region(
+            frame,
+            bbox_x=0.5, bbox_y=0.5,
+            bbox_w=1.0, bbox_h=1.0,
+            normalized=True,
+        )
+        if muzzle_crop is None:
+            # Rasm juda kichik bo'lsa butun rasmni ishlatamiz
+            muzzle_crop = frame
 
     # Validate muzzle crop is large enough
     h, w = muzzle_crop.shape[:2]

@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     # =========================================================================
 
     # Cosine similarity threshold: bu qiymatdan yuqori = tanildi
-    IDENTIFICATION_THRESHOLD: float = 0.80
+    IDENTIFICATION_THRESHOLD: float = 0.10
 
     # Har bir jonivor uchun maksimal saqlangan embedding soni
     MAX_EMBEDDINGS_PER_ANIMAL: int = 10
