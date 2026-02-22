@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.exceptions import EntityNotFoundError
 from app.models.animal import Animal
 from app.models.animal_embedding import AnimalEmbedding
@@ -40,7 +41,7 @@ from app.utils.image_utils import decode_frame_bytes, extract_muzzle_region
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/identification", tags=["Identification"])
+router = APIRouter(prefix="/identification", tags=["Identification"], dependencies=[Depends(get_current_active_user)])
 
 # Max upload size: 10MB
 MAX_IMAGE_SIZE = 10 * 1024 * 1024

@@ -19,6 +19,7 @@ from sqlalchemy import select, func, desc
 import logging
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.models.weight_measurement import WeightMeasurement
 from app.models.animal import Animal
 from app.services.weight_measurement import WeightMeasurementService
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/weights",
     tags=["weights"],
+    dependencies=[Depends(get_current_active_user)],
 )
 
 

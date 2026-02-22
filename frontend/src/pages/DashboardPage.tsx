@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import config from '../config';
+import { apiFetch } from '../utils/apiFetch';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,18 +50,6 @@ interface LiveWeightUpdate {
 // ---------------------------------------------------------------------------
 
 const API = config.apiUrl;
-
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
 
 // ---------------------------------------------------------------------------
 // Components

@@ -66,3 +66,8 @@ aiosqlite                 # SQLite async driver — test DB uchun
 black==23.11.0
 flake8==6.1.0
 mypy==1.7.1
+# Authentication
+PyJWT>=2.8.0            # JWT token creation and verification
+# passlib olib tashlandi — bcrypt togridan ishlatiladi
+bcrypt>=4.1.0           # Explicit bcrypt dependency
+email-validator>=2.1.0  # Pydantic EmailStr uchun

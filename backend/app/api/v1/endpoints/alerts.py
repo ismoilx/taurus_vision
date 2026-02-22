@@ -20,6 +20,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.exceptions import EntityNotFoundError
 from app.models.alert import Alert, AlertStatus, AlertSeverity
 from app.models.animal import Animal
@@ -35,7 +36,7 @@ from app.services.alert_service import AlertService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/alerts", tags=["Alerts"])
+router = APIRouter(prefix="/alerts", tags=["Alerts"], dependencies=[Depends(get_current_active_user)])
 
 
 # ------------------------------------------------------------------ #

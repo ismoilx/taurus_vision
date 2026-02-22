@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from io import BytesIO
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.logging_config import get_logger
 from app.services.export_service import ExportService
 from app.schemas.export import (
@@ -27,7 +28,7 @@ from app.schemas.export import (
 logger = get_logger(__name__)
 
 # Create router
-router = APIRouter(prefix="/export", tags=["Export"])
+router = APIRouter(prefix="/export", tags=["Export"], dependencies=[Depends(get_current_active_user)])
 
 # Initialize service
 export_service = ExportService()

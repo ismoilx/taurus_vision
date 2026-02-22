@@ -14,6 +14,7 @@ import {
   type LiveWeightUpdate,
 } from '../shared/types';
 import config from '../config';
+import { apiFetch } from '../utils/apiFetch';
 
 // ---------------------------------------------------------------------------
 // Main Component
@@ -23,7 +24,7 @@ import config from '../config';
 export default function LiveFeedPage() {
   // Endi "lastMessage" ni chaqirib olamiz
   const { status, lastMessage, connect, disconnect } = useWebSocket(
-    config.wsUrl + '/api/v1/live/ws'
+    (() => { const t = localStorage.getItem('tv_access_token'); return config.wsUrl + '/api/v1/live/ws' + (t ? `?token=${t}` : ''); })()
   );
 
   const [pipelineRunning, setPipelineRunning] = useState(false);
@@ -71,8 +72,7 @@ export default function LiveFeedPage() {
 
   async function checkPipeline() {
     try {
-      const res = await fetch(`${config.apiUrl}/api/v1/pipeline/status`);
-      const data = await res.json();
+      const data = await apiFetch<{ running: boolean }>('/api/v1/pipeline/status');
       setPipelineRunning(data.running);
     } catch (err) {
       console.error('Pipeline check error:', err);

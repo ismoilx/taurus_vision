@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from io import BytesIO
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.logging_config import get_logger
 from app.services.report_service import ReportService
 from app.schemas.report import (
@@ -27,7 +28,7 @@ from app.schemas.report import (
 logger = get_logger(__name__)
 
 # Create router
-router = APIRouter(prefix="/reports", tags=["Reports"])
+router = APIRouter(prefix="/reports", tags=["Reports"], dependencies=[Depends(get_current_active_user)])
 
 # Initialize service
 report_service = ReportService()

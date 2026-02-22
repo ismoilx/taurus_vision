@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.logging_config import get_logger
 from app.services.analytics_service import AnalyticsService
 from app.schemas.analytics import (
@@ -28,7 +29,7 @@ from app.schemas.analytics import (
 logger = get_logger(__name__)
 
 # Create router
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"], dependencies=[Depends(get_current_active_user)])
 
 # Initialize service (singleton pattern would be better in production)
 analytics_service = AnalyticsService()

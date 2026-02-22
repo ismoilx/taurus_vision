@@ -422,3 +422,100 @@ class PerformanceMonitor:
 def performance_monitor() -> PerformanceMonitor:
     """Har test uchun yangi PerformanceMonitor instance."""
     return PerformanceMonitor()
+
+# ── Auth Fixtures (Sprint 5 — Authentication) ─────────────────────────────────
+
+@pytest.fixture
+async def admin_user(db):
+    """Test uchun ADMIN foydalanuvchi."""
+    from app.core.security import hash_password
+    from app.models.user import User, UserRole
+
+    user = User(
+        email="testadmin@taurus.uz",
+        username="testadmin",
+        full_name="Test Administrator",
+        hashed_password=hash_password("AdminTest1"),
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@pytest.fixture
+async def manager_user(db):
+    """Test uchun MANAGER foydalanuvchi."""
+    from app.core.security import hash_password
+    from app.models.user import User, UserRole
+
+    user = User(
+        email="testmanager@taurus.uz",
+        username="testmanager",
+        full_name="Test Manager",
+        hashed_password=hash_password("ManagerTest1"),
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@pytest.fixture
+async def viewer_user(db):
+    """Test uchun VIEWER foydalanuvchi."""
+    from app.core.security import hash_password
+    from app.models.user import User, UserRole
+
+    user = User(
+        email="testviewer@taurus.uz",
+        username="testviewer",
+        full_name="Test Viewer",
+        hashed_password=hash_password("ViewerTest1"),
+        role=UserRole.VIEWER,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@pytest.fixture
+async def admin_token(client, admin_user) -> str:
+    """ADMIN foydalanuvchi uchun JWT access token."""
+    r = await client.post("/api/v1/auth/login", json={
+        "email": "testadmin@taurus.uz",
+        "password": "AdminTest1",
+    })
+    return r.json()["access_token"]
+
+
+@pytest.fixture
+async def manager_token(client, manager_user) -> str:
+    """MANAGER foydalanuvchi uchun JWT access token."""
+    r = await client.post("/api/v1/auth/login", json={
+        "email": "testmanager@taurus.uz",
+        "password": "ManagerTest1",
+    })
+    return r.json()["access_token"]
+
+
+@pytest.fixture
+async def viewer_token(client, viewer_user) -> str:
+    """VIEWER foydalanuvchi uchun JWT access token."""
+    r = await client.post("/api/v1/auth/login", json={
+        "email": "testviewer@taurus.uz",
+        "password": "ViewerTest1",
+    })
+    return r.json()["access_token"]
+
+
+@pytest.fixture
+def auth_headers(admin_token: str) -> dict:
+    """Admin token bilan Authorization header."""
+    return {"Authorization": f"Bearer {admin_token}"}

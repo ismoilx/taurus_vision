@@ -8,7 +8,8 @@ Provides REST API for:
 - Statistics retrieval
 """
 
-from fastapi import APIRouter, HTTPException, status
+from app.api.v1.deps import get_current_active_user
+from fastapi import Depends,  APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 import logging
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Barcha endpointlar bitta qatorda "Cameras" papkasiga tushishi uchun
 # shu yerni o'zgartirdik:
-router = APIRouter(tags=["Cameras"])
+router = APIRouter(tags=["Cameras"], dependencies=[Depends(get_current_active_user)])
 
 
 # Pydantic schemas

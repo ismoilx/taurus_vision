@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.core.exceptions import EntityNotFoundError
 from app.models.animal import AnimalStatus
 from app.repositories.adi_repository import ADIRepository
@@ -39,7 +40,7 @@ from app.services.alert_service import AlertService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/adi", tags=["ADI"])
+router = APIRouter(prefix="/adi", tags=["ADI"], dependencies=[Depends(get_current_active_user)])
 
 
 # ------------------------------------------------------------------ #

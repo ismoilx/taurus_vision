@@ -4,7 +4,7 @@
  * View all animals with filtering and CRUD operations
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -16,8 +16,9 @@ import {
   Edit2,
   Trash2,
   Eye,
-} from 'lucide-react';
+  Upload, Camera } from 'lucide-react';
 import config from '../config';
+import { apiFetch } from '../utils/apiFetch';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,18 +49,6 @@ interface AnimalListResponse {
 // ---------------------------------------------------------------------------
 
 const API = config.apiUrl;
-
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
 
 // ---------------------------------------------------------------------------
 // Components
@@ -95,6 +84,7 @@ interface AnimalFormData {
   acquisition_date: string;
   breed: string;
   notes: string;
+  photo?: File | null;
 }
 
 function AnimalModal({
@@ -117,10 +107,13 @@ function AnimalModal({
       : new Date().toISOString().split('T')[0],
     breed: initial?.breed ?? '',
     notes: initial?.notes ?? '',
+    photo: null,
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<string>('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const set =
     (key: keyof AnimalFormData) =>
@@ -150,10 +143,23 @@ function AnimalModal({
           body: JSON.stringify(body),
         });
       } else {
-        await apiFetch('/api/v1/animals/', {
+        const created = await apiFetch<{ id: number }>('/api/v1/animals/', {
           method: 'POST',
           body: JSON.stringify(body),
         });
+        // Rasm yuklash (ixtiyoriy)
+        if (form.photo && created?.id) {
+          try {
+            const fd = new FormData();
+            fd.append('photo', form.photo);
+            const token = localStorage.getItem('tv_access_token');
+            await fetch(`${config.apiUrl}/api/v1/identification/register/${created.id}`, {
+              method: 'POST',
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              body: fd,
+            });
+          } catch { /* rasm yuklanmasa ham jonivor saqlanadi */ }
+        }
       }
       onSaved();
       onClose();
@@ -258,6 +264,47 @@ function AnimalModal({
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+
+          {/* Rasm yuklash */}
+          {!isEdit && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Identifikatsiya rasmi (ixtiyoriy)
+              </label>
+              <div
+                onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="preview"
+                    className="max-h-32 mx-auto rounded-lg object-cover" />
+                ) : (
+                  <div className="text-gray-400">
+                    <Upload className="w-8 h-8 mx-auto mb-2" />
+                    <p className="text-sm">Rasm yuklash uchun bosing</p>
+                    <p className="text-xs mt-1">JPG, PNG</p>
+                  </div>
+                )}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    setForm(p => ({ ...p, photo: f }));
+                    const r = new FileReader();
+                    r.onload = ev => setPhotoPreview(ev.target?.result as string);
+                    r.readAsDataURL(f);
+                  }}
+                />
+              </div>
+              {form.photo && (
+                <p className="text-xs text-green-600 mt-1">✅ {form.photo.name}</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-6 border-t border-gray-200 flex gap-3">
@@ -292,6 +339,8 @@ export default function AnimalsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<string>('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');

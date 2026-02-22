@@ -15,6 +15,7 @@ from sqlalchemy import select
 import logging
 
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user
 from app.models.animal import Animal
 from app.models.detection import Detection
 from app.models.weight_measurement import WeightMeasurement
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/pipeline",
     tags=["pipeline"],
+    dependencies=[Depends(get_current_active_user)],
 )
 
 # Global pipeline instance

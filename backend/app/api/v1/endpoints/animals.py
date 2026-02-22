@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import Query
 from app.models.animal import AnimalSpecies, AnimalStatus
 from app.core.database import get_db
+from app.api.v1.deps import get_current_active_user, require_manager
 from app.services.animal import AnimalService
 from app.schemas.animal import (
     AnimalCreate,
@@ -28,6 +29,7 @@ router = APIRouter(
     redirect_slashes=False,
     prefix="/animals",
     tags=["animals"],
+    dependencies=[Depends(get_current_active_user)],
 )
 
 

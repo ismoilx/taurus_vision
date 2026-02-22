@@ -20,12 +20,14 @@ from app.schemas.detection import (
     ModelInfoResponse,
 )
 from app.config import settings
+from app.api.v1.deps import get_current_active_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/detection",
     tags=["detection"],
+    dependencies=[Depends(get_current_active_user)],
 )
 
 
