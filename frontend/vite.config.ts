@@ -12,8 +12,9 @@ export default defineConfig({
     
     // MUAMMONI HAL QILUVCHI ASOSIY QISM:
     allowedHosts: [
-      'zxzx.uz',     // Sizning domeningiz
-      '.zxzx.uz'    // Barcha subdomenlar (masalan, api.zxzx.uz) uchun
+      'zxzx.uz',       // Sizning asosiy domeningiz
+      '.zxzx.uz',      // Barcha subdomenlar uchun
+      'api.zxzx.uz'    // Backend uchun maxsus ruxsat
     ],
     
     watch: {
