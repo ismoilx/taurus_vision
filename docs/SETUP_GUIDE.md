@@ -21,175 +21,117 @@ cd taurus-vision
 
 ## 2. YOLO modelini tayyorlash
 
-Model fayli Git LFS orqali bo'lingan holda saqlanadi:
-
 ```bash
-# Qismlarni birlashtirish
 cat backend/ml/models/yolo11n.pt.1 backend/ml/models/yolo11n.pt.2 > backend/ml/models/yolo11n.pt
-
-# To'g'ri birlashtiriladimi tekshirish
-ls -lh backend/ml/models/yolo11n.pt
-# Natija: ~6MB bo'lishi kerak
+ls -lh backend/ml/models/yolo11n.pt  # ~6MB bo'lishi kerak
 ```
 
 ---
 
-## 3. Environment sozlash (ixtiyoriy)
+## 3. Ishga tushirish
 
 ```bash
-cp backend/.env.example backend/.env
-```
-
-`.env` faylida asosiy sozlamalar avtomatik Docker Compose orqali uzatiladi. O'zgartirish kerak emas — standart sozlamalar ishlaydi.
-
----
-
-## 4. Ishga tushirish
-
-```bash
-# Barcha servicelarn ishga tushirish
 docker compose up -d
-
-# Loglarni kuzatish
 docker compose logs -f
-
-# Faqat backend loglari
-docker logs taurus-backend -f
 ```
-
-Birinchi marta ishga tushirganda Docker:
-1. Image larni build qiladi (~5-10 daqiqa)
-2. PostgreSQL ni ishga tushiradi
-3. Migration larni avtomatik bajaradi
-4. Backend va frontendni ishga tushiradi
 
 ---
 
-## 5. Tekshirish
+## 4. Health tekshirish
 
 ```bash
-# Barcha service lar ishlayaptimi
 docker compose ps
-
-# Health check
 curl http://localhost:8000/health
 ```
 
-**Muvaffaqiyatli natija:**
-```json
-{
-  "status": "healthy",
-  "database": "healthy",
-  "ai_model": "healthy"
-}
+---
+
+## 5. ⚠️ MAJBURIY: Birinchi Admin Yaratish
+
+Tizimga kirish uchun avval admin yaratilishi shart:
+
+```bash
+# Tavsiya etilgan usul — o'z ma'lumotlaringiz bilan:
+docker exec taurus-backend python scripts/create_admin.py \
+    --email admin@sizning-ferma.uz \
+    --username admin \
+    --password "KuchliParol2024!" \
+    --fullname "Ferma Boshqaruvchisi"
+
+# Yoki default parametrlar bilan (keyin parolni o'zgartiring!):
+docker exec taurus-backend python scripts/create_admin.py
 ```
+
+**Default login (agar parametrsiz):**
+```
+Email:    admin@taurus.local
+Username: admin
+Parol:    Admin1234!
+```
+
+> ⚠️ Production muhitida default parolni albatta o'zgartiring!
 
 ---
 
-## 6. Birinchi jonivor qo'shish
+## 6. Tizimga kirish
 
-**Usul 1 — Frontend orqali:**
-1. http://localhost:5173 ga oching
-2. "Jonivorlar" tabiga o'ting
-3. "+ Qo'shish" tugmasini bosing
-4. Ma'lumotlarni to'ldiring
+- **Frontend:** http://localhost:5173
+- **Swagger UI:** http://localhost:8000/docs
 
-**Usul 2 — API orqali:**
+---
+
+## 7. API orqali ishlash (token kerak)
+
 ```bash
+# 1. Token olish
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "Admin1234!"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
+# 2. Jonivor yaratish
 curl -X POST http://localhost:8000/api/v1/animals/ \
   -H "Content-Type: application/json" \
-  -d '{
-    "tag_id": "JNV-001",
-    "species": "cattle",
-    "gender": "male",
-    "acquisition_date": "2026-01-01T00:00:00"
-  }'
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"tag_id": "JNV-001", "species": "cattle", "gender": "male", "acquisition_date": "2026-01-01T00:00:00"}'
+
+# 3. Pipeline ishga tushirish
+curl -X POST http://localhost:8000/api/v1/pipeline/start \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
-## 7. Pipeline ishga tushirish
+## Foydalanuvchi rollari
 
-**Frontend orqali:** Header da "Start" tugmasini bosing.
-
-**API orqali:**
-```bash
-curl -X POST http://localhost:8000/api/v1/pipeline/start
-```
-
-Pipeline ishlayotganida:
-- Video kadrlar YOLO ga uzatiladi
-- Jonivorlar aniqlanadi
-- Vazn hisoblanadi
-- WebSocket orqali frontendga yuboriladi
-
----
-
-## Muammolar va yechimlar
-
-### Docker build juda uzoq
-```bash
-# Cache dan foydalanish
-docker compose build --parallel
-```
-
-### Port band
-```bash
-# Qaysi dastur portni ishlatayapti
-sudo lsof -i :8000
-sudo lsof -i :5173
-sudo lsof -i :5432
-```
-
-### Migration xatosi
-```bash
-docker exec taurus-backend alembic upgrade head
-docker restart taurus-backend
-```
-
-### YOLO model yuklanmadi
-```bash
-# Model fayli to'g'ri birlashtiriladimi
-docker exec taurus-backend ls -lh /app/ml/models/
-
-# Health tekshirish
-curl http://localhost:8000/health
-```
-
-### Ma'lumotlar bazasini tozalash (qaytadan boshlash)
-```bash
-docker compose down -v
-docker compose up -d
-```
+| Rol | Huquqlar |
+|-----|---------|
+| **ADMIN** | To'liq huquq |
+| **MANAGER** | Boshqarish (jonivorlar, alertlar) |
+| **VIEWER** | Faqat ko'rish |
 
 ---
 
 ## Foydali buyruqlar
 
 ```bash
-# Barcha loglar
-docker compose logs -f
-
-# Backend restart
-docker restart taurus-backend
-
-# DB ga kirish
-docker exec -it taurus-postgres psql -U taurus -d taurus_vision
-
-# Migration bajarish
-docker exec taurus-backend alembic upgrade head
-
-# Container lari to'xtatish
-docker compose stop
-
-# To'liq tozalash (volume lar ham)
-docker compose down -v
+docker compose logs -f                          # Barcha loglar
+docker restart taurus-backend                  # Backend restart
+docker exec -it taurus-postgres psql -U taurus -d taurus_vision  # DB
+docker exec taurus-backend alembic upgrade head  # Migration
+docker exec taurus-backend python scripts/create_admin.py        # Admin yaratish
+docker exec taurus-backend python scripts/simulate_adi_data.py   # Test data
+docker compose down -v                          # To'liq tozalash
 ```
 
 ---
 
-## Keyingi qadamlar
+## Muammolar
 
-- [API hujjatlari](API_DOCUMENTATION.md)
-- [Arxitektura](ARCHITECTURE.md)
-- Swagger UI: http://localhost:8000/docs
+| Muammo | Yechim |
+|--------|--------|
+| 401 Unauthorized | `docker exec taurus-backend python scripts/create_admin.py` |
+| Migration xatosi | `docker exec taurus-backend alembic upgrade head` |
+| YOLO yuklanmadi | `docker exec taurus-backend ls -lh /app/ml/models/` |
+| Port band | `sudo lsof -i :8000` |
+| Qaytadan boshlash | `docker compose down -v && docker compose up -d` (keyin admin yarat!) |

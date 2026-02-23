@@ -226,7 +226,7 @@ export default function LoginPage() {
     setError(''); setLoading(true);
     try {
       await login(identifier.trim(), password);
-      navigate('/dashboard', { replace: true });
+      navigate('/', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Email yoki parol xato.');
     } finally {

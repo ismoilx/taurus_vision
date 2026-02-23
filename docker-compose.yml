@@ -102,6 +102,7 @@ services:
       - ./backend/ml:/app/ml
       - ./workers:/app/workers
       - backend_data:/app/data
+      - ./data/videos:/app/data/videos
     depends_on:
       postgres:
         condition: service_healthy

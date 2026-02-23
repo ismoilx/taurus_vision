@@ -111,7 +111,9 @@ class Settings(BaseSettings):
     # =========================================================================
 
     # Cosine similarity threshold: bu qiymatdan yuqori = tanildi
-    IDENTIFICATION_THRESHOLD: float = 0.10
+    # 0.80 = MobileNetV2 muzzle recognition uchun optimal qiymat (README ga mos)
+    # ESLATMA: 0.10 xato edi — deyarli har qanday jonivor false match berardi
+    IDENTIFICATION_THRESHOLD: float = 0.80
 
     # Har bir jonivor uchun maksimal saqlangan embedding soni
     MAX_EMBEDDINGS_PER_ANIMAL: int = 10

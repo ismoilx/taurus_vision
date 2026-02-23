@@ -1,339 +1,420 @@
 /**
- * Dashboard Page
- * 
- * Main overview with statistics and recent activity
+ * DashboardPage — Sprint 7-8
+ *
+ * Yangiliklar:
+ *   - Vazn trend grafigi (LineChart) — /analytics/trends/weight
+ *   - Soatlik aniqlash grafigi (BarChart) — /analytics/patterns/detection
+ *   - Sog'liq metrikalari — /analytics/health/metrics
  */
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Activity,
-  Scale,
-  Camera,
-  Users,
-  TrendingUp,
-  Play,
-  Square,
-  AlertCircle,
+  LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Legend,
+} from 'recharts';
+import {
+  Activity, Scale, Camera, Users,
+  TrendingUp, Play, Square, AlertCircle,
+  Heart, Zap,
 } from 'lucide-react';
-import config from '../config';
 import { apiFetch } from '../utils/apiFetch';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// =============================================================================
+// TYPES
+// =============================================================================
 
 interface PipelineStatus {
   status: 'not_initialized' | 'running' | 'stopped';
   running: boolean;
-  stats?: {
-    total_frames: number;
-    processed_frames: number;
-    detections: number;
-    measurements_created: number;
-    errors: number;
-    fps?: number;
-  };
+  stats?: { total_frames: number; processed_frames: number; detections: number; measurements_created: number; errors: number; fps?: number };
 }
 
-interface LiveWeightUpdate {
-  animal_id: number;
-  animal_tag_id: string;
-  estimated_weight_kg: number;
-  confidence_score: number;
-  camera_id: string;
-  timestamp: string;
+interface OverviewStats {
+  animals: { total: number; active: number };
+  detections: { today: number; week: number; month: number; total: number };
+  weight: { average_kg: number | null; change_percentage_7d: number | null };
 }
 
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
+interface WeightTrendPoint { date: string; average_weight: number; measurement_count: number }
+interface HourlyDetection  { hour: string; detections: number }
+interface HealthMetrics    { risk_score: number; alert_summary: { total: number; critical: number; warning: number } }
 
-const API = config.apiUrl;
+// =============================================================================
+// STAT CARD
+// =============================================================================
 
-// ---------------------------------------------------------------------------
-// Components
-// ---------------------------------------------------------------------------
-
-function StatCard({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  accent,
-  onClick,
-}: {
-  label: string;
-  value: string | number;
-  sub: string;
-  icon: any;
-  accent: string;
-  onClick?: () => void;
+function StatCard({ label, value, sub, icon: Icon, color, onClick }: {
+  label: string; value: string | number; sub: string;
+  icon: React.ElementType; color: string; onClick?: () => void;
 }) {
   return (
-    <div
-      onClick={onClick}
-      className={`bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all ${
-        onClick ? 'cursor-pointer' : ''
-      }`}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className={`p-3 ${accent} rounded-lg`}>
-          <Icon className="w-6 h-6 text-white" />
+    <div onClick={onClick}
+      className={`bg-white rounded-2xl border border-gray-200 p-5 shadow-sm transition-all hover:shadow-md ${onClick ? 'cursor-pointer hover:-translate-y-0.5' : ''}`}>
+      <div className="flex items-center justify-between mb-4">
+        <div className={`p-2.5 rounded-xl ${color}`}>
+          <Icon className="w-5 h-5 text-white" />
         </div>
       </div>
-      <div className="text-3xl font-bold text-gray-900 mb-1">{value}</div>
-      <div className="text-sm text-gray-600 font-medium mb-0.5">{label}</div>
+      <div className="text-3xl font-bold text-gray-900 tracking-tight mb-1">{value}</div>
+      <div className="text-sm font-medium text-gray-700 mb-0.5">{label}</div>
       <div className="text-xs text-gray-400">{sub}</div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Component
-// ---------------------------------------------------------------------------
+// =============================================================================
+// CUSTOM TOOLTIP
+// =============================================================================
+
+function WeightTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 shadow-lg text-xs">
+      <p className="font-semibold text-gray-700 mb-1">{label}</p>
+      <p className="text-blue-600 font-medium">{payload[0]?.value?.toFixed(1)} kg</p>
+      <p className="text-gray-400">{payload[0]?.payload?.measurement_count ?? 0} ta o'lchov</p>
+    </div>
+  );
+}
+
+function DetectionTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 shadow-lg text-xs">
+      <p className="font-semibold text-gray-700 mb-1">{label}</p>
+      <p className="text-indigo-600 font-medium">{payload[0]?.value} ta aniqlash</p>
+    </div>
+  );
+}
+
+// =============================================================================
+// RISK BADGE
+// =============================================================================
+
+function RiskBadge({ score }: { score: number }) {
+  const cfg =
+    score <= 20 ? { label: 'Xavf past', bg: 'bg-emerald-50', text: 'text-emerald-700', bar: 'bg-emerald-500' } :
+    score <= 50 ? { label: "O'rta xavf", bg: 'bg-amber-50', text: 'text-amber-700', bar: 'bg-amber-500' } :
+    score <= 80 ? { label: 'Yuqori xavf', bg: 'bg-orange-50', text: 'text-orange-700', bar: 'bg-orange-500' } :
+                  { label: 'Kritik', bg: 'bg-red-50', text: 'text-red-700', bar: 'bg-red-500' };
+  return (
+    <div className={`rounded-xl p-3 ${cfg.bg}`}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className={`text-xs font-semibold ${cfg.text}`}>{cfg.label}</span>
+        <span className={`text-sm font-bold ${cfg.text}`}>{score}/100</span>
+      </div>
+      <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${cfg.bar} transition-all`} style={{ width: `${score}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
 
 export default function DashboardPage() {
   const navigate = useNavigate();
 
-  const [pipeline, setPipeline] = useState<PipelineStatus>({
-    status: 'not_initialized',
-    running: false,
-  });
-  const [measurements, setMeasurements] = useState<LiveWeightUpdate[]>([]);
-  const [stats, setStats] = useState({
-    totalAnimals: 0,
-    totalDetections: 0,
-    avgWeight: '—',
-  });
+  const [pipeline, setPipeline]       = useState<PipelineStatus>({ status: 'not_initialized', running: false });
+  const [overview, setOverview]       = useState<OverviewStats | null>(null);
+  const [weightTrend, setWeightTrend] = useState<WeightTrendPoint[]>([]);
+  const [hourlyData, setHourlyData]   = useState<HourlyDetection[]>([]);
+  const [health, setHealth]           = useState<HealthMetrics | null>(null);
+  const [trendDays, setTrendDays]     = useState(30);
+  const [loadingCharts, setLoadingCharts] = useState(false);
 
   // ---------------------------------------------------------------------------
-  // Load Data
+  // Load
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    loadPipelineStatus();
-    loadStats();
-    loadRecentMeasurements();
-
-    const interval = setInterval(() => {
-      loadPipelineStatus();
-      if (pipeline.running) {
-        loadRecentMeasurements();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
+    loadAll();
+    const id = setInterval(loadPipeline, 5000);
+    return () => clearInterval(id);
   }, []);
 
-  async function loadPipelineStatus() {
-    try {
-      const status = await apiFetch<PipelineStatus>('/api/v1/pipeline/status');
-      setPipeline(status);
-    } catch (err) {
-      console.error('Pipeline status error:', err);
-    }
+  useEffect(() => { loadCharts(); }, [trendDays]);
+
+  async function loadAll() {
+    await Promise.all([loadPipeline(), loadOverview(), loadCharts(), loadHealth()]);
   }
 
-  async function loadStats() {
+  async function loadPipeline() {
     try {
-      const [animalsRes, analyticsRes] = await Promise.all([
-        apiFetch<{ total: number }>('/api/v1/animals/?limit=1'),
-        apiFetch<any>('/api/v1/analytics/overview'),
-      ]);
-
-      setStats({
-        totalAnimals: animalsRes.total || 0,
-        totalDetections: analyticsRes?.detections?.total ?? analyticsRes?.total_detections ?? 0,
-        avgWeight:
-          analyticsRes?.weight?.average_kg > 0
-            ? analyticsRes.weight.average_kg.toFixed(1)
-            : analyticsRes?.average_weight > 0
-            ? analyticsRes.average_weight.toFixed(1)
-            : '—',
-      });
-    } catch (err) {
-      console.error('Stats error:', err);
-    }
+      const s = await apiFetch<PipelineStatus>('/api/v1/pipeline/status');
+      setPipeline(s);
+    } catch { /* silent */ }
   }
 
-  async function loadRecentMeasurements() {
+  async function loadOverview() {
     try {
-      const data = await apiFetch<any>('/api/v1/weights/recent?limit=8&min_confidence=0.0');
-      // WeightMeasurementListResponse: { items: [...], total, skip, limit }
-      const items = Array.isArray(data) ? data : (data?.items ?? []);
-      setMeasurements(
-        items.map((m: any) => ({
-          animal_id: m.animal_id,
-          animal_tag_id: m.animal_tag_id ?? `#${m.animal_id}`,
-          estimated_weight_kg: m.estimated_weight_kg,
-          confidence_score: m.confidence_score,
-          camera_id: m.camera_id,
-          timestamp: m.timestamp,
+      const data = await apiFetch<any>('/api/v1/analytics/overview');
+      setOverview(data);
+    } catch { /* silent */ }
+  }
+
+  async function loadCharts() {
+    setLoadingCharts(true);
+    try {
+      // Weight trend
+      const wt = await apiFetch<{ data: any[] }>(`/api/v1/analytics/trends/weight?days=${trendDays}`);
+      setWeightTrend((wt.data ?? []).map(p => ({
+        date: new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
+        average_weight: p.average_weight,
+        measurement_count: p.measurement_count,
+      })));
+
+      // Hourly detection pattern — last 7 days
+      const today    = new Date().toISOString().split('T')[0];
+      const weekAgo  = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      const dp = await apiFetch<{ detections_by_hour: number[] }>(
+        `/api/v1/analytics/patterns/detection?date_from=${weekAgo}&date_to=${today}`
+      );
+      setHourlyData(
+        (dp.detections_by_hour ?? []).map((count, hour) => ({
+          hour: `${String(hour).padStart(2, '0')}:00`,
+          detections: count,
         }))
       );
-    } catch (err) {
-      console.error('Measurements error:', err);
-    }
+    } catch { /* silent */ }
+    finally { setLoadingCharts(false); }
+  }
+
+  async function loadHealth() {
+    try {
+      const h = await apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics');
+      setHealth(h);
+    } catch { /* silent */ }
   }
 
   // ---------------------------------------------------------------------------
-  // Pipeline Controls
+  // Pipeline controls
   // ---------------------------------------------------------------------------
 
   async function handleStartPipeline() {
-    try {
-      await apiFetch('/api/v1/pipeline/start', { method: 'POST' });
-      await loadPipelineStatus();
-    } catch (err) {
-      alert('Pipeline xatolik: ' + (err instanceof Error ? err.message : ''));
-    }
+    try { await apiFetch('/api/v1/pipeline/start', { method: 'POST' }); await loadPipeline(); }
+    catch (e) { alert('Pipeline xatolik: ' + (e instanceof Error ? e.message : '')); }
   }
-
   async function handleStopPipeline() {
-    try {
-      await apiFetch('/api/v1/pipeline/stop', { method: 'POST' });
-      await loadPipelineStatus();
-    } catch (err) {
-      alert('Pipeline xatolik: ' + (err instanceof Error ? err.message : ''));
-    }
+    try { await apiFetch('/api/v1/pipeline/stop', { method: 'POST' }); await loadPipeline(); }
+    catch (e) { alert('Pipeline xatolik: ' + (e instanceof Error ? e.message : '')); }
   }
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600 mt-1">Umumiy ko'rinish va statistika</p>
-        </div>
+  const weightChange = overview?.weight?.change_percentage_7d;
+  const avgWeight    = overview?.weight?.average_kg;
 
-        {/* Pipeline Control */}
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Umumiy ko'rinish va statistika</p>
+        </div>
         <button
           onClick={pipeline.running ? handleStopPipeline : handleStartPipeline}
-          className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white shadow-lg transition-all hover:scale-105 ${
-            pipeline.running
-              ? 'bg-gradient-to-r from-red-500 to-red-600'
-              : 'bg-gradient-to-r from-green-500 to-green-600'
-          }`}
-        >
-          {pipeline.running ? (
-            <>
-              <Square className="w-5 h-5 fill-current" />
-              Stop Pipeline
-            </>
-          ) : (
-            <>
-              <Play className="w-5 h-5 fill-current" />
-              Start Pipeline
-            </>
-          )}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md active:scale-95 ${
+            pipeline.running ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'
+          }`}>
+          {pipeline.running
+            ? <><Square className="w-4 h-4 fill-current" /> Stop</>
+            : <><Play className="w-4 h-4 fill-current" /> Start Pipeline</>}
         </button>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* ── Stats ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          label="Jonivorlar"
-          value={stats.totalAnimals}
-          sub="jami ro'yxatda"
-          icon={Users}
-          accent="bg-green-500"
+          label="Jonivorlar" icon={Users} color="bg-blue-500"
+          value={overview?.animals?.total ?? '—'}
+          sub={`${overview?.animals?.active ?? 0} ta faol`}
           onClick={() => navigate('/animals')}
         />
         <StatCard
-          label="Aniqlashlar"
-          value={stats.totalDetections}
-          sub="jami"
-          icon={Camera}
-          accent="bg-blue-500"
+          label="Bugungi aniqlash" icon={Camera} color="bg-indigo-500"
+          value={overview?.detections?.today ?? '—'}
+          sub={`Hafta: ${overview?.detections?.week ?? 0}`}
         />
         <StatCard
-          label="O'rtacha vazn"
-          value={stats.avgWeight === '—' ? '—' : `${stats.avgWeight} kg`}
-          sub="sessiya"
-          icon={Scale}
-          accent="bg-purple-500"
+          label="O'rtacha vazn" icon={Scale} color="bg-violet-500"
+          value={avgWeight != null ? `${avgWeight.toFixed(1)} kg` : '—'}
+          sub={weightChange != null
+            ? `${weightChange >= 0 ? '+' : ''}${weightChange.toFixed(1)}% (7 kun)`
+            : '7 kunlik ma\'lumot yo\'q'}
         />
         <StatCard
-          label="Pipeline"
+          label="Pipeline" icon={Activity} color={pipeline.running ? 'bg-emerald-500' : 'bg-gray-400'}
           value={pipeline.running ? 'Ishlaydi' : "To'xtatilgan"}
           sub={pipeline.stats ? `${(pipeline.stats.fps ?? 0).toFixed(1)} FPS` : '—'}
-          icon={Activity}
-          accent={pipeline.running ? 'bg-green-500' : 'bg-gray-400'}
         />
       </div>
 
-      {/* Pipeline Stats (if running) */}
+      {/* ── Pipeline stats bar ── */}
       {pipeline.running && pipeline.stats && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-8">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Pipeline — real vaqt
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-4 h-4 text-emerald-500" />
+            <span className="text-sm font-semibold text-gray-700">Pipeline — real vaqt</span>
+            <span className="ml-auto flex items-center gap-1.5">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span className="text-xs text-emerald-600 font-medium">Jonli</span>
+            </span>
+          </div>
+          <div className="grid grid-cols-5 gap-3">
             {[
-              { label: 'Kadrlar', val: pipeline.stats.total_frames },
-              { label: 'Qayta isl.', val: pipeline.stats.processed_frames },
-              { label: 'Aniqlash', val: pipeline.stats.detections },
-              { label: 'Saqlangan', val: pipeline.stats.measurements_created },
-              { label: 'Xato', val: pipeline.stats.errors },
-            ].map(({ label, val }) => (
-              <div key={label} className="bg-gray-50 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-gray-900">{val}</div>
-                <div className="text-xs text-gray-500 mt-1">{label}</div>
+              { l: 'Kadrlar',    v: pipeline.stats.total_frames },
+              { l: 'Qayta isl.', v: pipeline.stats.processed_frames },
+              { l: 'Aniqlash',   v: pipeline.stats.detections },
+              { l: 'Saqlangan',  v: pipeline.stats.measurements_created },
+              { l: 'Xato',       v: pipeline.stats.errors },
+            ].map(({ l, v }) => (
+              <div key={l} className="bg-gray-50 rounded-xl p-3 text-center">
+                <div className="text-xl font-bold text-gray-900 tabular-nums">{v}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{l}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Recent Measurements */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Oxirgi O'lchovlar</h3>
-          <TrendingUp className="w-5 h-5 text-gray-400" />
+      {/* ── Charts row ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        {/* Weight trend — 2/3 width */}
+        <div className="lg:col-span-2 bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-blue-500" />
+              <span className="text-sm font-semibold text-gray-800">Vazn trendi</span>
+            </div>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              {[7, 30, 90].map(d => (
+                <button key={d} onClick={() => setTrendDays(d)}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${trendDays === d ? 'bg-white shadow-sm text-blue-600 font-semibold' : 'text-gray-500 hover:text-gray-800'}`}>
+                  {d}k
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {loadingCharts ? (
+            <div className="h-48 flex items-center justify-center text-gray-400 text-sm">Yuklanmoqda...</div>
+          ) : weightTrend.length === 0 ? (
+            <div className="h-48 flex flex-col items-center justify-center text-gray-400">
+              <Scale className="w-8 h-8 mb-2 opacity-30" />
+              <p className="text-sm">Pipeline ishlayotganda ma'lumot to'planadi</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={weightTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} axisLine={false} unit=" kg" />
+                <Tooltip content={<WeightTooltip />} cursor={{ stroke: '#e5e7eb', strokeWidth: 1 }} />
+                <Line type="monotone" dataKey="average_weight" stroke="#3b82f6"
+                  strokeWidth={2} dot={false} activeDot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
-        {measurements.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
-            Pipeline ishga tushirilganda o'lchovlar shu yerda ko'rinadi
+        {/* Health card — 1/3 width */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <Heart className="w-4 h-4 text-rose-500" />
+            <span className="text-sm font-semibold text-gray-800">Sog'liq holati</span>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {measurements.map((m, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0 hover:bg-gray-50 rounded-lg px-3 cursor-pointer transition-colors"
-                onClick={() => navigate(`/animals/${m.animal_id}`)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center">
-                    <Scale className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-gray-900">
-                      {m.animal_tag_id}
-                    </div>
-                    <div className="text-xs text-gray-500">{m.camera_id}</div>
-                  </div>
+
+          {health ? (
+            <>
+              <RiskBadge score={health.risk_score} />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <span className="text-xs text-gray-500">Jami alertlar</span>
+                  <span className="text-sm font-bold text-gray-900">{health.alert_summary.total}</span>
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-bold text-gray-900">
-                    {m.estimated_weight_kg.toFixed(1)} kg
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {(m.confidence_score * 100).toFixed(0)}% ishonch
-                  </div>
+                <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                  <span className="text-xs text-gray-500 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Kritik
+                  </span>
+                  <span className={`text-sm font-bold ${health.alert_summary.critical > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {health.alert_summary.critical}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs text-gray-500 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Ogohlantirish
+                  </span>
+                  <span className={`text-sm font-bold ${health.alert_summary.warning > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                    {health.alert_summary.warning}
+                  </span>
                 </div>
               </div>
-            ))}
+              {health.alert_summary.total > 0 && (
+                <button onClick={() => navigate('/alerts')}
+                  className="mt-auto w-full py-2 text-xs font-medium text-blue-600 border border-blue-200 rounded-xl hover:bg-blue-50 transition-colors">
+                  Alertlarni ko'rish →
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Yuklanmoqda...</div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Hourly detection heatmap ── */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Activity className="w-4 h-4 text-indigo-500" />
+          <span className="text-sm font-semibold text-gray-800">Soatlik aniqlash (oxirgi 7 kun)</span>
+        </div>
+
+        {loadingCharts ? (
+          <div className="h-40 flex items-center justify-center text-gray-400 text-sm">Yuklanmoqda...</div>
+        ) : hourlyData.every(d => d.detections === 0) ? (
+          <div className="h-40 flex flex-col items-center justify-center text-gray-400">
+            <Camera className="w-8 h-8 mb-2 opacity-30" />
+            <p className="text-sm">So'nggi 7 kunda aniqlash ma'lumoti yo'q</p>
           </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={hourlyData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barCategoryGap="20%">
+              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+              <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false}
+                interval={3} />
+              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+              <Tooltip content={<DetectionTooltip />} cursor={{ fill: '#f1f5f9' }} />
+              <Bar dataKey="detections" fill="#6366f1" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         )}
       </div>
+
+      {/* ── Detections summary row ── */}
+      {overview && (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: 'Bugun', value: overview.detections.today },
+            { label: 'Bu hafta', value: overview.detections.week },
+            { label: 'Bu oy', value: overview.detections.month },
+          ].map(({ label, value }) => (
+            <div key={label} className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm text-center">
+              <div className="text-2xl font-bold text-gray-900 tabular-nums">{value.toLocaleString()}</div>
+              <div className="text-xs text-gray-500 mt-1">{label} aniqlash</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

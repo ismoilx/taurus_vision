@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Cpu, Video, Camera, Bell, LogOut, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Cpu, Video, Camera, Bell, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,6 +16,7 @@ import AnimalDetailPage from './pages/AnimalDetailPage';
 import LiveFeedPage    from './pages/LiveFeedPage';
 import CamerasPage     from './pages/CamerasPage';
 import AlertsPage      from './pages/AlertsPage';
+import AnalyticsPage   from './pages/AnalyticsPage';
 
 import './App.css';
 
@@ -148,10 +149,11 @@ function UserMenu() {
 
 const navItems = [
   { to:'/',        icon:LayoutDashboard, label:'Dashboard',  end:true },
-  { to:'/animals', icon:Cpu,            label:'Jonivorlar'           },
-  { to:'/live',    icon:Video,          label:'Live Feed'            },
-  { to:'/cameras', icon:Camera,         label:'Kameralar'            },
-  { to:'/alerts',  icon:Bell,           label:'Alertlar'             },
+  { to:'/animals',   icon:Cpu,            label:'Jonivorlar'           },
+  { to:'/analytics', icon:BarChart2,      label:'Analitika'            },
+  { to:'/live',      icon:Video,          label:'Live Feed'            },
+  { to:'/cameras',   icon:Camera,         label:'Kameralar'            },
+  { to:'/alerts',    icon:Bell,           label:'Alertlar'             },
 ];
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -256,6 +258,7 @@ export default function App() {
                   <Route path="/"            element={<DashboardPage />} />
                   <Route path="/animals"     element={<AnimalsPage />} />
                   <Route path="/animals/:id" element={<AnimalDetailPage />} />
+                  <Route path="/analytics"  element={<AnalyticsPage />} />
                   <Route path="/live"        element={<LiveFeedPage />} />
                   <Route path="/cameras"     element={<CamerasPage />} />
                   <Route path="/alerts"      element={<AlertsPage />} />
