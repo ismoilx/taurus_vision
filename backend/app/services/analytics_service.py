@@ -469,7 +469,7 @@ class AnalyticsService:
             for row in freq_rows:
                 # Alert: No detection in 7 days
                 if row.last_detection:
-                    days_since_detection = (now - row.last_detection).days
+                    days_since_detection = (now - row.last_detection.replace(tzinfo=None)).days
                     if days_since_detection > 7:
                         alerts.append({
                             "type": "no_detection",
@@ -843,7 +843,7 @@ class AnalyticsService:
                 # Find measurement from ~7 days ago
                 one_week_ago = datetime.utcnow() - timedelta(days=7)
                 for m in measurements[1:]:
-                    if m.timestamp < one_week_ago:
+                    if m.timestamp.replace(tzinfo=None) < one_week_ago:
                         week_ago = m.estimated_weight_kg
                         break
                 
