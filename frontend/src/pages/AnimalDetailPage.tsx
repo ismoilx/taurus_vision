@@ -16,7 +16,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Scale, Activity, TrendingUp, TrendingDown,
   Minus, AlertTriangle, CheckCircle, Camera, Upload,
-  Trash2, Download, RefreshCw,
+  Trash2, Download, RefreshCw, Heart, Plus, XCircle,
 } from 'lucide-react';
 import {
   AreaChart, Area, LineChart, Line,
@@ -53,6 +53,30 @@ interface ADILog {
 interface ADITrend {
   trend: { date: string; score: number; category: string }[];
   avg_score?: number; min_score?: number; max_score?: number;
+}
+
+interface HealthRecord {
+  id: number;
+  animal_id: number;
+  record_type: string;
+  severity: string;
+  diagnosis: string;
+  symptoms?: string;
+  treatment?: string;
+  medication?: string;
+  veterinarian?: string;
+  cost?: number;
+  recorded_at: string;
+  next_checkup_date?: string;
+  is_resolved: boolean;
+  resolved_at?: string;
+}
+
+interface HealthRecordListResponse {
+  records: HealthRecord[];
+  total: number;
+  skip: number;
+  limit: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -140,7 +164,7 @@ export default function AnimalDetailPage() {
   const [adiTrend, setAdiTrend] = useState<ADITrend | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState('');
-  const [tab,      setTab]      = useState<'overview'|'adi'|'weight'|'register'>('overview');
+  const [tab,      setTab]      = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
 
   // Registration
   const [regFile,     setRegFile]     = useState<File | null>(null);
@@ -149,6 +173,24 @@ export default function AnimalDetailPage() {
   const [regMsg,      setRegMsg]      = useState('');
   const [embedCount,  setEmbedCount]  = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Health records
+  const [healthRecords,  setHealthRecords]  = useState<HealthRecord[]>([]);
+  const [healthLoading,  setHealthLoading]  = useState(false);
+  const [healthTotal,    setHealthTotal]    = useState(0);
+  const [showHealthForm, setShowHealthForm] = useState(false);
+  const [healthForm, setHealthForm] = useState({
+    record_type: 'checkup',
+    severity:    'normal',
+    diagnosis:   '',
+    symptoms:    '',
+    treatment:   '',
+    medication:  '',
+    veterinarian:'',
+    cost:        '',
+  });
+  const [healthFormLoading, setHealthFormLoading] = useState(false);
+  const [healthFormMsg,     setHealthFormMsg]     = useState('');
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
@@ -193,6 +235,71 @@ export default function AnimalDetailPage() {
       setError(e instanceof Error ? e.message : 'Xato');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // ── Load health records ───────────────────────────────────────────────────
+
+  async function loadHealth() {
+    if (!id) return;
+    setHealthLoading(true);
+    try {
+      const resp = await apiFetch<HealthRecordListResponse>(
+        `/api/v1/health/animals/${id}/records?skip=0&limit=50`
+      );
+      setHealthRecords(resp?.records ?? []);
+      setHealthTotal(resp?.total ?? 0);
+    } catch (e) {
+      console.error('Health records load error:', e);
+    } finally {
+      setHealthLoading(false);
+    }
+  }
+
+  // Health tab tanlanganda yuklash
+  useEffect(() => {
+    if (tab === 'health' && id) loadHealth();
+  }, [tab, id]);
+
+  async function handleHealthCreate() {
+    if (!id || !healthForm.diagnosis.trim()) return;
+    setHealthFormLoading(true);
+    setHealthFormMsg('');
+    try {
+      await apiFetch(`/api/v1/health/animals/${id}/records`, {
+        method: 'POST',
+        body: JSON.stringify({
+          record_type:  healthForm.record_type,
+          severity:     healthForm.severity,
+          diagnosis:    healthForm.diagnosis,
+          symptoms:     healthForm.symptoms   || undefined,
+          treatment:    healthForm.treatment  || undefined,
+          medication:   healthForm.medication || undefined,
+          veterinarian: healthForm.veterinarian || undefined,
+          cost:         healthForm.cost ? parseFloat(healthForm.cost) : undefined,
+        }),
+      });
+      setHealthFormMsg('✅ Yozuv muvaffaqiyatli qo\'shildi!');
+      setHealthForm({
+        record_type: 'checkup', severity: 'normal',
+        diagnosis: '', symptoms: '', treatment: '',
+        medication: '', veterinarian: '', cost: '',
+      });
+      setShowHealthForm(false);
+      await loadHealth();
+    } catch (e) {
+      setHealthFormMsg(`❌ ${e instanceof Error ? e.message : 'Xato'}`);
+    } finally {
+      setHealthFormLoading(false);
+    }
+  }
+
+  async function handleHealthResolve(recordId: number) {
+    try {
+      await apiFetch(`/api/v1/health/records/${recordId}/resolve`, { method: 'POST' });
+      await loadHealth();
+    } catch (e) {
+      console.error('Health resolve error:', e);
     }
   }
 
@@ -455,12 +562,13 @@ export default function AnimalDetailPage() {
       {/* ── Tabs ── */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20,
         background: '#F7F8FA', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-        {(['overview', 'adi', 'weight', 'register'] as const).map(t => (
+        {(['overview', 'adi', 'weight', 'health', 'register'] as const).map(t => (
           <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>
-            {t === 'overview' ? '📋 Umumiy'
-           : t === 'adi'      ? '🎯 ADI'
-           : t === 'weight'   ? '⚖️ Vazn'
-           :                    '📷 Identifikatsiya'}
+            {t === 'overview'  ? '📋 Umumiy'
+           : t === 'adi'       ? '🎯 ADI'
+           : t === 'weight'    ? '⚖️ Vazn'
+           : t === 'health'    ? '🏥 Sog\'liq'
+           :                     '📷 Identifikatsiya'}
           </button>
         ))}
       </div>
@@ -815,6 +923,359 @@ export default function AnimalDetailPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ══════════════════════ HEALTH TAB ══════════════════════ */}
+      {tab === 'health' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Header: soni + yangi qo'shish tugmasi */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 14, color: '#6B7280' }}>
+              Jami <span style={{ fontWeight: 700, color: '#0D1117' }}>{healthTotal}</span> ta sog'liq yozuvi
+            </div>
+            <button
+              onClick={() => { setShowHealthForm(v => !v); setHealthFormMsg(''); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 16px', borderRadius: 8,
+                background: showHealthForm ? '#F3F4F6' : '#1E3EB4',
+                color: showHealthForm ? '#374151' : '#fff',
+                border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <Plus size={14} />
+              {showHealthForm ? 'Bekor qilish' : 'Yangi yozuv'}
+            </button>
+          </div>
+
+          {/* ── Yangi yozuv formasi ── */}
+          {showHealthForm && (
+            <div style={{
+              background: '#fff', border: '1px solid #E4E7ED',
+              borderRadius: 12, padding: 24,
+            }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
+                Yangi Sog'liq Yozuvi
+              </h3>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {/* Tur */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Tur *
+                  </label>
+                  <select
+                    value={healthForm.record_type}
+                    onChange={e => setHealthForm(f => ({ ...f, record_type: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, color: '#374151',
+                      background: '#F9FAFB',
+                    }}
+                  >
+                    <option value="checkup">Tekshiruv</option>
+                    <option value="treatment">Davolash</option>
+                    <option value="vaccination">Emlash</option>
+                    <option value="injury">Shikast</option>
+                    <option value="surgery">Operatsiya</option>
+                    <option value="illness">Kasallik</option>
+                    <option value="other">Boshqa</option>
+                  </select>
+                </div>
+
+                {/* Jiddiylik */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Jiddiylik *
+                  </label>
+                  <select
+                    value={healthForm.severity}
+                    onChange={e => setHealthForm(f => ({ ...f, severity: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, color: '#374151',
+                      background: '#F9FAFB',
+                    }}
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="warning">Ogohlantirish</option>
+                    <option value="critical">Kritik</option>
+                  </select>
+                </div>
+
+                {/* Diagnoz */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Diagnoz * <span style={{ fontWeight: 400, color: '#9CA3AF' }}>(min 1 belgi)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={healthForm.diagnosis}
+                    onChange={e => setHealthForm(f => ({ ...f, diagnosis: e.target.value }))}
+                    placeholder="Masalan: Oddiy tekshiruv, Sog'lik holati normal"
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: `1px solid ${healthForm.diagnosis ? '#E4E7ED' : '#FCA5A5'}`,
+                      fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Belgilar */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Belgilar
+                  </label>
+                  <input
+                    type="text"
+                    value={healthForm.symptoms}
+                    onChange={e => setHealthForm(f => ({ ...f, symptoms: e.target.value }))}
+                    placeholder="Kuzatilgan alomatlar..."
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Davolash */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Davolash
+                  </label>
+                  <input
+                    type="text"
+                    value={healthForm.treatment}
+                    onChange={e => setHealthForm(f => ({ ...f, treatment: e.target.value }))}
+                    placeholder="Qilingan davolash..."
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Dori */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Dori-darmon
+                  </label>
+                  <input
+                    type="text"
+                    value={healthForm.medication}
+                    onChange={e => setHealthForm(f => ({ ...f, medication: e.target.value }))}
+                    placeholder="Berilgan dorilar..."
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Veterinar */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Veterinar
+                  </label>
+                  <input
+                    type="text"
+                    value={healthForm.veterinarian}
+                    onChange={e => setHealthForm(f => ({ ...f, veterinarian: e.target.value }))}
+                    placeholder="Veterinar ismi..."
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* Narx */}
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                    Narx (UZS)
+                  </label>
+                  <input
+                    type="number"
+                    value={healthForm.cost}
+                    onChange={e => setHealthForm(f => ({ ...f, cost: e.target.value }))}
+                    placeholder="0"
+                    min="0"
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8,
+                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Xabar */}
+              {healthFormMsg && (
+                <div style={{
+                  marginTop: 14, padding: '10px 14px', borderRadius: 8,
+                  background: healthFormMsg.startsWith('✅') ? '#F0FDF4' : '#FEF2F2',
+                  color: healthFormMsg.startsWith('✅') ? '#16A34A' : '#DC2626',
+                  fontSize: 13, border: `1px solid ${healthFormMsg.startsWith('✅') ? '#BBF7D0' : '#FECACA'}`,
+                }}>
+                  {healthFormMsg}
+                </div>
+              )}
+
+              {/* Submit */}
+              <button
+                onClick={handleHealthCreate}
+                disabled={!healthForm.diagnosis.trim() || healthFormLoading}
+                style={{
+                  marginTop: 16, width: '100%', padding: '12px', borderRadius: 8,
+                  background: healthForm.diagnosis ? '#1E3EB4' : '#E4E7ED',
+                  color: healthForm.diagnosis ? '#fff' : '#9CA3AF',
+                  border: 'none', cursor: healthForm.diagnosis ? 'pointer' : 'not-allowed',
+                  fontSize: 14, fontWeight: 600, display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                {healthFormLoading ? (
+                  <>
+                    <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .6s linear infinite' }} />
+                    Saqlanmoqda...
+                  </>
+                ) : (
+                  <><Heart size={16} /> Saqlash</>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* ── Yozuvlar ro'yxati ── */}
+          {healthLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF' }}>
+              <div style={{ width: 28, height: 28, border: '2px solid #E4E7ED',
+                borderTopColor: '#1E3EB4', borderRadius: '50%',
+                animation: 'spin .65s linear infinite', margin: '0 auto 10px' }} />
+              Yuklanmoqda...
+            </div>
+          ) : healthRecords.length === 0 ? (
+            <div style={{
+              background: '#fff', border: '1px solid #E4E7ED',
+              borderRadius: 12, padding: '48px 24px', textAlign: 'center',
+            }}>
+              <Heart size={40} color="#D1D5DB" style={{ margin: '0 auto 12px' }} />
+              <p style={{ color: '#9CA3AF', fontSize: 14 }}>Sog'liq yozuvlari yo'q</p>
+              <p style={{ color: '#D1D5DB', fontSize: 12, marginTop: 4 }}>
+                Yuqoridagi "Yangi yozuv" tugmasini bosing
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {healthRecords.map(rec => {
+                const sevColor = rec.severity === 'critical' ? '#EF4444'
+                               : rec.severity === 'warning'  ? '#F59E0B'
+                               :                               '#22C55E';
+                const sevBg = rec.severity === 'critical' ? '#FEF2F2'
+                            : rec.severity === 'warning'  ? '#FFFBEB'
+                            :                               '#F0FDF4';
+                const typeLabel: Record<string, string> = {
+                  checkup: '🩺 Tekshiruv', treatment: '💊 Davolash',
+                  vaccination: '💉 Emlash', injury: '🤕 Shikast',
+                  surgery: '🔪 Operatsiya', illness: '🤒 Kasallik', other: '📝 Boshqa',
+                };
+                return (
+                  <div key={rec.id} style={{
+                    background: '#fff', border: '1px solid #E4E7ED',
+                    borderRadius: 12, padding: '16px 20px',
+                    borderLeft: `4px solid ${sevColor}`,
+                    opacity: rec.is_resolved ? 0.7 : 1,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: '#0D1117' }}>
+                            {typeLabel[rec.record_type] ?? rec.record_type}
+                          </span>
+                          <span style={{
+                            fontSize: 11, fontWeight: 600, padding: '2px 8px',
+                            borderRadius: 99, background: sevBg, color: sevColor,
+                            border: `1px solid ${sevColor}22`,
+                          }}>
+                            {rec.severity}
+                          </span>
+                          {rec.is_resolved && (
+                            <span style={{
+                              fontSize: 11, padding: '2px 8px', borderRadius: 99,
+                              background: '#F0FDF4', color: '#16A34A', border: '1px solid #BBF7D0',
+                            }}>
+                              ✓ Hal etilgan
+                            </span>
+                          )}
+                        </div>
+
+                        <p style={{ fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
+                          {rec.diagnosis}
+                        </p>
+
+                        {rec.symptoms && (
+                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
+                            <span style={{ fontWeight: 600 }}>Belgilar:</span> {rec.symptoms}
+                          </p>
+                        )}
+                        {rec.treatment && (
+                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
+                            <span style={{ fontWeight: 600 }}>Davolash:</span> {rec.treatment}
+                          </p>
+                        )}
+                        {rec.medication && (
+                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
+                            <span style={{ fontWeight: 600 }}>Dori:</span> {rec.medication}
+                          </p>
+                        )}
+
+                        <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+                            📅 {format(new Date(rec.recorded_at), 'dd.MM.yyyy HH:mm')}
+                          </span>
+                          {rec.veterinarian && (
+                            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+                              👨‍⚕️ {rec.veterinarian}
+                            </span>
+                          )}
+                          {rec.cost != null && (
+                            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+                              💰 {rec.cost.toLocaleString()} UZS
+                            </span>
+                          )}
+                          {rec.next_checkup_date && (
+                            <span style={{ fontSize: 11, color: '#3B82F6' }}>
+                              📆 Keyingi: {format(new Date(rec.next_checkup_date), 'dd.MM.yyyy')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Hal etish tugmasi */}
+                      {!rec.is_resolved && (
+                        <button
+                          onClick={() => handleHealthResolve(rec.id)}
+                          title="Hal etilgan deb belgilash"
+                          style={{
+                            marginLeft: 12, flexShrink: 0,
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            padding: '6px 12px', borderRadius: 7,
+                            background: '#F0FDF4', color: '#16A34A',
+                            border: '1px solid #BBF7D0', cursor: 'pointer',
+                            fontSize: 12, fontWeight: 500,
+                          }}
+                        >
+                          <CheckCircle size={13} /> Hal etildi
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

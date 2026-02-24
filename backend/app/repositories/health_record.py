@@ -352,7 +352,7 @@ class HealthRecordRepository:
         logger.debug(f"Fetching upcoming checkups (next {days_ahead} days)")
         
         today = date.today()
-        future_date = date.today() + datetime.timedelta(days=days_ahead)
+        future_date = date.today() + timedelta(days=days_ahead)
         
         conditions = [
             HealthRecord.next_checkup_date.isnot(None),

@@ -27,21 +27,34 @@ logger = get_logger(__name__)
 class HealthRecordService:
     """
     Service layer for health record operations.
-    
+
     Provides high-level business logic for:
     - Creating and managing health records
     - Scheduling checkups
     - Tracking critical issues
     - Generating health reports
     - Statistics and analytics
-    
+
     Validates data and coordinates between repositories.
+
+    Args:
+        db: Async database session (injected via FastAPI Depends per request).
+
+    Usage:
+        service = HealthRecordService(db)
+        record = await service.create_health_record(...)
     """
-    
-    def __init__(self):
-        """Initialize service with repositories."""
-        self.health_repo = HealthRecordRepository()
-        self.animal_repo = AnimalRepository()
+
+    def __init__(self, db: AsyncSession) -> None:
+        """
+        Initialize service with a database session.
+
+        Args:
+            db: Async SQLAlchemy session — injected per HTTP request.
+        """
+        self.db = db
+        self.health_repo = HealthRecordRepository()   # per-method db pattern
+        self.animal_repo = AnimalRepository(db)        # constructor db pattern
     
     # =========================================================================
     # CREATE HEALTH RECORD
@@ -105,10 +118,10 @@ class HealthRecordService:
         logger.info(f"Creating health record: animal_id={animal_id}, type={record_type.value}")
         
         # Validate animal exists
-        animal = await self.animal_repo.get_by_id(db, animal_id)
+        animal = await self.animal_repo.get_by_id(animal_id)
         if not animal:
             raise ValueError(f"Animal with id {animal_id} not found")
-        
+
         # Validate dates
         if recorded_at is None:
             recorded_at = datetime.utcnow()
@@ -195,7 +208,7 @@ class HealthRecordService:
         logger.debug(f"Fetching health records for animal_id={animal_id}")
         
         # Validate animal exists
-        animal = await self.animal_repo.get_by_id(db, animal_id)
+        animal = await self.animal_repo.get_by_id(animal_id)
         if not animal:
             raise ValueError(f"Animal with id {animal_id} not found")
         
@@ -505,7 +518,7 @@ class HealthRecordService:
         logger.debug(f"Generating health summary for animal_id={animal_id}")
         
         # Validate animal
-        animal = await self.animal_repo.get_by_id(db, animal_id)
+        animal = await self.animal_repo.get_by_id(animal_id)
         if not animal:
             raise ValueError(f"Animal with id {animal_id} not found")
         
