@@ -9,6 +9,7 @@ bir joyda ko'rinishini ta'minlaydi.
 
 from app.models.base             import BaseModel
 from app.models.user             import User, UserRole
+from app.models.camera           import Camera, CameraType
 from app.models.animal           import Animal, AnimalSpecies, AnimalGender, AnimalStatus
 from app.models.detection        import Detection
 from app.models.animal_embedding import AnimalEmbedding
@@ -23,6 +24,9 @@ __all__ = [
     # Auth
     "User",
     "UserRole",
+    # Cameras
+    "Camera",
+    "CameraType",
     # Animals
     "Animal",
     "AnimalSpecies",

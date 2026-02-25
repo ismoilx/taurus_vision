@@ -1,275 +1,275 @@
 """
-WebSocket infrastructure for real-time updates.
+Taurus Vision — WebSocket Connection Manager
 
-Implements production-grade WebSocket connection management
-with broadcasting capabilities for live farm monitoring.
+Real-time yangilanishlarni barcha ulangan clientlarga yuborish uchun
+markaziy infratuzilma.
+
+DIZAYN PRINSIPLARI:
+    - broadcast() xabarni aynan kelgan formatda yuboradi (wrapper YO'Q)
+    - Caller (detection_pipeline) to'liq xabar strukturasini o'zi belgilaydi
+    - Lock asosida thread-safe ulanish boshqaruvi
+    - Nosoz ulanishlar avtomatik tozalanadi
+
+XABAR FORMATI (broadcast qiluvchi tom belgilaydi):
+    {
+        "type": "detection",       # yoki "heartbeat", "connection", ...
+        "timestamp": "...",
+        "animal_id": 1,
+        ...
+    }
 """
 
-from typing import Set
-from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
 import json
 import logging
-import asyncio
+from datetime import datetime
+from typing import Optional
+
+from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
-# --- MANA SHUNI QO'SHING (Importlardan keyin) ---
-class DateTimeEncoder(json.JSONEncoder):
-    """
-    Vaqtni (datetime) JSON tushunadigan formatga (ISO string) o'girib beradi.
-    """
-    def default(self, obj):
-        from datetime import datetime
+
+# =============================================================================
+# JSON SERIALIZER — datetime qo'llab-quvvatlash bilan
+# =============================================================================
+
+class _DateTimeEncoder(json.JSONEncoder):
+    """datetime ob'ektlarini ISO format stringga o'giradi."""
+
+    def default(self, obj: object) -> object:
         if isinstance(obj, datetime):
             return obj.isoformat()
         return super().default(obj)
-# -----------------------------------------------
 
+
+# =============================================================================
+# CONNECTION MANAGER
+# =============================================================================
 
 class ConnectionManager:
     """
-    WebSocket connection manager.
-    
-    Handles multiple simultaneous connections and provides
-    broadcasting capabilities for real-time updates.
-    
-    FEATURES:
-    - Connection pooling
-    - Automatic reconnection handling
-    - Broadcast to all connected clients
-    - Connection health monitoring
-    
-    THREAD SAFETY:
-    - Uses asyncio locks for concurrent access
-    - Safe for multi-camera, multi-client scenarios
+    WebSocket ulanishlarini boshqaradi va xabarlarni broadcast qiladi.
+
+    XUSUSIYATLAR:
+        - Ko'p simultaneous ulanishlarni qo'llab-quvvatlash
+        - asyncio.Lock asosida thread-safe operatsiyalar
+        - Broadcast paytida nosoz ulanishlar avtomatik tozalanadi
+        - Heartbeat mexanizmi ulanishlarni tirik ushlab turadi
+
+    FOYDALANISH:
+        manager = ConnectionManager()
+        await manager.connect(websocket)
+        await manager.broadcast({"type": "detection", ...})
     """
-    
-    def __init__(self):
-        """Initialize connection manager."""
-        # Set of active WebSocket connections
-        self.active_connections: Set[WebSocket] = set()
-        
-        # Lock for thread-safe operations
+
+    def __init__(self) -> None:
+        self._active: set[WebSocket] = set()
         self._lock = asyncio.Lock()
-        
-        # Statistics
-        self._total_connections = 0
-        self._total_disconnections = 0
-        self._total_messages_sent = 0
-    
+        self._total_connected    = 0
+        self._total_disconnected = 0
+        self._total_sent         = 0
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                           #
+    # ------------------------------------------------------------------ #
+
     async def connect(self, websocket: WebSocket) -> None:
         """
-        Accept and register a new WebSocket connection.
-        
+        Yangi WebSocket ulanishini qabul qiladi va ro'yxatga oladi.
+
+        Handshake (accept) bu yerda bajariladi — caller ACCEPT QILMAYDI.
+
         Args:
-            websocket: WebSocket connection to accept
+            websocket: FastAPI WebSocket ob'ekti
+
+        Raises:
+            Exception: accept() muvaffaqiyatsiz bo'lsa
         """
         await websocket.accept()
-        
+
         async with self._lock:
-            self.active_connections.add(websocket)
-            self._total_connections += 1
-        
+            self._active.add(websocket)
+            self._total_connected += 1
+            count = len(self._active)
+
         logger.info(
-            f"WebSocket connected. "
-            f"Active connections: {len(self.active_connections)}"
+            "WebSocket connected",
+            extra={"extra_data": {"active_connections": count}},
         )
-        
-        # Send welcome message
-        await self._send_personal(
-            websocket,
-            {
-                "type": "connection",
-                "status": "connected",
-                "message": "Connected to Taurus Vision live feed",
-                "active_connections": len(self.active_connections),
-            }
-        )
-    
+
+        await self._send_to(websocket, {
+            "type":               "connection",
+            "status":             "connected",
+            "message":            "Taurus Vision live feed ga ulandi",
+            "active_connections": count,
+            "timestamp":          datetime.utcnow().isoformat(),
+        })
+
     async def disconnect(self, websocket: WebSocket) -> None:
         """
-        Remove a WebSocket connection from the pool.
-        
+        WebSocket ulanishini ro'yxatdan chiqaradi.
+
         Args:
-            websocket: WebSocket connection to remove
+            websocket: Chiqariladigan ulanish
         """
         async with self._lock:
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
-                self._total_disconnections += 1
-        
+            self._active.discard(websocket)
+            self._total_disconnected += 1
+            count = len(self._active)
+
         logger.info(
-            f"WebSocket disconnected. "
-            f"Active connections: {len(self.active_connections)}"
+            "WebSocket disconnected",
+            extra={"extra_data": {"active_connections": count}},
         )
-    
+
     async def broadcast(self, message: dict) -> None:
         """
-        Broadcast message to all connected clients.
-        
-        Handles individual connection failures gracefully.
-        If a send fails, that connection is automatically removed.
-        
+        Xabarni barcha faol clientlarga yuboradi.
+
+        MUHIM: Xabar aynan kelgan formatda yuboriladi — hech qanday
+        wrapper qo'shilmaydi. Caller to'liq xabar strukturasini belgilaydi.
+
         Args:
-            message: Dictionary to broadcast (will be JSON serialized)
+            message: JSON serializatsiya qilinadigan dict
         """
-        if not self.active_connections:
-            logger.debug("No active connections to broadcast to")
-            return
-        
-        # Add metadata
-        broadcast_message = {
-            "type": "weight_update",
-            "data": message,
-        }
-        
-        # Convert to JSON once (with DateTimeEncoder)
-        try:
-            json_message = json.dumps(broadcast_message, cls=DateTimeEncoder)
-        except TypeError as e:
-            logger.error(f"JSON serialization failed: {e}")
-            return
-        
-        # Track failed connections
-        failed_connections = set()
-        
-        # Broadcast to all connections
         async with self._lock:
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(json_message)
-                    self._total_messages_sent += 1
-                    
-                except WebSocketDisconnect:
-                    # Connection lost
-                    failed_connections.add(connection)
-                    logger.warning("Connection lost during broadcast")
-                    
-                except Exception as e:
-                    # Other errors
-                    failed_connections.add(connection)
-                    logger.error(f"Error broadcasting to connection: {e}")
-            
-            # Remove failed connections
-            if failed_connections:
-                self.active_connections -= failed_connections
-                logger.info(
-                    f"Removed {len(failed_connections)} failed connections. "
-                    f"Active: {len(self.active_connections)}"
-                )
-        
-        logger.debug(
-            f"Broadcasted to {len(self.active_connections)} clients "
-            f"({len(failed_connections)} failed)"
-        )
-    
-    async def _send_personal(
-        self,
-        websocket: WebSocket,
-        message: dict,
-    ) -> None:
-        """
-        Send message to a specific client.
-        
-        Args:
-            websocket: Target WebSocket connection
-            message: Dictionary to send (will be JSON serialized)
-        """
+            if not self._active:
+                return
+            snapshot = set(self._active)
+
         try:
-            await websocket.send_json(message)
-            self._total_messages_sent += 1
-            
-        except Exception as e:
-            logger.error(f"Failed to send personal message: {e}")
-    
-    async def send_heartbeat(self) -> None:
-        """
-        Send heartbeat/ping to all connections to keep them alive.
-        
-        Should be called periodically (e.g., every 30 seconds).
-        """
-        heartbeat_message = {
-            "type": "heartbeat",
-            "timestamp": asyncio.get_event_loop().time(),
-            "active_connections": len(self.active_connections),
-        }
-        
-        await self.broadcast(heartbeat_message)
-    
+            json_str = json.dumps(message, cls=_DateTimeEncoder)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "WebSocket broadcast: JSON serialize xatosi",
+                extra={"extra_data": {"error": str(exc)}},
+            )
+            return
+
+        failed: set[WebSocket] = set()
+
+        for ws in snapshot:
+            try:
+                await ws.send_text(json_str)
+                self._total_sent += 1
+            except (WebSocketDisconnect, RuntimeError):
+                failed.add(ws)
+            except Exception as exc:
+                failed.add(ws)
+                logger.warning(
+                    "Broadcast: xabar yuborishda xato",
+                    extra={"extra_data": {"error": str(exc)}},
+                )
+
+        if failed:
+            async with self._lock:
+                self._active -= failed
+            logger.info(
+                "Broadcast: nosoz ulanishlar tozalandi",
+                extra={"extra_data": {
+                    "removed":   len(failed),
+                    "remaining": len(self._active),
+                }},
+            )
+
+    async def heartbeat(self) -> None:
+        """Barcha clientlarga heartbeat xabari yuboradi."""
+        await self.broadcast({
+            "type":               "heartbeat",
+            "timestamp":          datetime.utcnow().isoformat(),
+            "active_connections": len(self._active),
+        })
+
     def get_stats(self) -> dict:
         """
-        Get connection manager statistics.
-        
+        Ulanish statistikasini qaytaradi.
+
         Returns:
-            Dictionary with connection stats
+            Dict: faol, jami ulangan, jami uzilgan, jami yuborilgan
         """
         return {
-            "active_connections": len(self.active_connections),
-            "total_connections": self._total_connections,
-            "total_disconnections": self._total_disconnections,
-            "total_messages_sent": self._total_messages_sent,
+            "active_connections":  len(self._active),
+            "total_connected":     self._total_connected,
+            "total_disconnected":  self._total_disconnected,
+            "total_messages_sent": self._total_sent,
         }
 
+    # ------------------------------------------------------------------ #
+    # Internal                                                             #
+    # ------------------------------------------------------------------ #
 
-# Global connection manager instance
-# This will be initialized in main.py on startup
-ws_manager: ConnectionManager | None = None
+    async def _send_to(self, websocket: WebSocket, message: dict) -> None:
+        """Bitta ulanishga xabar yuborish — ichki yordamchi."""
+        try:
+            await websocket.send_json(message)
+            self._total_sent += 1
+        except Exception as exc:
+            logger.error(
+                "WebSocket: shaxsiy xabar yuborishda xato",
+                extra={"extra_data": {"error": str(exc)}},
+            )
 
 
-def get_ws_manager() -> ConnectionManager:
-    """
-    Get the global WebSocket connection manager.
-    
-    Returns:
-        Global ConnectionManager instance
-        
-    Raises:
-        RuntimeError: If manager hasn't been initialized
-    """
-    if ws_manager is None:
-        raise RuntimeError(
-            "WebSocket manager not initialized. "
-            "Call initialize_ws_manager() in startup event."
-        )
-    return ws_manager
+# =============================================================================
+# GLOBAL INSTANCE MANAGEMENT
+# =============================================================================
+
+_ws_manager: Optional[ConnectionManager] = None
 
 
 def initialize_ws_manager() -> ConnectionManager:
     """
-    Initialize the global WebSocket connection manager.
-    
-    Should be called once during application startup.
-    
+    Global WebSocket managerini yaratadi.
+
+    main.py startup_event da bir marta chaqiriladi.
+
     Returns:
-        Initialized ConnectionManager instance
+        Yangi ConnectionManager instance
     """
-    global ws_manager
-    ws_manager = ConnectionManager()
-    logger.info("WebSocket connection manager initialized")
-    return ws_manager
+    global _ws_manager
+    _ws_manager = ConnectionManager()
+    logger.info("WebSocket manager initialized")
+    return _ws_manager
+
+
+def get_ws_manager() -> ConnectionManager:
+    """
+    Global WebSocket managerini qaytaradi.
+
+    Returns:
+        ConnectionManager instance
+
+    Raises:
+        RuntimeError: Manager hali ishga tushirilmagan bo'lsa
+    """
+    if _ws_manager is None:
+        raise RuntimeError(
+            "WebSocket manager ishga tushirilmagan. "
+            "initialize_ws_manager() ni startup_event da chaqiring."
+        )
+    return _ws_manager
 
 
 async def shutdown_ws_manager() -> None:
     """
-    Shutdown WebSocket manager and close all connections.
-    
-    Should be called during application shutdown.
+    Barcha ulanishlarni yopadi va managerni tozalaydi.
+
+    main.py shutdown_event da chaqiriladi.
     """
-    global ws_manager
-    
-    if ws_manager is None:
+    global _ws_manager
+
+    if _ws_manager is None:
         return
-    
-    logger.info("Shutting down WebSocket connections...")
-    
-    # Close all active connections
-    for connection in list(ws_manager.active_connections):
+
+    logger.info("WebSocket manager yopilmoqda...")
+
+    for ws in list(_ws_manager._active):
         try:
-            await connection.close()
-        except Exception as e:
-            logger.error(f"Error closing WebSocket: {e}")
-    
-    # Clear connections
-    ws_manager.active_connections.clear()
-    
-    logger.info("WebSocket manager shutdown complete")
+            await ws.close(code=1001, reason="Server shutting down")
+        except Exception:
+            pass
+
+    _ws_manager._active.clear()
+    _ws_manager = None
+    logger.info("WebSocket manager yopildi")

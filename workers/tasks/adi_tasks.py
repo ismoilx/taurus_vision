@@ -282,9 +282,10 @@ async def _check_missing_async(task) -> dict:
         alert_service = AlertService(db)
 
         # Aktiv jonivorlar sonini olish
-        count_stmt = select(Animal).where(Animal.status == AnimalStatus.ACTIVE)
+        from sqlalchemy import func
+        count_stmt = select(func.count()).select_from(Animal).where(Animal.status == AnimalStatus.ACTIVE)
         count_result = await db.execute(count_stmt)
-        animal_count = len(count_result.scalars().all())
+        animal_count = count_result.scalar() or 0
 
         alerts = await alert_service.check_missing_animals()
 

@@ -23,8 +23,13 @@ import { apiFetch } from '../utils/apiFetch';
 // Yangi to'g'irlangan qism:
 export default function LiveFeedPage() {
   // Endi "lastMessage" ni chaqirib olamiz
+  // Factory funksiya — har reconnect da tokenni localStorage dan yangi o'qiydi
+  // Bu token refresh bo'lgandan keyin ham to'g'ri ulanishni ta'minlaydi
   const { status, lastMessage, connect, disconnect } = useWebSocket(
-    (() => { const t = localStorage.getItem('tv_access_token'); return config.wsUrl + '/api/v1/live/ws' + (t ? `?token=${t}` : ''); })()
+    () => {
+      const t = localStorage.getItem('tv_access_token');
+      return config.wsUrl + '/api/v1/live/ws' + (t ? `?token=${t}` : '');
+    }
   );
 
   const [pipelineRunning, setPipelineRunning] = useState(false);

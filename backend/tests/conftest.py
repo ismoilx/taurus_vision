@@ -13,6 +13,7 @@ import asyncio
 import numpy as np
 from typing import AsyncGenerator
 from datetime import datetime, timezone
+from fastapi import Request
 
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
@@ -74,15 +75,15 @@ def app():
 @pytest.fixture
 async def client(app, db) -> AsyncGenerator[AsyncClient, None]:
     """
-    Async HTTP client — DB override bilan.
-
-    Har request haqiqiy DB o'rniga test DB ga boradi.
+    Async HTTP client — faqat DB override bilan.
+    Endi passlib o'rnatildi, haqiqiy auth tizimi o'zi muammosiz ishlaydi!
     """
     from app.core.database import get_db
 
     async def override_get_db():
         yield db
 
+    app.dependency_overrides.clear() # Oldingi qoldiqlarni tozalaymiz
     app.dependency_overrides[get_db] = override_get_db
 
     async with AsyncClient(
