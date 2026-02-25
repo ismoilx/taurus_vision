@@ -216,6 +216,10 @@ async def startup_event():
     else:
         logger.error("✗ Database connection failed!")
 
+    # 3.5. Database Seeder (birinchi admin yaratish)
+    from app.core.seeder import run_seeder
+    await run_seeder()
+
     # 4. WebSocket Manager
     from app.api.v1.websocket import initialize_ws_manager
     initialize_ws_manager()

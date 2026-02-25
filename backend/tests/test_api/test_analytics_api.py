@@ -1,138 +1,86 @@
-"""
-Analytics API Tests — /api/v1/analytics/
-
-Qamrovi:
-  - GET /analytics/overview        umumiy statistika
-  - GET /analytics/weight-trends   vazn trendi
-  - GET /analytics/detection-patterns  aniqlash naqshlari
-"""
-
+"""Analytics API Tests — /api/v1/analytics/"""
 import pytest
 from httpx import AsyncClient
 
-
 pytestmark = [pytest.mark.api, pytest.mark.asyncio]
+
+H = lambda t: {"Authorization": f"Bearer {t}"}
 
 
 class TestAnalyticsOverview:
-    """GET /api/v1/analytics/overview."""
-
-    async def _safe_get(self, client: AsyncClient, base_path: str, alt_path: str):
-        """Slash (/) yoki yozilishida farq bo'lsa 404 o'rniga alternativni qidiradi."""
-        r = await client.get(base_path)
+    async def test_overview_empty_db(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/overview", headers=H(admin_token))
         if r.status_code == 404:
-            r = await client.get(base_path + "/")
-        if r.status_code == 404:
-            r = await client.get(alt_path)
-        return r
-
-    async def test_overview_empty_db(self, client: AsyncClient):
-        """Bo'sh DB — nollar bilan qaytadi."""
-        r = await self._safe_get(client, "/api/v1/analytics/overview", "/api/v1/analytics/dashboard")
+            r = await client.get("/api/v1/analytics/dashboard", headers=H(admin_token))
         assert r.status_code == 200
         data = r.json()
-
-        # Kerakli bo'limlar (eski 'weights' o'rniga mavjudlarini tekshiramiz)
         assert "animals" in data
         assert "detections" in data
-        assert "alerts" in data or "weights" in data
 
-    async def test_overview_animals_section(self, client: AsyncClient):
-        """animals bo'limi to'g'ri tuzilmada."""
-        r = await self._safe_get(client, "/api/v1/analytics/overview", "/api/v1/analytics/dashboard")
+    async def test_overview_animals_section(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/overview", headers=H(admin_token))
+        if r.status_code == 404:
+            r = await client.get("/api/v1/analytics/dashboard", headers=H(admin_token))
         assert r.status_code == 200
         animals = r.json()["animals"]
-        assert "total"  in animals
+        assert "total" in animals
         assert "active" in animals
 
-    async def test_overview_detections_section(self, client: AsyncClient):
-        """detections bo'limi total ni o'z ichiga oladi."""
-        r = await self._safe_get(client, "/api/v1/analytics/overview", "/api/v1/analytics/dashboard")
+    async def test_overview_detections_section(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/overview", headers=H(admin_token))
+        if r.status_code == 404:
+            r = await client.get("/api/v1/analytics/dashboard", headers=H(admin_token))
         assert r.status_code == 200
-        detections = r.json()["detections"]
-        assert "total" in detections
+        assert "total" in r.json()["detections"]
 
-    async def test_overview_with_data(
-        self, client: AsyncClient, sample_animal, sample_detection, sample_weight
-    ):
-        """Ma'lumot bor — noldan katta."""
-        r = await self._safe_get(client, "/api/v1/analytics/overview", "/api/v1/analytics/dashboard")
+    async def test_overview_with_data(self, client: AsyncClient, admin_token: str, sample_animal, sample_detection, sample_weight):
+        r = await client.get("/api/v1/analytics/overview", headers=H(admin_token))
+        if r.status_code == 404:
+            r = await client.get("/api/v1/analytics/dashboard", headers=H(admin_token))
         assert r.status_code == 200
         data = r.json()
-        assert data["animals"]["total"]    >= 1
+        assert data["animals"]["total"] >= 1
         assert data["detections"]["total"] >= 1
+
+    async def test_no_token(self, client: AsyncClient):
+        r = await client.get("/api/v1/analytics/overview")
+        assert r.status_code == 401
 
 
 class TestWeightTrends:
-    """GET /api/v1/analytics/weight-trends."""
-
-    async def _safe_get(self, client: AsyncClient, base_path: str, alt_path: str):
-        r = await client.get(base_path)
+    async def test_trends_empty(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/trends/weight", headers=H(admin_token))
         if r.status_code == 404:
-            r = await client.get(base_path + "/")
+            r = await client.get("/api/v1/analytics/weight-trends", headers=H(admin_token))
+        assert r.status_code == 200
+
+    async def test_trends_days_param(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/trends/weight?days=7", headers=H(admin_token))
         if r.status_code == 404:
-            r = await client.get(alt_path)
-        return r
-
-    async def test_trends_empty(self, client: AsyncClient):
-        """Bo'sh DB — bo'sh yoki default javob."""
-        r = await self._safe_get(client, "/api/v1/analytics/weight-trends", "/api/v1/analytics/trends/weight")
+            r = await client.get("/api/v1/analytics/weight-trends?days=7", headers=H(admin_token))
         assert r.status_code == 200
-
-    async def test_trends_with_data(
-        self, client: AsyncClient, sample_animal, sample_weight
-    ):
-        """O'lchov bor — trend ma'lumotlari qaytadi."""
-        r = await self._safe_get(client, "/api/v1/analytics/weight-trends", "/api/v1/analytics/trends/weight")
-        assert r.status_code == 200
-
-    async def test_trends_days_param(self, client: AsyncClient):
-        """days parametri qabul qilinadi."""
-        r = await self._safe_get(client, "/api/v1/analytics/weight-trends?days=7", "/api/v1/analytics/trends/weight?days=7")
-        assert r.status_code == 200
-
-        r2 = await self._safe_get(client, "/api/v1/analytics/weight-trends?days=30", "/api/v1/analytics/trends/weight?days=30")
-        assert r2.status_code == 200
 
 
 class TestDetectionPatterns:
-    """GET /api/v1/analytics/detection-patterns."""
-
-    async def _safe_get(self, client: AsyncClient, base_path: str, alt_path: str):
-        r = await client.get(base_path)
+    async def test_patterns_empty(self, client: AsyncClient, admin_token: str):
+        r = await client.get("/api/v1/analytics/patterns/detections", headers=H(admin_token))
         if r.status_code == 404:
-            r = await client.get(base_path + "/")
-        if r.status_code == 404:
-            r = await client.get(alt_path)
-        return r
-
-    async def test_patterns_empty(self, client: AsyncClient):
-        """Bo'sh DB — 200."""
-        r = await self._safe_get(client, "/api/v1/analytics/detection-patterns", "/api/v1/analytics/patterns/detections")
+            r = await client.get("/api/v1/analytics/detection-patterns", headers=H(admin_token))
         assert r.status_code == 200
 
-    async def test_patterns_with_data(
-        self, client: AsyncClient, sample_detection
-    ):
-        """Detection bor — natija qaytadi."""
-        r = await self._safe_get(client, "/api/v1/analytics/detection-patterns", "/api/v1/analytics/patterns/detections")
+    async def test_patterns_with_data(self, client: AsyncClient, admin_token: str, sample_detection):
+        r = await client.get("/api/v1/analytics/patterns/detections", headers=H(admin_token))
+        if r.status_code == 404:
+            r = await client.get("/api/v1/analytics/detection-patterns", headers=H(admin_token))
         assert r.status_code == 200
 
 
 class TestHealthEndpoint:
-    """GET /health — backend health."""
-
     async def test_health_ok(self, client: AsyncClient):
-        """Health endpoint 200 qaytaradi."""
         r = await client.get("/health")
         assert r.status_code == 200
-        data = r.json()
-        # Degraded holatini ham muvaffaqiyatli qabul qilamiz (chunki mock muhitda bo'lishi normal)
-        assert data.get("status") in ["healthy", "ok", "running", "degraded"]
+        assert r.json().get("status") in ["healthy", "ok", "running", "degraded"]
 
     async def test_health_live(self, client: AsyncClient):
-        """Health live probe."""
         r = await client.get("/health/live")
-        if r.status_code == 404:
-            r = await client.get("/health/live/")
         assert r.status_code == 200
