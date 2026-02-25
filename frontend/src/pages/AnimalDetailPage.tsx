@@ -1,14 +1,12 @@
 /**
  * AnimalDetailPage — Jonivor shaxsiy sahifasi
  *
- * Ko'rsatiladi:
- *   - Asosiy ma'lumotlar + holat
- *   - ADI joriy ball + kategoriya + trend
- *   - ADI 30 kunlik grafik
- *   - Vazn 30 kunlik grafik
- *   - ADI komponentlari (feeding, activity, growth)
- *   - Oxirgi o'lchovlar jadvali
- *   - Rasm ro'yxatdan o'tkazish
+ * Tuzatilgan buglar:
+ *   ✅ ADI komponentlar: adi.scores.feeding_score (oldin: adi.feeding_score)
+ *   ✅ data_quality (oldin: data_completeness)
+ *   ✅ adiDetailed state — trend.current dan olinadi
+ *   ✅ (adiToday as any) hack olib tashlandi
+ *   ✅ Barcha 8 komponent ko'rsatiladi (mavjud bo'lganda)
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -16,7 +14,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Scale, Activity, TrendingUp, TrendingDown,
   Minus, AlertTriangle, CheckCircle, Camera, Upload,
-  Trash2, Download, RefreshCw, Heart, Plus, XCircle,
+  Download, RefreshCw, Heart, Plus,
 } from 'lucide-react';
 import {
   AreaChart, Area, LineChart, Line,
@@ -42,17 +40,44 @@ interface WeightMeasurement {
   confidence_score: number; camera_id: string; timestamp: string;
 }
 
+// Backend ADILogResponse.scores ichidagi komponentlar
+interface ADIComponentScores {
+  activity_score?:   number;
+  feeding_score?:    number;
+  drinking_score?:   number;
+  movement_score?:   number;
+  growth_score?:     number;
+  social_score?:     number;
+  sensor_score?:     number;
+  veterinary_score?: number;
+}
+
+// Backend ADILogResponse — to'liq (komponentlar bilan)
+interface ADILogDetailed {
+  id:               number;
+  animal_id:        number;
+  calculation_date: string;
+  calculated_at:    string;
+  adi_score:        number;
+  category:         string;
+  scores:           ADIComponentScores;
+  data_quality:     number;
+  notes?:           string;
+}
+
+// Grafik uchun soddalashtirilgan yozuv
 interface ADILog {
   id: number; animal_id: number; calculation_date: string;
   adi_score: number; category: string;
-  feeding_score?: number; activity_score?: number; growth_score?: number;
-  detection_count?: number; weight_count?: number;
-  data_completeness?: number;
 }
 
+// Backend ADITrendResponse
 interface ADITrend {
-  trend: { date: string; score: number; category: string }[];
-  avg_score?: number; min_score?: number; max_score?: number;
+  trend:      { date: string; score: number; category: string }[];
+  avg_score?: number;
+  min_score?: number;
+  max_score?: number;
+  current?:   ADILogDetailed;   // ← eng so'nggi kunning to'liq ADI (komponentlar bilan)
 }
 
 interface HealthRecord {
@@ -157,29 +182,30 @@ export default function AnimalDetailPage() {
   const { id }   = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [animal,   setAnimal]   = useState<Animal | null>(null);
-  const [weights,  setWeights]  = useState<WeightMeasurement[]>([]);
-  const [adiLogs,  setAdiLogs]  = useState<ADILog[]>([]);
-  const [adiToday, setAdiToday] = useState<ADILog | null>(null);
-  const [adiTrend, setAdiTrend] = useState<ADITrend | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState('');
-  const [tab,      setTab]      = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
+  const [animal,      setAnimal]      = useState<Animal | null>(null);
+  const [weights,     setWeights]     = useState<WeightMeasurement[]>([]);
+  const [adiLogs,     setAdiLogs]     = useState<ADILog[]>([]);
+  const [adiToday,    setAdiToday]    = useState<ADILog | null>(null);
+  const [adiTrend,    setAdiTrend]    = useState<ADITrend | null>(null);
+  const [adiDetailed, setAdiDetailed] = useState<ADILogDetailed | null>(null);  // komponentlar bilan
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [tab,         setTab]         = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
 
   // Registration
-  const [regFile,     setRegFile]     = useState<File | null>(null);
-  const [regPreview,  setRegPreview]  = useState<string>('');
-  const [regLoading,  setRegLoading]  = useState(false);
-  const [regMsg,      setRegMsg]      = useState('');
-  const [embedCount,  setEmbedCount]  = useState(0);
+  const [regFile,    setRegFile]    = useState<File | null>(null);
+  const [regPreview, setRegPreview] = useState<string>('');
+  const [regLoading, setRegLoading] = useState(false);
+  const [regMsg,     setRegMsg]     = useState('');
+  const [embedCount, setEmbedCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Health records
-  const [healthRecords,  setHealthRecords]  = useState<HealthRecord[]>([]);
-  const [healthLoading,  setHealthLoading]  = useState(false);
-  const [healthTotal,    setHealthTotal]    = useState(0);
-  const [showHealthForm, setShowHealthForm] = useState(false);
-  const [healthForm, setHealthForm] = useState({
+  const [healthRecords,     setHealthRecords]     = useState<HealthRecord[]>([]);
+  const [healthLoading,     setHealthLoading]     = useState(false);
+  const [healthTotal,       setHealthTotal]       = useState(0);
+  const [showHealthForm,    setShowHealthForm]    = useState(false);
+  const [healthForm,        setHealthForm]        = useState({
     record_type: 'checkup',
     severity:    'normal',
     diagnosis:   '',
@@ -210,20 +236,41 @@ export default function AnimalDetailPage() {
                  : (weightsData?.items ?? []);
       setWeights(wArr);
 
-      // ADI trend
+      // ADI trend — backend current maydonida komponentlarni qaytaradi
       try {
         const trend = await apiFetch<ADITrend>(`/api/v1/adi/animal/${id}/trend?days=30`);
         setAdiTrend(trend);
-        if (trend.trend?.length) {
+
+        if (trend.current) {
+          // Eng so'nggi kunning to'liq ADI (8 komponent, data_quality)
+          setAdiDetailed(trend.current);
+          setAdiToday({
+            id:               trend.current.id,
+            animal_id:        trend.current.animal_id,
+            calculation_date: trend.current.calculation_date,
+            adi_score:        trend.current.adi_score,
+            category:         trend.current.category,
+          });
+        } else if (trend.trend?.length) {
+          // Batafsil ma'lumot yo'q — faqat grafik uchun oxirgi nuqta
           const last = trend.trend[trend.trend.length - 1];
-          setAdiToday({ id: 0, animal_id: Number(id),
-            calculation_date: last.date, adi_score: last.score, category: last.category });
+          setAdiToday({
+            id: 0, animal_id: Number(id),
+            calculation_date: last.date,
+            adi_score:        last.score,
+            category:         last.category,
+          });
         }
-        setAdiLogs(trend.trend?.map((p, i) => ({
-          id: i, animal_id: Number(id),
-          calculation_date: p.date, adi_score: p.score, category: p.category,
-        })) ?? []);
-      } catch { /* ADI yo'q bo'lishi mumkin */ }
+
+        setAdiLogs(
+          (trend.trend ?? []).map((p, i) => ({
+            id: i, animal_id: Number(id),
+            calculation_date: p.date,
+            adi_score:        p.score,
+            category:         p.category,
+          }))
+        );
+      } catch { /* ADI yo'q bo'lishi mumkin — yangi jonivor */ }
 
       // Embedding count
       try {
@@ -256,7 +303,6 @@ export default function AnimalDetailPage() {
     }
   }
 
-  // Health tab tanlanganda yuklash
   useEffect(() => {
     if (tab === 'health' && id) loadHealth();
   }, [tab, id]);
@@ -272,9 +318,9 @@ export default function AnimalDetailPage() {
           record_type:  healthForm.record_type,
           severity:     healthForm.severity,
           diagnosis:    healthForm.diagnosis,
-          symptoms:     healthForm.symptoms   || undefined,
-          treatment:    healthForm.treatment  || undefined,
-          medication:   healthForm.medication || undefined,
+          symptoms:     healthForm.symptoms    || undefined,
+          treatment:    healthForm.treatment   || undefined,
+          medication:   healthForm.medication  || undefined,
           veterinarian: healthForm.veterinarian || undefined,
           cost:         healthForm.cost ? parseFloat(healthForm.cost) : undefined,
         }),
@@ -362,12 +408,13 @@ export default function AnimalDetailPage() {
     }));
 
   const latestWeight = weightChart.length ? weightChart[weightChart.length - 1].weight : null;
-  const prevWeight   = weightChart.length > 1 ? weightChart[weightChart.length - 7]?.weight : null;
+  const prevWeight   = weightChart.length > 7 ? weightChart[weightChart.length - 7]?.weight : null;
   const weightChange = latestWeight && prevWeight ? latestWeight - prevWeight : null;
 
-  const adiCfg   = adiToday
+  const adiCfg = adiToday
     ? (CATEGORY_CONFIG[adiToday.category as keyof typeof CATEGORY_CONFIG] || CATEGORY_CONFIG.average)
     : null;
+
   const trendDirection = (() => {
     if (!adiTrend?.trend?.length || adiTrend.trend.length < 3) return 'insufficient_data';
     const arr   = adiTrend.trend;
@@ -421,6 +468,7 @@ export default function AnimalDetailPage() {
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px', fontFamily: 'Outfit, sans-serif' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap');
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
       {/* ── Header ── */}
@@ -536,16 +584,12 @@ export default function AnimalDetailPage() {
         <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: '16px 20px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
             textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>ADI Trendi</div>
-          {trendCfg ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <trendCfg.icon size={24} color={trendCfg.color} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: trendCfg.color }}>
-                {trendCfg.label}
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: 14, color: '#9CA3AF' }}>—</div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <trendCfg.icon size={24} color={trendCfg.color} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: trendCfg.color }}>
+              {trendCfg.label}
+            </span>
+          </div>
         </div>
 
         {/* Aniqlashlar */}
@@ -631,28 +675,44 @@ export default function AnimalDetailPage() {
                     }}>
                       {adiCfg?.label}
                     </div>
-                    {trendCfg && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: trendCfg.color }}>
-                        <trendCfg.icon size={16} />
-                        {trendCfg.label}
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: trendCfg.color }}>
+                      <trendCfg.icon size={16} />
+                      {trendCfg.label}
+                    </div>
                     <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>
                       {format(parseISO(adiToday.calculation_date), 'dd.MM.yyyy')}
                     </div>
                   </div>
                 </div>
 
-                {/* Komponentlar */}
-                {(adiToday as any).feeding_score !== undefined && (
+                {/* Komponentlar — adiDetailed.scores dan olinadi (to'g'ri manba) */}
+                {adiDetailed?.scores && (
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#6B7280',
                       textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
                       Komponentlar
                     </div>
-                    <ComponentBar label="Oziqlanish" value={(adiToday as any).feeding_score ?? 0} color="#3B82F6" />
-                    <ComponentBar label="Faollik"    value={(adiToday as any).activity_score ?? 0} color="#8B5CF6" />
-                    <ComponentBar label="O'sish"     value={(adiToday as any).growth_score ?? 0}   color="#22C55E" />
+                    {adiDetailed.scores.feeding_score != null && (
+                      <ComponentBar label="Oziqlanish" value={adiDetailed.scores.feeding_score}  color="#3B82F6" />
+                    )}
+                    {adiDetailed.scores.activity_score != null && (
+                      <ComponentBar label="Faollik"    value={adiDetailed.scores.activity_score} color="#8B5CF6" />
+                    )}
+                    {adiDetailed.scores.growth_score != null && (
+                      <ComponentBar label="O'sish"     value={adiDetailed.scores.growth_score}   color="#22C55E" />
+                    )}
+                    {adiDetailed.scores.drinking_score != null && (
+                      <ComponentBar label="Suv ichish" value={adiDetailed.scores.drinking_score} color="#06B6D4" />
+                    )}
+                    {adiDetailed.scores.movement_score != null && (
+                      <ComponentBar label="Harakat"    value={adiDetailed.scores.movement_score} color="#F59E0B" />
+                    )}
+                    {adiDetailed.scores.social_score != null && (
+                      <ComponentBar label="Ijtimoiy"   value={adiDetailed.scores.social_score}   color="#EC4899" />
+                    )}
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 8 }}>
+                      Ma'lumot sifati: {((adiDetailed.data_quality ?? 0) * 100).toFixed(0)}%
+                    </div>
                   </div>
                 )}
               </>
@@ -789,39 +849,63 @@ export default function AnimalDetailPage() {
             )}
           </div>
 
-          {/* Komponentlar grafik */}
-          {adiLogs.some(a => (a as any).feeding_score) && (
+          {/* Komponentlar to'liq paneli — faqat adiDetailed mavjud bo'lganda */}
+          {adiDetailed?.scores && (
             <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
-                ADI Komponentlari Trendi
-              </h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={[...adiLogs]
-                  .sort((a, b) => a.calculation_date.localeCompare(b.calculation_date))
-                  .map(a => ({
-                    date:     format(parseISO(a.calculation_date), 'dd/MM'),
-                    feeding:  (a as any).feeding_score?.toFixed(1),
-                    activity: (a as any).activity_score?.toFixed(1),
-                    growth:   (a as any).growth_score?.toFixed(1),
-                  }))
-                }>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#E4E7ED" />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="#E4E7ED" />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E4E7ED', fontSize: 12 }} />
-                  <Line type="monotone" dataKey="feeding"  stroke="#3B82F6" strokeWidth={2} dot={false} name="Oziqlanish" />
-                  <Line type="monotone" dataKey="activity" stroke="#8B5CF6" strokeWidth={2} dot={false} name="Faollik" />
-                  <Line type="monotone" dataKey="growth"   stroke="#22C55E" strokeWidth={2} dot={false} name="O'sish" />
-                </LineChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', gap: 20, justifyContent: 'center', marginTop: 12 }}>
-                {[['#3B82F6', 'Oziqlanish'], ['#8B5CF6', 'Faollik'], ['#22C55E', "O'sish"]].map(([c, l]) => (
-                  <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6B7280' }}>
-                    <div style={{ width: 20, height: 2, background: c }} />
-                    {l}
-                  </div>
-                ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', margin: 0 }}>
+                  ADI Komponentlari — {format(parseISO(adiDetailed.calculation_date), 'dd.MM.yyyy')}
+                </h3>
+                <span style={{
+                  fontSize: 11, padding: '3px 10px', borderRadius: 99,
+                  background: '#F3F4F6', color: '#6B7280',
+                }}>
+                  Sifat: {((adiDetailed.data_quality ?? 0) * 100).toFixed(0)}%
+                </span>
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                {[
+                  { key: 'feeding_score',    label: 'Oziqlanish',  color: '#3B82F6', weight: '20%' },
+                  { key: 'activity_score',   label: 'Faollik',     color: '#8B5CF6', weight: '20%' },
+                  { key: 'growth_score',     label: "O'sish",      color: '#22C55E', weight: '20%' },
+                  { key: 'movement_score',   label: 'Harakat',     color: '#F59E0B', weight: '15%' },
+                  { key: 'drinking_score',   label: 'Suv ichish',  color: '#06B6D4', weight: '10%' },
+                  { key: 'social_score',     label: 'Ijtimoiy',    color: '#EC4899', weight: '10%' },
+                  { key: 'sensor_score',     label: 'Sensor',      color: '#64748B', weight: '5%'  },
+                  { key: 'veterinary_score', label: 'Veterinar',   color: '#DC2626', weight: '5%'  },
+                ].map(({ key, label, color, weight }) => {
+                  const val = adiDetailed.scores[key as keyof ADIComponentScores];
+                  if (val == null) return null;
+                  return (
+                    <div key={key} style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 12, color: '#6B7280' }}>
+                          {label} <span style={{ fontSize: 10, color: '#D1D5DB' }}>({weight})</span>
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color }}>
+                          {val.toFixed(0)}
+                        </span>
+                      </div>
+                      <div style={{ height: 8, background: '#F3F4F6', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{
+                          height: '100%', width: `${val}%`,
+                          background: color, borderRadius: 4,
+                          transition: 'width 0.6s ease',
+                        }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {adiDetailed.notes && (
+                <div style={{
+                  marginTop: 16, padding: '10px 14px', borderRadius: 8,
+                  background: '#F9FAFB', border: '1px solid #E4E7ED',
+                  fontSize: 12, color: '#6B7280',
+                }}>
+                  💬 {adiDetailed.notes}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -870,7 +954,6 @@ export default function AnimalDetailPage() {
                 Barcha O'lchovlar ({weights.length} ta)
               </h3>
               <button onClick={() => {
-                const token = localStorage.getItem('tv_access_token');
                 window.open(`${config.apiUrl}/api/v1/export/weights?animal_id=${id}&format=csv`, '_blank');
               }} style={{
                 display: 'flex', alignItems: 'center', gap: 6,
@@ -930,7 +1013,6 @@ export default function AnimalDetailPage() {
       {tab === 'health' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Header: soni + yangi qo'shish tugmasi */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 14, color: '#6B7280' }}>
               Jami <span style={{ fontWeight: 700, color: '#0D1117' }}>{healthTotal}</span> ta sog'liq yozuvi
@@ -961,7 +1043,6 @@ export default function AnimalDetailPage() {
               </h3>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                {/* Tur */}
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
                     Tur *
@@ -985,7 +1066,6 @@ export default function AnimalDetailPage() {
                   </select>
                 </div>
 
-                {/* Jiddiylik */}
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
                     Jiddiylik *
@@ -1005,10 +1085,9 @@ export default function AnimalDetailPage() {
                   </select>
                 </div>
 
-                {/* Diagnoz */}
                 <div style={{ gridColumn: '1 / -1' }}>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Diagnoz * <span style={{ fontWeight: 400, color: '#9CA3AF' }}>(min 1 belgi)</span>
+                    Diagnoz *
                   </label>
                   <input
                     type="text"
@@ -1023,75 +1102,29 @@ export default function AnimalDetailPage() {
                   />
                 </div>
 
-                {/* Belgilar */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Belgilar
-                  </label>
-                  <input
-                    type="text"
-                    value={healthForm.symptoms}
-                    onChange={e => setHealthForm(f => ({ ...f, symptoms: e.target.value }))}
-                    placeholder="Kuzatilgan alomatlar..."
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
+                {[
+                  ['symptoms',    'Belgilar',    'Kuzatilgan alomatlar...'],
+                  ['treatment',   'Davolash',    'Qilingan davolash...'],
+                  ['medication',  'Dori-darmon', 'Berilgan dorilar...'],
+                  ['veterinarian','Veterinar',   'Veterinar ismi...'],
+                ].map(([field, label, placeholder]) => (
+                  <div key={field}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
+                      {label}
+                    </label>
+                    <input
+                      type="text"
+                      value={healthForm[field as keyof typeof healthForm]}
+                      onChange={e => setHealthForm(f => ({ ...f, [field]: e.target.value }))}
+                      placeholder={placeholder}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8,
+                        border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                ))}
 
-                {/* Davolash */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Davolash
-                  </label>
-                  <input
-                    type="text"
-                    value={healthForm.treatment}
-                    onChange={e => setHealthForm(f => ({ ...f, treatment: e.target.value }))}
-                    placeholder="Qilingan davolash..."
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                {/* Dori */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Dori-darmon
-                  </label>
-                  <input
-                    type="text"
-                    value={healthForm.medication}
-                    onChange={e => setHealthForm(f => ({ ...f, medication: e.target.value }))}
-                    placeholder="Berilgan dorilar..."
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                {/* Veterinar */}
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Veterinar
-                  </label>
-                  <input
-                    type="text"
-                    value={healthForm.veterinarian}
-                    onChange={e => setHealthForm(f => ({ ...f, veterinarian: e.target.value }))}
-                    placeholder="Veterinar ismi..."
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-
-                {/* Narx */}
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
                     Narx (UZS)
@@ -1110,7 +1143,6 @@ export default function AnimalDetailPage() {
                 </div>
               </div>
 
-              {/* Xabar */}
               {healthFormMsg && (
                 <div style={{
                   marginTop: 14, padding: '10px 14px', borderRadius: 8,
@@ -1122,7 +1154,6 @@ export default function AnimalDetailPage() {
                 </div>
               )}
 
-              {/* Submit */}
               <button
                 onClick={handleHealthCreate}
                 disabled={!healthForm.diagnosis.trim() || healthFormLoading}
@@ -1253,7 +1284,6 @@ export default function AnimalDetailPage() {
                         </div>
                       </div>
 
-                      {/* Hal etish tugmasi */}
                       {!rec.is_resolved && (
                         <button
                           onClick={() => handleHealthResolve(rec.id)}
@@ -1283,7 +1313,6 @@ export default function AnimalDetailPage() {
       {tab === 'register' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
-          {/* Rasm yuklash */}
           <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 6 }}>
               Identifikatsiya Rasmi Yuklash
@@ -1293,7 +1322,6 @@ export default function AnimalDetailPage() {
               Bir necha burchakdan rasm yuklash aniqlikni oshiradi.
             </p>
 
-            {/* Upload zone */}
             <div
               onClick={() => fileRef.current?.click()}
               style={{
@@ -1360,7 +1388,6 @@ export default function AnimalDetailPage() {
             </button>
           </div>
 
-          {/* Yo'riqnoma */}
           <div style={{ background: '#F7F8FA', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 16 }}>
               Qanday ishlaydi?
@@ -1386,19 +1413,6 @@ export default function AnimalDetailPage() {
                 </div>
               </div>
             ))}
-
-            <div style={{
-              marginTop: 20, padding: '12px 16px', borderRadius: 8,
-              background: '#EFF6FF', border: '1px solid #BFDBFE',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#1E3EB4', marginBottom: 4 }}>
-                💡 Maslahat
-              </div>
-              <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>
-                Har bir jonivor uchun kamida <b>3-5 ta rasm</b> (turli burchak va yoritishda) yuklang.
-                Bu aniqlikni 75% dan 95% ga yetkazadi.
-              </div>
-            </div>
 
             <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8,
               background: '#F0FDF4', border: '1px solid #BBF7D0' }}>

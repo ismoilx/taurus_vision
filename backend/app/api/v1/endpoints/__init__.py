@@ -20,7 +20,7 @@ from app.api.v1.endpoints import (
     registration,
     adi,
     alerts,
-    health,
+    health,          # ← QO'SHILDI
 )
 
 router = APIRouter(prefix="/v1")
@@ -49,4 +49,4 @@ router.include_router(adi.router)
 router.include_router(alerts.router)
 
 # --- Health Records ---
-router.include_router(health.router)
+router.include_router(health.router)   # ← QO'SHILDI
