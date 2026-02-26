@@ -36,7 +36,7 @@ Storage:
 
 ## 🗂️ **TO'LIQ FAYL STRUKTURASI**
 ```
-taurus-vision/
+## taurus-vision/
 │
 ├── docs/                           # HUJJATLAR
 │   ├── ARCHITECTURE.md            # Arxitektura tafsiloti
@@ -231,7 +231,7 @@ taurus-vision/
 ├── .gitignore
 ├── README.md                      # Asosiy README
 ├── LICENSE
-└── CHANGELOG.md
+└── CHANGELOG.md##
 ```
 
 ---
