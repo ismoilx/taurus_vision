@@ -57,7 +57,7 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       HOST: "0.0.0.0"
       PORT: "8000"
-      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "https://zxzx.uz", "https://api.zxzx.uz"]'
+      CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "https://zxzx.uz", "https://api.zxzx.uz", "https://taurus.zxzx.uz"]'
       SECRET_KEY: "taurus-vision-dev-secret-change-in-production-2024"
       INITIAL_ADMIN_EMAIL: "admin@taurus.uz"
       INITIAL_ADMIN_USERNAME: "admin"
@@ -169,8 +169,8 @@ services:
     container_name: taurus-frontend
     restart: unless-stopped
     environment:
-      VITE_API_URL: "http://localhost:8000"
-      VITE_WS_URL: "ws://localhost:8000"
+      VITE_API_URL: "https://api.zxzx.uz"
+      VITE_WS_URL: "wss://api.zxzx.uz"
     ports:
       - "5173:5173"
     volumes:

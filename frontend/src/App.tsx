@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Cpu, Video, Camera, Bell, Mail, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, Cpu, Video, Camera, Bell, Mail, Users, FileText, Stethoscope, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -17,6 +17,9 @@ import LiveFeedPage    from './pages/LiveFeedPage';
 import CamerasPage     from './pages/CamerasPage';
 import AlertsPage          from './pages/AlertsPage';
 import NotificationsPage   from './pages/NotificationsPage';
+import UsersPage           from './pages/UsersPage';
+import ReportsPage         from './pages/ReportsPage';
+import HealthPage          from './pages/HealthPage';
 import AnalyticsPage   from './pages/AnalyticsPage';
 
 import './App.css';
@@ -156,6 +159,9 @@ const navItems = [
   { to:'/cameras',   icon:Camera,         label:'Kameralar'            },
   { to:'/alerts',        icon:Bell,   label:'Alertlar'             },
   { to:'/notifications', icon:Mail,   label:'Bildirishnomalar'      },
+  { to:'/users',         icon:Users,       label:'Foydalanuvchilar'   },
+  { to:'/reports',       icon:FileText,    label:'Hisobotlar'         },
+  { to:'/health',        icon:Stethoscope, label:'Veterinariya'       },
 ];
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -265,6 +271,9 @@ export default function App() {
                   <Route path="/cameras"     element={<CamerasPage />} />
                   <Route path="/alerts"          element={<AlertsPage />} />
                   <Route path="/notifications"    element={<NotificationsPage />} />
+                  <Route path="/users"            element={<UsersPage />} />
+                  <Route path="/reports"          element={<ReportsPage />} />
+                  <Route path="/health"           element={<HealthPage />} />
                   <Route path="*"            element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>
