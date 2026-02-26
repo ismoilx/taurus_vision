@@ -1,4 +1,4 @@
-Backend:
+```Backend:
   Language: Python 3.11
   Framework: FastAPI
   ORM: SQLAlchemy 2.0
@@ -34,7 +34,7 @@ Storage:
 
 ---
 
-## 🗂️ **TO'LIQ FAYL STRUKTURASI**
+🗂️ **TO'LIQ FAYL STRUKTURASI**
 ```
 ```taurus-vision/
 │
