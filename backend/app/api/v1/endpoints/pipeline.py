@@ -117,7 +117,7 @@ async def start_pipeline(
             detail=f"Pipeline '{body.camera_id}' allaqachon ishlayapti",
         )
 
-    ok = await manager.start_camera(
+    ok, reason = await manager.start_camera(
         camera_id    = camera.camera_id,
         camera_type  = camera.type.value,
         source       = camera.source,
@@ -129,7 +129,7 @@ async def start_pipeline(
     if not ok:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pipeline '{body.camera_id}' ni ishga tushirib bo'lmadi",
+            detail=reason or f"Pipeline '{body.camera_id}' ni ishga tushirib bo'lmadi",
         )
 
     return {
@@ -167,12 +167,12 @@ async def stop_pipeline(
         )
 
     stats = manager.get_status(camera_id).get("stats")
-    ok    = await manager.stop_camera(camera_id)
+    ok, reason = await manager.stop_camera(camera_id)
 
     return {
         "status":        "stopped" if ok else "error",
         "camera_id":     camera_id,
-        "message":       "Pipeline to'xtatildi" if ok else "To'xtatishda xato",
+        "message":       "Pipeline to'xtatildi" if ok else reason,
         "final_stats":   stats,
         "total_running": manager.total_running(),
     }
@@ -432,3 +432,36 @@ async def inject_test_detection(
         "websocket_broadcast": ws_manager is not None,
         "detections":          injected,
     }
+
+# ============================================================================
+# SPRINT 9-10: Tizim metrikalari
+# ============================================================================
+
+@router.get(
+    "/system-metrics",
+    status_code=200,
+    summary="Tizim resurslari va load balancing holati",
+    description=(
+        "CPU, RAM, aktiv pipelinelar soni va load balancer holati. "
+        "Dashboard va monitoring uchun."
+    ),
+)
+async def get_system_metrics(
+    current_user: CurrentUser = ...,
+) -> dict:
+    """
+    Tizim resurslari va pipeline load balancing ma'lumotlari.
+
+    Returns:
+        {
+            "cpu_percent":         float  — CPU yuki (%),
+            "ram_percent":         float  — RAM yuki (%),
+            "ram_available_mb":    float  — Bo'sh RAM (MB),
+            "active_pipelines":    int    — Ishlayotgan pipelinelar,
+            "max_pipelines":       int    — Maksimal ruxsat etilgan,
+            "current_skip_frames": int    — Hozirgi adaptiv skip,
+            "can_start_new":       bool   — Yangi pipeline qo'shish mumkinmi,
+        }
+    """
+    manager = get_pipeline_manager()
+    return manager.get_system_metrics()

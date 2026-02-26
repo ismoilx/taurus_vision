@@ -409,3 +409,74 @@ class TestCamerasAPI:
         # 8. Verify removed
         response = test_client.get("/api/v1/cameras/")
         assert camera_id not in response.json()
+
+
+# ============================================================================
+# SPRINT 9-10: Qo'shimcha testlar
+# ============================================================================
+
+class TestSystemMetricsEndpoint:
+    """GET /pipeline/system-metrics — Sprint 9-10 yangi endpoint."""
+
+    async def test_system_metrics_structure(
+        self, client: AsyncClient, admin_token: str
+    ):
+        """system-metrics to'g'ri kalit larni qaytaradi."""
+        r = await client.get(
+            "/api/v1/pipeline/system-metrics",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+
+        required = [
+            "cpu_percent", "ram_percent", "ram_available_mb",
+            "active_pipelines", "max_pipelines",
+            "current_skip_frames", "can_start_new",
+        ]
+        for key in required:
+            assert key in data, f"Missing key in system-metrics: {key}"
+
+    async def test_system_metrics_values_in_range(
+        self, client: AsyncClient, viewer_token: str
+    ):
+        """VIEWER ham system-metrics ko'ra oladi, qiymatlar mantiqiy."""
+        r = await client.get(
+            "/api/v1/pipeline/system-metrics",
+            headers={"Authorization": f"Bearer {viewer_token}"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+
+        assert 0 <= data["cpu_percent"] <= 100
+        assert 0 <= data["ram_percent"] <= 100
+        assert data["ram_available_mb"] >= 0
+        assert data["active_pipelines"] >= 0
+        assert data["max_pipelines"] >= 1
+        assert data["current_skip_frames"] in (2, 4, 8)
+        assert isinstance(data["can_start_new"], bool)
+
+
+class TestPipelineStatusEndpoint:
+    """GET /pipeline/status — barcha pipelinelar holati."""
+
+    async def test_all_status_format(
+        self, client: AsyncClient, admin_token: str
+    ):
+        """Pipeline status to'g'ri format."""
+        r = await client.get(
+            "/api/v1/pipeline/status",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+
+        assert "total_running" in data
+        assert "running_cameras" in data
+        assert isinstance(data["total_running"], int)
+        assert isinstance(data["running_cameras"], list)
+
+    async def test_unauthenticated_denied(self, client: AsyncClient):
+        """Token yo'q bo'lganda 401."""
+        r = await client.get("/api/v1/pipeline/status")
+        assert r.status_code in (401, 403)

@@ -1,11 +1,18 @@
 """
-Celery Application Configuration — Sprint 6
+Celery Application Configuration — Sprint 9-10
 
 Beat schedule:
-  00:30 UTC  — Kunlik ADI hisoblash (barcha aktiv jonivorlar)
-  Har soat   — Ko'rinmayotgan jonivorlarni tekshirish
-  Dushanba 02:00 — O'sish to'xtagan jonivorlar
-  Yakshanba 03:00 — Eski alertlarni tozalash
+  00:30 UTC        — Kunlik ADI hisoblash (barcha aktiv jonivorlar)
+  Har soat         — Ko'rinmayotgan jonivorlarni tekshirish
+  Dushanba 02:00   — O'sish to'xtagan jonivorlar
+  Yakshanba 03:00  — Eski alertlarni tozalash
+
+  Sprint 9-10 (yangi):
+  Har 5 daqiqa     — Kamera sog'lig'ini tekshirish (health_check_cameras)
+  Har 1 daqiqa     — Kamera statistikasini cache qilish (aggregate_camera_stats)
+  Har 6 soat       — Anomaliya aniqlash (detect_anomalies)
+  Har kuni 23:00   — Kunlik ferma xulosasi (generate_daily_summary)
+  Hafta da bir     — Eski detection larni tozalash (cleanup_stale_detections)
 """
 
 from celery import Celery
@@ -68,3 +75,33 @@ from workers.tasks import (  # noqa: E402, F401
     detection_tasks,
     notification_tasks,
 )
+# ── Sprint 9-10 tasklar qo'shildi ─────────────────────────────────────────────
+_sprint910_tasks = {
+    "camera-health-check": {
+        "task":     "detection.health_check_cameras",
+        "schedule": crontab(minute="*/5"),
+        "options":  {"queue": "default"},
+    },
+    "camera-stats-cache": {
+        "task":     "detection.aggregate_camera_stats",
+        "schedule": crontab(minute="*"),
+        "options":  {"queue": "default"},
+    },
+    "anomaly-detection": {
+        "task":     "analysis.detect_anomalies",
+        "schedule": crontab(minute=0, hour="*/6"),
+        "options":  {"queue": "default"},
+    },
+    "daily-farm-summary": {
+        "task":     "analysis.generate_daily_summary",
+        "schedule": crontab(hour=23, minute=0),
+        "options":  {"queue": "default"},
+    },
+    "cleanup-stale-detections": {
+        "task":     "detection.cleanup_stale_detections",
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
+        "kwargs":   {"days_to_keep": 90},
+        "options":  {"queue": "maintenance"},
+    },
+}
+celery_app.conf.beat_schedule.update(_sprint910_tasks)
