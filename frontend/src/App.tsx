@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Cpu, Video, Camera, Bell, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
+import { LayoutDashboard, Cpu, Video, Camera, Bell, Mail, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -15,7 +15,8 @@ import AnimalsPage     from './pages/AnimalsPage';
 import AnimalDetailPage from './pages/AnimalDetailPage';
 import LiveFeedPage    from './pages/LiveFeedPage';
 import CamerasPage     from './pages/CamerasPage';
-import AlertsPage      from './pages/AlertsPage';
+import AlertsPage          from './pages/AlertsPage';
+import NotificationsPage   from './pages/NotificationsPage';
 import AnalyticsPage   from './pages/AnalyticsPage';
 
 import './App.css';
@@ -153,7 +154,8 @@ const navItems = [
   { to:'/analytics', icon:BarChart2,      label:'Analitika'            },
   { to:'/live',      icon:Video,          label:'Live Feed'            },
   { to:'/cameras',   icon:Camera,         label:'Kameralar'            },
-  { to:'/alerts',    icon:Bell,           label:'Alertlar'             },
+  { to:'/alerts',        icon:Bell,   label:'Alertlar'             },
+  { to:'/notifications', icon:Mail,   label:'Bildirishnomalar'      },
 ];
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -261,7 +263,8 @@ export default function App() {
                   <Route path="/analytics"  element={<AnalyticsPage />} />
                   <Route path="/live"        element={<LiveFeedPage />} />
                   <Route path="/cameras"     element={<CamerasPage />} />
-                  <Route path="/alerts"      element={<AlertsPage />} />
+                  <Route path="/alerts"          element={<AlertsPage />} />
+                  <Route path="/notifications"    element={<NotificationsPage />} />
                   <Route path="*"            element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>

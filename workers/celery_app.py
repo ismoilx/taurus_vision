@@ -43,6 +43,12 @@ celery_app.conf.beat_schedule = {
         "kwargs":   {"keep_days": 90},
         "options":  {"queue": "maintenance"},
     },
+
+    "daily-digest-email": {
+        "task":     "notification.send_daily_digest",
+        "schedule": crontab(hour=7, minute=0),   # Har kuni 07:00 UTC
+        "options":  {"queue": "notification"},
+    },
 }
 
 celery_app.conf.task_routes = {

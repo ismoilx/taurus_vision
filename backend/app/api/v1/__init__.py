@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     adi,
     alerts,
     health,
+    notifications,
 )
 
 router = APIRouter(prefix="/v1")
@@ -50,3 +51,6 @@ router.include_router(alerts.router)
 
 # --- Health Records ---
 router.include_router(health.router)
+
+# --- Notifications ---
+router.include_router(notifications.router)

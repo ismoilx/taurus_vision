@@ -670,6 +670,20 @@ class AlertService:
                     f"| animal={animal_id} "
                     f"| severity={severity.value}"
                 )
+
+                # Sprint 11: Yangi alert uchun email notification
+                # LOW severity uchun email yuborilmaydi (notification_service da filtrlanadi)
+                try:
+                    from workers.tasks.notification_tasks import send_alert_email
+                    send_alert_email.delay(
+                        alert_id   = created.id,
+                        animal_tag = None,  # AlertService animal_tag ni bilmaydi
+                    )
+                    logger.debug(f"Notification task queued: alert #{created.id}")
+                except Exception as notif_exc:
+                    # Notification xatosi pipeline ni to'xtatmasin
+                    logger.warning(f"Notification task queue failed: {notif_exc}")
+
                 return created
 
         except Exception as e:

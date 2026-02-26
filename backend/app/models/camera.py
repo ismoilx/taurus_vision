@@ -73,7 +73,7 @@ class Camera(BaseModel):
     # =========================================================================
 
     type: Mapped[CameraType] = mapped_column(
-        SQLEnum(CameraType, name="camera_type"),
+        SQLEnum(CameraType, name="camera_type", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=CameraType.SIMULATED,
         comment="Kamera manba turi: simulated | usb | rtsp",
