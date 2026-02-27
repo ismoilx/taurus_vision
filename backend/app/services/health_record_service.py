@@ -158,7 +158,34 @@ class HealthRecordService:
             f"Health record created successfully: id={created.id}, "
             f"animal_id={animal_id}, type={record_type.value}, severity={severity.value}"
         )
-        
+
+        # Sprint 11-12: HealthRecord yaratilganda real-time WebSocket broadcast
+        # Frontend AnimalDetailPage va HealthPage darhol yangilanadi
+        try:
+            stats        = await self.health_repo.get_statistics(db, animal_id)
+            health_score = self._calculate_health_score(stats)
+            health_status = self._get_health_status(health_score)
+
+            from app.api.v1.websocket import get_ws_manager
+            ws_manager = get_ws_manager()
+            import asyncio as _asyncio
+            _asyncio.ensure_future(
+                ws_manager.broadcast_health_update(
+                    animal_id     = animal_id,
+                    health_score  = health_score,
+                    health_status = health_status,
+                    record_id     = created.id,
+                )
+            )
+            logger.debug(
+                f"Health update WS broadcast scheduled: "
+                f"animal={animal_id}, score={health_score}"
+            )
+        except RuntimeError:
+            pass  # WS manager test yoki startup bosqichida yo'q
+        except Exception as ws_exc:
+            logger.warning(f"Health WS broadcast failed: {ws_exc}")
+
         return created
     
     # =========================================================================

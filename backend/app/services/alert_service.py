@@ -684,6 +684,40 @@ class AlertService:
                     # Notification xatosi pipeline ni to'xtatmasin
                     logger.warning(f"Notification task queue failed: {notif_exc}")
 
+                # Sprint 11-12: Real-time WebSocket broadcast
+                # Barcha ulangan clientlar darhol yangi alertni ko'radi
+                try:
+                    from app.api.v1.websocket import get_ws_manager
+                    ws_manager = get_ws_manager()
+                    # asyncio.create_task orqali — alert_service async context da ishlaydi
+                    import asyncio as _asyncio
+                    _asyncio.ensure_future(ws_manager.broadcast_alert(created))
+                    logger.debug(f"Alert WS broadcast scheduled: alert #{created.id}")
+                except RuntimeError:
+                    # WebSocket manager ishga tushirilmagan (test yoki startup bosqichida)
+                    pass
+                except Exception as ws_exc:
+                    # WS xatosi asosiy oqimni to'xtatmasin
+                    logger.warning(f"Alert WS broadcast failed: {ws_exc}")
+
+                # Sprint 11-12: Critical alert → HealthRecord avtomatik yaratish
+                # CRITICAL va HIGH severity alertlar uchun veterinar yozuvi ochiladi
+                if (
+                    severity in (AlertSeverity.CRITICAL, AlertSeverity.HIGH)
+                    and animal_id is not None
+                ):
+                    try:
+                        await self._auto_create_health_record(
+                            animal_id  = animal_id,
+                            alert      = created,
+                            alert_type = alert_type,
+                        )
+                    except Exception as hr_exc:
+                        # Health record xatosi pipeline ni to'xtatmasin
+                        logger.warning(
+                            f"Auto health record creation failed: {hr_exc}"
+                        )
+
                 return created
 
         except Exception as e:
@@ -783,3 +817,85 @@ class AlertService:
         if not alert:
             raise EntityNotFoundError(entity="Alert", identifier=alert_id)
         return alert
+    async def _auto_create_health_record(
+        self,
+        animal_id:  int,
+        alert:      "Alert",
+        alert_type: "AlertType",
+    ) -> None:
+        """
+        Critical/High severity alert yaratilganda avtomatik HealthRecord ochadi.
+
+        Bu metod veterinarga signal beradi — kritik holat yuzaga kelganda
+        tizim avtomatik tibbiy yozuv yaratadi. Veterinar keyinchalik
+        to'ldirishi yoki o'zgartirishi mumkin.
+
+        QOIDALAR:
+            - ADI_CRITICAL    → HealthRecord (illness, critical)
+            - ADI_SHARP_DROP  → HealthRecord (checkup, warning)
+            - FEEDING_STOPPED → HealthRecord (illness, warning)
+            - MISSING_ANIMAL  → HealthRecord (checkup, warning)
+            - Boshqa CRITICAL  → HealthRecord (other, critical)
+
+        Args:
+            animal_id:  Jonivor ID
+            alert:      Yangi yaratilgan Alert instance
+            alert_type: AlertType enum qiymati
+
+        Notes:
+            Xato yutiladi — health record xatosi alert yaratishni to'xtatmaydi.
+        """
+        from app.models.health_record import HealthRecord, HealthRecordType, HealthRecordSeverity
+        from datetime import datetime, timezone
+
+        # Alert turiga qarab health record parametrlari
+        _TYPE_MAP: dict[str, tuple[HealthRecordType, HealthRecordSeverity]] = {
+            "adi_critical":    (HealthRecordType.ILLNESS,   HealthRecordSeverity.CRITICAL),
+            "adi_warning":     (HealthRecordType.CHECKUP,   HealthRecordSeverity.WARNING),
+            "adi_sharp_drop":  (HealthRecordType.CHECKUP,   HealthRecordSeverity.WARNING),
+            "feeding_stopped": (HealthRecordType.ILLNESS,   HealthRecordSeverity.WARNING),
+            "missing_animal":  (HealthRecordType.CHECKUP,   HealthRecordSeverity.WARNING),
+        }
+
+        alert_type_str = alert_type.value if hasattr(alert_type, "value") else str(alert_type)
+        record_type, severity = _TYPE_MAP.get(
+            alert_type_str,
+            (HealthRecordType.OTHER, HealthRecordSeverity.CRITICAL),
+        )
+
+        # Tizim tomonidan yaratilgan tibbiy yozuv
+        diagnosis = (
+            f"[TIZIM] {getattr(alert, 'title', 'Avtomatik alert')} — "
+            f"Veterinar tekshiruvi talab etiladi"
+        )
+
+        health_record = HealthRecord(
+            animal_id    = animal_id,
+            record_type  = record_type,
+            severity     = severity,
+            diagnosis    = diagnosis[:500],  # CharField limit
+            symptoms     = getattr(alert, "description", None),
+            notes        = (
+                f"Alert #{getattr(alert, 'id', '?')} ({alert_type_str}) "
+                f"asosida avtomatik yaratildi. "
+                f"Veterinar to'ldirishi talab etiladi."
+            ),
+            is_resolved  = False,
+            recorded_at  = datetime.now(timezone.utc),
+        )
+
+        self.db.add(health_record)
+        await self.db.flush()  # ID ga ega bo'lish uchun (commit keyingi qadam)
+        await self.db.commit()
+
+        logger.info(
+            "Auto health record created",
+            extra={"extra_data": {
+                "animal_id":      animal_id,
+                "health_record_id": health_record.id,
+                "alert_id":       getattr(alert, "id", None),
+                "alert_type":     alert_type_str,
+                "record_type":    record_type.value,
+                "severity":       severity.value,
+            }},
+        )

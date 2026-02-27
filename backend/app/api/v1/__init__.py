@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     alerts,
     health,
     notifications,
+    behavior,
 )
 
 router = APIRouter(prefix="/v1")
@@ -54,3 +55,6 @@ router.include_router(health.router)
 
 # --- Notifications ---
 router.include_router(notifications.router)
+
+# --- Behavior Analysis (Sprint 11-12) ---
+router.include_router(behavior.router)

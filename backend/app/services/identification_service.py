@@ -46,7 +46,7 @@ from app.services.ai.feature_extractor import get_feature_extractor
 logger = logging.getLogger(__name__)
 
 # Identification threshold: similarity score must be >= this value
-IDENTIFICATION_THRESHOLD = 0.10
+IDENTIFICATION_THRESHOLD = 0.80
 
 # Maximum embeddings stored per animal
 MAX_EMBEDDINGS_PER_ANIMAL = 10

@@ -173,6 +173,65 @@ class ConnectionManager:
                 }},
             )
 
+    async def broadcast_alert(self, alert: object) -> None:
+        """
+        Yangi alert haqida barcha clientlarga real-time xabar yuboradi.
+
+        alert_service._ensure_alert() tomonidan yangi alert yaratilganda
+        avtomatik chaqiriladi. Frontend AlertsPage real-time yangilanadi.
+
+        Args:
+            alert: Alert ORM instance — id, alert_type, severity,
+                   title, description, animal_id, camera_id,
+                   triggered_at maydonlari ishlatiladi.
+        """
+        try:
+            triggered_at = getattr(alert, "triggered_at", None)
+            await self.broadcast({
+                "type":        "alert",
+                "alert_id":    getattr(alert, "id",          None),
+                "alert_type":  getattr(alert, "alert_type",  None),
+                "severity":    getattr(alert, "severity",    None),
+                "title":       getattr(alert, "title",       None),
+                "description": getattr(alert, "description", None),
+                "animal_id":   getattr(alert, "animal_id",   None),
+                "camera_id":   getattr(alert, "camera_id",   None),
+                "timestamp":   triggered_at.isoformat() if triggered_at else datetime.utcnow().isoformat(),
+            })
+        except Exception as exc:
+            logger.warning(
+                "broadcast_alert xatosi — asosiy oqim ta'sirlanmaydi",
+                extra={"extra_data": {"error": str(exc)}},
+            )
+
+    async def broadcast_health_update(
+        self,
+        animal_id: int,
+        health_score: int,
+        health_status: str,
+        record_id: int | None = None,
+    ) -> None:
+        """
+        Jonivor sog'liq holati yangilanganda barcha clientlarga xabar beradi.
+
+        HealthRecordService.create_health_record() tomonidan chaqiriladi.
+        Frontend AnimalDetailPage va HealthPage real-time yangilanadi.
+
+        Args:
+            animal_id:     Jonivor ID
+            health_score:  Hozirgi sog'liq bali (0-100)
+            health_status: Holat matni (excellent/good/fair/poor/critical)
+            record_id:     Yangi health record ID (ixtiyoriy)
+        """
+        await self.broadcast({
+            "type":          "health_update",
+            "animal_id":     animal_id,
+            "health_score":  health_score,
+            "health_status": health_status,
+            "record_id":     record_id,
+            "timestamp":     datetime.utcnow().isoformat(),
+        })
+
     async def heartbeat(self) -> None:
         """Barcha clientlarga heartbeat xabari yuboradi."""
         await self.broadcast({
