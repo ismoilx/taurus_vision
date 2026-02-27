@@ -9,6 +9,7 @@ Date: 2026-02-16
 """
 
 from datetime import datetime, date
+from datetime import date, timedelta
 from typing import Optional, List, Tuple
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
