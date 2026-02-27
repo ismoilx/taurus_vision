@@ -143,7 +143,7 @@ export default function AlertsPage() {
     queryKey: alertsKey,
     queryFn: () => {
       const statusParam = filter === 'all' ? 'all' : filter;
-      return apiFetch<AlertListResponse>(`/api/v1/alerts?status=${statusParam}&limit=100`);
+      return apiFetch<AlertListResponse>(`/api/v1/alerts/?status=${statusParam}&limit=100`);
     },
   });
 
