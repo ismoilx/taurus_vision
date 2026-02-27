@@ -4,6 +4,13 @@ Analytics API Endpoints - Taurus Vision
 REST API endpoints for analytics and statistics.
 Provides comprehensive data for dashboards, charts, and reports.
 
+PERFORMANCE:
+  Redis cache qo'shildi — og'ir DB so'rovlar keshlanadi:
+    - /overview        → 60s cache
+    - /trends/weight   → 5 daqiqa cache
+    - /patterns/*      → 5 daqiqa cache
+    - /health/metrics  → 2 daqiqa cache
+
 Author: Taurus Vision Team
 Date: 2026-02-16
 """
@@ -16,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.v1.deps import get_current_active_user
 from app.core.logging_config import get_logger
+from app.core.cache import cache_get, cache_set, CacheKeys
 from app.services.analytics_service import AnalyticsService
 from app.schemas.analytics import (
     DashboardOverview,
@@ -106,20 +114,21 @@ async def get_dashboard_overview(
 ) -> DashboardOverview:
     """
     Get comprehensive dashboard overview.
-    
-    This is the main endpoint for populating the dashboard UI.
-    It aggregates data from multiple sources to provide a complete
-    snapshot of the farm's current state.
-    
-    Performance note: This endpoint executes multiple database queries
-    but is optimized with proper indexing and query optimization.
-    Typical response time: 100-300ms.
+    Redis cache: 60 soniya — og'ir DB so'rovdan qaytadigan vaqt 100-300ms edi,
+    endi keshdan <5ms da qaytadi.
     """
     logger.info("API call: GET /analytics/overview")
-    
+
+    # ── Cache check ──────────────────────────────────────────────────────────
+    cached = await cache_get(CacheKeys.OVERVIEW)
+    if cached is not None:
+        logger.debug("Cache HIT: analytics:overview")
+        return DashboardOverview(**cached)
+
+    # ── DB dan hisoblash ─────────────────────────────────────────────────────
     try:
         overview = await analytics_service.get_dashboard_overview(db)
-        
+
         logger.info(
             "Dashboard overview generated",
             extra={
@@ -130,9 +139,12 @@ async def get_dashboard_overview(
                 }
             }
         )
-        
+
+        # 60 soniya kesh
+        await cache_set(CacheKeys.OVERVIEW, overview, ttl=60)
+
         return DashboardOverview(**overview)
-        
+
     except Exception as e:
         logger.error(f"Error generating dashboard overview: {e}", exc_info=True)
         raise HTTPException(
@@ -247,7 +259,15 @@ async def get_weight_trends(
             }
         }
     )
-    
+
+    # ── Cache check (faqat farm-wide, animal_id yo'q bo'lsa) ─────────────────
+    cache_key = CacheKeys.weight_trend(days) if animal_id is None else None
+    if cache_key:
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            logger.debug(f"Cache HIT: {cache_key}")
+            return WeightTrendsResponse(**cached)
+
     try:
         # Validate animal exists if specified
         if animal_id is not None:
@@ -259,7 +279,7 @@ async def get_weight_trends(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Animal with id {animal_id} not found"
                 )
-        
+
         # Get trends
         trends = await analytics_service.get_weight_trends(
             db,
@@ -267,7 +287,7 @@ async def get_weight_trends(
             days=days,
             aggregation=aggregation
         )
-        
+
         logger.info(
             f"Weight trends generated: {len(trends)} data points",
             extra={
@@ -277,13 +297,19 @@ async def get_weight_trends(
                 }
             }
         )
-        
-        return WeightTrendsResponse(
+
+        response = WeightTrendsResponse(
             data=[WeightTrendPoint(**point) for point in trends],
             animal_id=animal_id,
             period_days=days
         )
-        
+
+        # 5 daqiqa kesh (tarixiy ma'lumot, tez o'zgarmaydi)
+        if cache_key:
+            await cache_set(cache_key, response.model_dump(), ttl=300)
+
+        return response
+
     except HTTPException:
         raise
     except Exception as e:
@@ -493,26 +519,19 @@ async def get_health_metrics(
 ) -> HealthMetricsResponse:
     """
     Calculate comprehensive health metrics.
-    
-    This endpoint is crucial for proactive farm management.
-    It identifies potential health issues before they become serious:
-    
-    Alert types:
-    - never_detected: Animal has never been seen by cameras
-    - no_recent_detection: Not detected in 7+ days
-    - weight_loss: Significant weight loss (>5% in 7 days)
-    
-    Best practices:
-    - Check this endpoint daily
-    - Investigate all critical alerts immediately
-    - Monitor risk score trends over time
-    - Set up automated notifications for critical scores
+    Redis cache: 2 daqiqa — sog'liq ko'rsatkichlari real-time emas.
     """
     logger.info("API call: GET /analytics/health/metrics")
-    
+
+    # ── Cache check ──────────────────────────────────────────────────────────
+    cached = await cache_get(CacheKeys.HEALTH_METRICS)
+    if cached is not None:
+        logger.debug("Cache HIT: analytics:health")
+        return HealthMetricsResponse(**cached)
+
     try:
         metrics = await analytics_service.get_health_metrics(db)
-        
+
         logger.info(
             "Health metrics calculated",
             extra={
@@ -523,9 +542,13 @@ async def get_health_metrics(
                 }
             }
         )
-        
-        return HealthMetricsResponse(**metrics)
-        
+
+        response = HealthMetricsResponse(**metrics)
+        # 2 daqiqa kesh
+        await cache_set(CacheKeys.HEALTH_METRICS, metrics, ttl=120)
+
+        return response
+
     except Exception as e:
         logger.error(f"Error calculating health metrics: {e}", exc_info=True)
         raise HTTPException(

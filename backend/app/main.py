@@ -220,6 +220,14 @@ async def startup_event():
     from app.core.seeder import run_seeder
     await run_seeder()
 
+    # 3.6. Redis Cache (ixtiyoriy — yo'q bo'lsa keshsiz ishlaydi)
+    from app.core.cache import get_redis
+    redis_client = await get_redis()
+    if redis_client is not None:
+        logger.info("✓ Redis cache connected")
+    else:
+        logger.warning("⚠️ Redis unavailable — caching disabled (performance reduced)")
+
     # 4. WebSocket Manager
     from app.api.v1.websocket import initialize_ws_manager
     initialize_ws_manager()
@@ -260,11 +268,13 @@ async def shutdown_event():
     from app.services.ai.feature_extractor import shutdown_feature_extractor
     from app.api.v1.websocket import shutdown_ws_manager
     from app.core.database import close_db
+    from app.core.cache import close_redis
 
     for name, coro in [
         ("YOLO model",          shutdown_yolo_service()),
         ("Feature extractor",   shutdown_feature_extractor()),
         ("WebSocket manager",   shutdown_ws_manager()),
+        ("Redis cache",         close_redis()),
         ("Database",            close_db()),
     ]:
         try:

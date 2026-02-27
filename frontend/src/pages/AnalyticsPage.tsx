@@ -8,7 +8,9 @@
  *   GET /api/v1/analytics/cameras/performance — Kamera ishlashi
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   PieChart, Pie, Cell,
@@ -159,65 +161,55 @@ function DayTip({ active, payload, label }: any) {
 // =============================================================================
 
 export default function AnalyticsPage() {
-  const [weightTrend, setWeightTrend] = useState<WeightTrendPoint[]>([]);
-  const [patterns, setPatterns]       = useState<DetectionPatterns | null>(null);
-  const [health, setHealth]           = useState<HealthMetrics | null>(null);
-  const [cameraPerf, setCameraPerf]   = useState<CameraPerf | null>(null);
-  const [loading, setLoading]         = useState(false);
+  const qClient = useQueryClient();
   const [trendDays, setTrendDays]     = useState(30);
   const [patternDays, setPatternDays] = useState(7);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Weight trend
-      const wt = await apiFetch<{ data: WeightTrendPoint[] }>(`/api/v1/analytics/trends/weight?days=${trendDays}`);
-      setWeightTrend((wt.data ?? []).map(p => ({
-        ...p,
-        date: new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
-      })));
+  const to   = new Date().toISOString().split('T')[0];
+  const from = new Date(Date.now() - patternDays * 86400000).toISOString().split('T')[0];
 
-      // Detection patterns
-      const to   = new Date().toISOString().split('T')[0];
-      const from = new Date(Date.now() - patternDays * 86400000).toISOString().split('T')[0];
-      const dp = await apiFetch<DetectionPatterns>(
-        `/api/v1/analytics/patterns/detection?date_from=${from}&date_to=${to}`
-      );
-      setPatterns(dp);
+  const { data: wtRaw, isFetching: loading } = useQuery({
+    queryKey: ['analytics', 'weight-trend', trendDays],
+    queryFn:  () => apiFetch<{ data: WeightTrendPoint[] }>(`/api/v1/analytics/trends/weight?days=${trendDays}`),
+  });
 
-      // Health
-      const h = await apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics');
-      setHealth(h);
+  const { data: patterns } = useQuery({
+    queryKey: ['analytics', 'patterns', from, to],
+    queryFn:  () => apiFetch<DetectionPatterns>(`/api/v1/analytics/patterns/detection?date_from=${from}&date_to=${to}`),
+  });
 
-      // Camera performance
-      const cp = await apiFetch<CameraPerf>('/api/v1/analytics/cameras/performance?days=7');
-      setCameraPerf(cp);
-    } catch (e) {
-      console.error('Analytics load error:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [trendDays, patternDays]);
+  const { data: health } = useQuery({
+    queryKey: ['analytics', 'health'],
+    queryFn:  () => apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics'),
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const { data: cameraPerf } = useQuery({
+    queryKey: ['analytics', 'camera-perf'],
+    queryFn:  () => apiFetch<CameraPerf>('/api/v1/analytics/cameras/performance?days=7'),
+  });
 
   // Formatted data
+  const weightTrend = (wtRaw?.data ?? []).map((p: any) => ({
+    ...p,
+    date: new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
+  }));
+
   const hourlyData = (patterns?.detections_by_hour ?? []).map((count, i) => ({
     hour: `${String(i).padStart(2, '0')}:00`,
     detections: count,
   }));
 
-  const dailyData = (patterns?.detections_by_day ?? []).map(d => ({
+  const dailyData = (patterns?.detections_by_day ?? []).map((d: any) => ({
     date: new Date(d.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
     detections: d.count,
   }));
 
   const statusPieData = Object.entries(health?.animals_by_status ?? {}).map(([k, v]) => ({
-    name: STATUS_LABELS[k] ?? k, value: v, color: STATUS_COLORS[k] ?? '#9ca3af',
+    name: STATUS_LABELS[k] ?? k, value: v as number, color: STATUS_COLORS[k] ?? '#9ca3af',
   }));
 
   const weightDistData = Object.entries(health?.weight_distribution ?? {}).map(([k, v]) => ({
-    range: k, count: v,
+    range: k, count: v as number,
   }));
 
   const peakHour = patterns?.statistics?.peak_hour;
@@ -232,7 +224,7 @@ export default function AnalyticsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Analitika</h1>
           <p className="text-sm text-gray-500 mt-0.5">Ferma statistikasi va trendlar</p>
         </div>
-        <button onClick={load} disabled={loading}
+        <button onClick={() => qClient.invalidateQueries({ queryKey: ['analytics'] })} disabled={loading}
           className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Yangilash

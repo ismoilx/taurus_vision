@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Taurus Vision</title>
+
+    <!--
+      PERFORMANCE: Google Fonts preconnect + non-blocking load.
+      App.tsx dagi @import render-blocking edi (2-4 soniya yuklash vaqti).
+      media="print" → onload="this.media='all'" hiylasi CSS ni async qiladi.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap" />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

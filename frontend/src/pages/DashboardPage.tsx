@@ -7,19 +7,20 @@
  *   - Sog'liq metrikalari — /analytics/health/metrics
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import {
   Activity, Scale, Camera, Users,
-  TrendingUp, Play, Square, AlertCircle,
+  TrendingUp, Play, Square,
   Heart, Zap,
 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
+import { queryKeys } from '../lib/queryClient';
 
 // =============================================================================
 // TYPES
@@ -118,96 +119,77 @@ function RiskBadge({ score }: { score: number }) {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const qClient  = useQueryClient();
+  const [trendDays, setTrendDays] = useState(30);
 
-  const [pipeline, setPipeline]       = useState<PipelineStatus>({ status: 'not_initialized', running: false });
-  const [overview, setOverview]       = useState<OverviewStats | null>(null);
-  const [weightTrend, setWeightTrend] = useState<WeightTrendPoint[]>([]);
-  const [hourlyData, setHourlyData]   = useState<HourlyDetection[]>([]);
-  const [health, setHealth]           = useState<HealthMetrics | null>(null);
-  const [trendDays, setTrendDays]     = useState(30);
-  const [loadingCharts, setLoadingCharts] = useState(false);
+  // ─── Queries (kesh bilan) ──────────────────────────────────────────────────
+  // Pipeline: har 5 soniyada yangilanadi, kesh yo'q (real-time)
+  const { data: pipeline = { status: 'not_initialized' as const, running: false } } =
+    useQuery({
+      queryKey: queryKeys.pipeline.status,
+      queryFn:  () => apiFetch<PipelineStatus>('/api/v1/pipeline/status'),
+      refetchInterval: 10_000, // WS fallback
+    });
 
-  // ---------------------------------------------------------------------------
-  // Load
-  // ---------------------------------------------------------------------------
+  // Overview: 1 daqiqa kesh — sahifaga qaytganda darhol ko'rsatiladi
+  const { data: overview = null } =
+    useQuery({
+      queryKey: queryKeys.analytics.overview,
+      queryFn:  () => apiFetch<OverviewStats>('/api/v1/analytics/overview'),
+    });
 
-  useEffect(() => {
-    loadAll();
-    const id = setInterval(loadPipeline, 5000);
-    return () => clearInterval(id);
-  }, []);
+  // Weight trend: trendDays o'zgarganda qayta so'rov, aks holda kesh
+  const { data: weightTrendRaw, isFetching: loadingCharts } =
+    useQuery({
+      queryKey: queryKeys.analytics.weightTrend(trendDays),
+      queryFn:  () => apiFetch<{ data: any[] }>(`/api/v1/analytics/trends/weight?days=${trendDays}`),
+    });
 
-  useEffect(() => { loadCharts(); }, [trendDays]);
+  const weightTrend: WeightTrendPoint[] = (weightTrendRaw?.data ?? []).map((p: any) => ({
+    date: new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
+    average_weight: p.average_weight,
+    measurement_count: p.measurement_count,
+  }));
 
-  async function loadAll() {
-    await Promise.all([loadPipeline(), loadOverview(), loadCharts(), loadHealth()]);
-  }
-
-  async function loadPipeline() {
-    try {
-      const s = await apiFetch<PipelineStatus>('/api/v1/pipeline/status');
-      setPipeline(s);
-    } catch { /* silent */ }
-  }
-
-  async function loadOverview() {
-    try {
-      const data = await apiFetch<any>('/api/v1/analytics/overview');
-      setOverview(data);
-    } catch { /* silent */ }
-  }
-
-  async function loadCharts() {
-    setLoadingCharts(true);
-    try {
-      // Weight trend
-      const wt = await apiFetch<{ data: any[] }>(`/api/v1/analytics/trends/weight?days=${trendDays}`);
-      setWeightTrend((wt.data ?? []).map(p => ({
-        date: new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
-        average_weight: p.average_weight,
-        measurement_count: p.measurement_count,
-      })));
-
-      // Hourly detection pattern — last 7 days
-      const today    = new Date().toISOString().split('T')[0];
-      const weekAgo  = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-      const dp = await apiFetch<{ detections_by_hour: number[] }>(
+  // Hourly detection
+  const today   = new Date().toISOString().split('T')[0];
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+  const { data: hourlyRaw } =
+    useQuery({
+      queryKey: queryKeys.analytics.hourlyDetection(weekAgo, today),
+      queryFn:  () => apiFetch<{ detections_by_hour: number[] }>(
         `/api/v1/analytics/patterns/detection?date_from=${weekAgo}&date_to=${today}`
-      );
-      setHourlyData(
-        (dp.detections_by_hour ?? []).map((count, hour) => ({
-          hour: `${String(hour).padStart(2, '0')}:00`,
-          detections: count,
-        }))
-      );
-    } catch { /* silent */ }
-    finally { setLoadingCharts(false); }
-  }
+      ),
+    });
 
-  async function loadHealth() {
-    try {
-      const h = await apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics');
-      setHealth(h);
-    } catch { /* silent */ }
-  }
+  const hourlyData: HourlyDetection[] = (hourlyRaw?.detections_by_hour ?? []).map(
+    (count, hour) => ({ hour: `${String(hour).padStart(2, '0')}:00`, detections: count })
+  );
 
-  // ---------------------------------------------------------------------------
-  // Pipeline controls
-  // ---------------------------------------------------------------------------
+  // Health metrics
+  const { data: health = null } =
+    useQuery({
+      queryKey: queryKeys.analytics.health,
+      queryFn:  () => apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics'),
+    });
 
-  async function handleStartPipeline() {
-    try { await apiFetch('/api/v1/pipeline/start', { method: 'POST' }); await loadPipeline(); }
-    catch (e) { alert('Pipeline xatolik: ' + (e instanceof Error ? e.message : '')); }
-  }
-  async function handleStopPipeline() {
-    try { await apiFetch('/api/v1/pipeline/stop', { method: 'POST' }); await loadPipeline(); }
-    catch (e) { alert('Pipeline xatolik: ' + (e instanceof Error ? e.message : '')); }
-  }
+  // ─── Mutations ─────────────────────────────────────────────────────────────
+  const startPipeline = useMutation({
+    mutationFn: () => apiFetch('/api/v1/pipeline/start', { method: 'POST' }),
+    onSuccess:  () => qClient.invalidateQueries({ queryKey: queryKeys.pipeline.status }),
+    onError:    (e: Error) => alert('Pipeline xatolik: ' + e.message),
+  });
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const stopPipeline = useMutation({
+    mutationFn: () => apiFetch('/api/v1/pipeline/stop', { method: 'POST' }),
+    onSuccess:  () => qClient.invalidateQueries({ queryKey: queryKeys.pipeline.status }),
+    onError:    (e: Error) => alert('Pipeline xatolik: ' + e.message),
+  });
 
+  function handleStartPipeline() { startPipeline.mutate(); }
+  function handleStopPipeline()  { stopPipeline.mutate(); }
+
+  // ─── Derived ───────────────────────────────────────────────────────────────
   const weightChange = overview?.weight?.change_percentage_7d;
   const avgWeight    = overview?.weight?.average_kg;
 

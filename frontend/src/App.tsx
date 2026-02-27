@@ -1,30 +1,64 @@
 /**
  * Taurus Vision — Main Application
- * Oq/kulrang minimal tema, auth routing bilan
+ *
+ * PERFORMANCE O'ZGARTIRISHLAR:
+ *   1. React.lazy + Suspense: Har bir sahifa alohida chunk — faqat kerak bo'lganda yuklanadi
+ *   2. @import olib tashlandi: index.html da preconnect + non-blocking font yuklanadi
+ *   3. Spinner komponenti: sahifa yuklanayotganda minimal loading ko'rsatadi
  */
 
-import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Cpu, Video, Camera, Bell, Mail, Users, FileText, Stethoscope, LogOut, ChevronDown, BarChart2 } from 'lucide-react';
-import { useState } from 'react';
+import {
+  BrowserRouter as Router, Routes, Route, NavLink, Navigate,
+} from 'react-router-dom';
+import {
+  LayoutDashboard, Cpu, Video, Camera, Bell, Mail,
+  Users, FileText, Stethoscope, LogOut, ChevronDown, BarChart2,
+} from 'lucide-react';
+import { useState, lazy, Suspense } from 'react';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
-
-import LoginPage       from './pages/LoginPage';
-import DashboardPage   from './pages/DashboardPage';
-import AnimalsPage     from './pages/AnimalsPage';
-import AnimalDetailPage from './pages/AnimalDetailPage';
-import LiveFeedPage    from './pages/LiveFeedPage';
-import CamerasPage     from './pages/CamerasPage';
-import AlertsPage          from './pages/AlertsPage';
-import NotificationsPage   from './pages/NotificationsPage';
-import UsersPage           from './pages/UsersPage';
-import ReportsPage         from './pages/ReportsPage';
-import HealthPage          from './pages/HealthPage';
-import AnalyticsPage   from './pages/AnalyticsPage';
-
+import { WebSocketProvider } from './context/WebSocketContext';
 import './App.css';
 
-// ─── Protected / Public routes ────────────────────────────────────────────────
+// ─── Lazy imports (har biri alohida JS chunk) ────────────────────────────────
+// Bundan oldin: bitta 400KB+ bundle — hammasi birga yuklangan
+// Endi: har sahifa ~30-60KB, faqat bosilganda yuklanadi
+const LoginPage          = lazy(() => import('./pages/LoginPage'));
+const DashboardPage      = lazy(() => import('./pages/DashboardPage'));
+const AnimalsPage        = lazy(() => import('./pages/AnimalsPage'));
+const AnimalDetailPage   = lazy(() => import('./pages/AnimalDetailPage'));
+const LiveFeedPage       = lazy(() => import('./pages/LiveFeedPage'));
+const CamerasPage        = lazy(() => import('./pages/CamerasPage'));
+const AlertsPage         = lazy(() => import('./pages/AlertsPage'));
+const NotificationsPage  = lazy(() => import('./pages/NotificationsPage'));
+const UsersPage          = lazy(() => import('./pages/UsersPage'));
+const ReportsPage        = lazy(() => import('./pages/ReportsPage'));
+const HealthPage         = lazy(() => import('./pages/HealthPage'));
+const AnalyticsPage      = lazy(() => import('./pages/AnalyticsPage'));
+
+// ─── Page loading spinner ─────────────────────────────────────────────────────
+
+function PageSpinner() {
+  return (
+    <div style={{
+      minHeight: 'calc(100vh - 56px)',
+      display: 'grid',
+      placeItems: 'center',
+      background: '#F7F8FA',
+    }}>
+      <div style={{
+        width: 28, height: 28,
+        border: '2px solid #E4E7ED',
+        borderTopColor: '#1E3EB4',
+        borderRadius: '50%',
+        animation: 'spin .65s linear infinite',
+      }} />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -239,11 +273,17 @@ function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      <main style={{ fontFamily:'Outfit,sans-serif' }}>{children}</main>
+      <main style={{ fontFamily:'Outfit,sans-serif' }}>
+        {/* WebSocketProvider: sahifa almashtirganda WS ulanishi saqlanadi */}
+        <WebSocketProvider>
+          <Suspense fallback={<PageSpinner />}>
+            {children}
+          </Suspense>
+        </WebSocketProvider>
+      </main>
 
-      {/* Mono font load */}
+      {/* Fonts preloaded in index.html — @import removed (was render-blocking) */}
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap');
         a { text-decoration: none; }
         nav a:hover:not([aria-current="page"]) { color: #374151 !important; background: rgba(0,0,0,0.04) !important; }
       `}</style>

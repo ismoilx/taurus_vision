@@ -11,7 +11,8 @@
  *   ✅ Dismiss: { dismissed_by, reason }
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Bell, AlertCircle, CheckCircle, Clock,
   RefreshCw, AlertTriangle, X, Eye, Shield,
@@ -131,78 +132,61 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AlertsPage() {
-  const [alerts,   setAlerts]   = useState<Alert[]>([]);
-  const [stats,    setStats]    = useState<AlertStats | null>(null);
+  const qClient = useQueryClient();
   const [filter,   setFilter]   = useState<FilterKey>('open');
-  const [loading,  setLoading]  = useState(true);
   const [actionId, setActionId] = useState<number | null>(null);
-  const [error,    setError]    = useState('');
 
-  useEffect(() => { loadData(); }, [filter]);
+  const alertsKey = ['alerts', filter];
+  const statsKey  = ['alerts', 'stats'];
 
-  async function loadData() {
-    setLoading(true);
-    setError('');
-    try {
-      // Status query: 'all' = barcha, qolganlar lowercase
+  const { data: alertsData, isFetching, isError, error } = useQuery({
+    queryKey: alertsKey,
+    queryFn: () => {
       const statusParam = filter === 'all' ? 'all' : filter;
-      const [listResp, statsResp] = await Promise.all([
-        apiFetch<AlertListResponse>(`/api/v1/alerts?status=${statusParam}&limit=100`),
-        apiFetch<AlertStats>('/api/v1/alerts/stats'),
-      ]);
+      return apiFetch<AlertListResponse>(`/api/v1/alerts?status=${statusParam}&limit=100`);
+    },
+  });
 
-      setAlerts(listResp?.items ?? []);
-      setStats(statsResp);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Yuklab bo\'lmadi');
-      console.error('Alerts load error:', e);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { data: stats } = useQuery({
+    queryKey: statsKey,
+    queryFn:  () => apiFetch<AlertStats>('/api/v1/alerts/stats'),
+  });
 
-  async function handleMarkSeen(id: number) {
-    setActionId(id);
-    try {
-      await apiFetch(`/api/v1/alerts/${id}/seen`, { method: 'PATCH' });
-      await loadData();
-    } catch (e) { console.error(e); }
-    finally { setActionId(null); }
-  }
+  const alerts = alertsData?.items ?? [];
 
-  async function handleResolve(id: number) {
-    setActionId(id);
-    try {
-      // resolve endpoint: { resolved_by, resolution_note }
-      await apiFetch(`/api/v1/alerts/${id}/resolve`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resolved_by:      'Frontend foydalanuvchi',
-          resolution_note:  'UI orqali yopildi',
-        }),
-      });
-      await loadData();
-    } catch (e) { console.error(e); }
-    finally { setActionId(null); }
-  }
+  const invalidate = () => {
+    qClient.invalidateQueries({ queryKey: ['alerts'] });
+  };
 
-  async function handleDismiss(id: number) {
-    setActionId(id);
-    try {
-      // dismiss endpoint: { dismissed_by, reason }
-      await apiFetch(`/api/v1/alerts/${id}/dismiss`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          dismissed_by: 'Frontend foydalanuvchi',
-          reason:       'Noto\'g\'ri alarm',
-        }),
-      });
-      await loadData();
-    } catch (e) { console.error(e); }
-    finally { setActionId(null); }
-  }
+  const seenMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/alerts/${id}/seen`, { method: 'PATCH' }),
+    onMutate:  (id) => setActionId(id),
+    onSettled: () => { setActionId(null); invalidate(); },
+  });
 
-  // Ochiq alertlar soni (badge uchun)
+  const resolveMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/alerts/${id}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolved_by: 'Frontend foydalanuvchi', resolution_note: 'UI orqali yopildi' }),
+    }),
+    onMutate:  (id) => setActionId(id),
+    onSettled: () => { setActionId(null); invalidate(); },
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/alerts/${id}/dismiss`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dismissed_by: 'Frontend foydalanuvchi', reason: "Noto'g'ri alarm" }),
+    }),
+    onMutate:  (id) => setActionId(id),
+    onSettled: () => { setActionId(null); invalidate(); },
+  });
+
+  const handleMarkSeen  = (id: number) => seenMutation.mutate(id);
+  const handleResolve   = (id: number) => resolveMutation.mutate(id);
+  const handleDismiss   = (id: number) => dismissMutation.mutate(id);
+  const loading = isFetching && alerts.length === 0;
+
   const openCount = stats ? (stats.total_open ?? 0) : 0;
 
   return (
@@ -223,7 +207,7 @@ export default function AlertsPage() {
           <p className="text-gray-500 mt-1">Ferma xabardorliklari va ogohlantirishlar</p>
         </div>
         <button
-          onClick={loadData}
+          onClick={() => qClient.invalidateQueries({ queryKey: ["alerts"] })}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -272,7 +256,7 @@ export default function AlertsPage() {
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          {error}
+          {isError ? (error instanceof Error ? error.message : "Xato") : ""}
         </div>
       )}
 
