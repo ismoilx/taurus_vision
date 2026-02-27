@@ -13,7 +13,8 @@
  *   - Qidirish va filtr
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Users, Plus, Search, Shield, Eye, RefreshCw,
   AlertCircle, CheckCircle, XCircle, Lock,
@@ -538,64 +539,57 @@ function UserActions({
 // ---------------------------------------------------------------------------
 
 export default function UsersPage() {
-  const [users, setUsers]           = useState<UserData[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState('');
+  const qClient = useQueryClient();
   const [search, setSearch]         = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [showAdd, setShowAdd]       = useState(false);
   const [resetUser, setResetUser]   = useState<UserData | null>(null);
   const [toast, setToast]           = useState('');
 
-  // Current user (o'zi o'zini boshqara olmasin)
-  const [currentUserId, setCurrentUserId] = useState<number>(0);
-
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
   };
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true); setError('');
-    try {
-      const [usersData, meData] = await Promise.all([
-        apiFetch<{ items: UserData[]; total: number }>('/api/v1/auth/users'),
-        apiFetch<{ id: number }>('/api/v1/auth/me'),
-      ]);
-      setUsers(usersData.items);
-      setCurrentUserId(meData.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Xato');
-    } finally { setLoading(false); }
-  }, []);
+  const invalidate = () => qClient.invalidateQueries({ queryKey: ['users'] });
 
-  useEffect(() => { loadUsers(); }, [loadUsers]);
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: usersData, isLoading: loading, isError, error } = useQuery({
+    queryKey: ['users'],
+    queryFn:  () => apiFetch<{ items: UserData[]; total: number }>('/api/v1/auth/users'),
+  });
+  const users = usersData?.items ?? [];
 
-  async function handleRoleChange(userId: number, newRole: 'admin' | 'manager' | 'viewer') {
-    try {
-      await apiFetch(`/api/v1/auth/users/${userId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ role: newRole }),
-      });
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
-      showToast('✅ Rol muvaffaqiyatli o\'zgartirildi');
-    } catch (err) {
-      showToast('❌ ' + (err instanceof Error ? err.message : 'Xato'));
-    }
-  }
+  const { data: meData } = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn:  () => apiFetch<{ id: number }>('/api/v1/auth/me'),
+  });
+  const currentUserId = meData?.id ?? 0;
 
-  async function handleToggleActive(user: UserData) {
-    const endpoint = user.is_active
-      ? `/api/v1/auth/users/${user.id}/deactivate`
-      : `/api/v1/auth/users/${user.id}/activate`;
-    try {
-      await apiFetch(endpoint, { method: 'POST' });
-      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: number; role: string }) =>
+      apiFetch(`/api/v1/auth/users/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+    onSuccess: () => { invalidate(); showToast("✅ Rol muvaffaqiyatli o'zgartirildi"); },
+    onError:   (e: Error) => showToast('❌ ' + e.message),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (user: UserData) => {
+      const ep = user.is_active
+        ? `/api/v1/auth/users/${user.id}/deactivate`
+        : `/api/v1/auth/users/${user.id}/activate`;
+      return apiFetch(ep, { method: 'POST' });
+    },
+    onSuccess: (_d, user) => {
+      invalidate();
       showToast(user.is_active ? '🔒 Foydalanuvchi bloklandi' : '✅ Blok olib tashlandi');
-    } catch (err) {
-      showToast('❌ ' + (err instanceof Error ? err.message : 'Xato'));
-    }
-  }
+    },
+    onError: (e: Error) => showToast('❌ ' + e.message),
+  });
+
+  const handleRoleChange   = (userId: number, role: 'admin'|'manager'|'viewer') => roleMutation.mutate({ userId, role });
+  const handleToggleActive = (user: UserData) => toggleMutation.mutate(user);
 
   // Filter
   const filtered = users.filter(u => {
@@ -649,7 +643,7 @@ export default function UsersPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={loadUsers} style={{
+          <button onClick={() => qClient.invalidateQueries({ queryKey: ["users"] })} style={{
             padding: '9px 12px', border: '1px solid #D1D5DB',
             borderRadius: 8, background: '#fff', cursor: 'pointer',
             display: 'flex', alignItems: 'center',
@@ -736,14 +730,14 @@ export default function UsersPage() {
       </div>
 
       {/* Error */}
-      {error && (
+      {isError && (
         <div style={{
           display: 'flex', gap: 10, padding: '12px 16px',
           background: '#FEF2F2', border: '1px solid #FECACA',
           borderRadius: 10, marginBottom: 20,
         }}>
           <AlertCircle size={16} color="#DC2626" />
-          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+          <span style={{ fontSize: 13, color: '#DC2626' }}>{error instanceof Error ? error.message : 'Xato'}</span>
         </div>
       )}
 
@@ -876,7 +870,7 @@ export default function UsersPage() {
       {showAdd && (
         <AddUserModal
           onClose={() => setShowAdd(false)}
-          onSaved={() => { setShowAdd(false); loadUsers(); showToast("✅ Foydalanuvchi qo'shildi!"); }}
+          onSaved={() => { setShowAdd(false); invalidate(); showToast("✅ Foydalanuvchi qo'shildi!"); }}
         />
       )}
       {resetUser && (

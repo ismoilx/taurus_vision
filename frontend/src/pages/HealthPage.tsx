@@ -13,7 +13,8 @@
  *   - Qidirish va filtrlash
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Stethoscope, Plus, Search, AlertTriangle, CheckCircle,
   Calendar, RefreshCw, Filter, ChevronRight, Clock,
@@ -655,11 +656,7 @@ function RecordRow({
 // ---------------------------------------------------------------------------
 
 export default function HealthPage() {
-  const [records, setRecords]       = useState<HealthRecord[]>([]);
-  const [animals, setAnimals]       = useState<Animal[]>([]);
-  const [stats, setStats]           = useState<HealthStats | null>(null);
-  const [upcoming, setUpcoming]     = useState<HealthRecord[]>([]);
-  const [loading, setLoading]       = useState(true);
+  const qClient = useQueryClient();
   const [search, setSearch]         = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sevFilter, setSevFilter]   = useState('all');
@@ -674,48 +671,47 @@ export default function HealthPage() {
     setTimeout(() => setToast(''), 3000);
   }
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [animalsRes, unresolvedRes, statsRes, upcomingRes] = await Promise.all([
-        apiFetch<{ items: Animal[] }>('/api/v1/animals/?limit=200'),
-        apiFetch<{ records: HealthRecord[] }>('/api/v1/health/unresolved?limit=100'),
-        apiFetch<HealthStats>('/api/v1/health/statistics'),
-        apiFetch<{ records: HealthRecord[] }>('/api/v1/health/upcoming-checkups?days_ahead=14'),
-      ]);
-      setAnimals(animalsRes.items || []);
-      setRecords(unresolvedRes.records || []);
-      setStats(statsRes);
-      setUpcoming(upcomingRes.records || []);
-    } catch (e) {
-      console.error(e);
-    } finally { setLoading(false); }
-  }, []);
+  const invalidateHealth = () => qClient.invalidateQueries({ queryKey: ['health'] });
 
-  useEffect(() => { load(); }, [load]);
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: animalsRes, isLoading: loading } = useQuery({
+    queryKey: ['animals', 'list-200'],
+    queryFn:  () => apiFetch<{ items: Animal[] }>('/api/v1/animals/?limit=200'),
+  });
+  const animals = animalsRes?.items ?? [];
 
-  async function loadAll() {
-    try {
-      // Load all records (resolved + unresolved)
-      const res = await apiFetch<{ records: HealthRecord[] }>('/api/v1/health/unresolved?limit=200');
-      setRecords(res.records || []);
-    } catch { /* ignore */ }
-  }
+  const { data: unresolvedRes } = useQuery({
+    queryKey: ['health', 'unresolved'],
+    queryFn:  () => apiFetch<{ records: HealthRecord[] }>('/api/v1/health/unresolved?limit=100'),
+  });
 
-  useEffect(() => {
-    if (showResolved) {
-      // Load critical records too
-      apiFetch<{ records: HealthRecord[] }>('/api/v1/health/critical')
-        .then(res => {
-          const combined = [...records];
-          (res.records || []).forEach(r => {
-            if (!combined.find(x => x.id === r.id)) combined.push(r);
-          });
-          setRecords(combined);
-        })
-        .catch(() => {});
-    }
-  }, [showResolved]);
+  const { data: criticalRes } = useQuery({
+    queryKey: ['health', 'critical'],
+    queryFn:  () => apiFetch<{ records: HealthRecord[] }>('/api/v1/health/critical'),
+    enabled:  showResolved,
+  });
+
+  const { data: stats } = useQuery({
+    queryKey: ['health', 'stats'],
+    queryFn:  () => apiFetch<HealthStats>('/api/v1/health/statistics'),
+  });
+
+  const { data: upcomingRes } = useQuery({
+    queryKey: ['health', 'upcoming'],
+    queryFn:  () => apiFetch<{ records: HealthRecord[] }>('/api/v1/health/upcoming-checkups?days_ahead=14'),
+  });
+  const upcoming = upcomingRes?.records ?? [];
+
+  // Combine unresolved + critical (deduplicated)
+  const records: HealthRecord[] = (() => {
+    const base = unresolvedRes?.records ?? [];
+    if (!showResolved || !criticalRes?.records) return base;
+    const combined = [...base];
+    (criticalRes.records).forEach(r => {
+      if (!combined.find(x => x.id === r.id)) combined.push(r);
+    });
+    return combined;
+  })();
 
   // Filtered records
   const filtered = records.filter(r => {
@@ -1021,7 +1017,7 @@ export default function HealthPage() {
         <AddRecordModal
           animals={animals}
           onClose={() => setShowAdd(false)}
-          onSaved={() => { load(); showToast("✅ Yozuv qo'shildi!"); }}
+          onSaved={() => { invalidateHealth(); showToast("✅ Yozuv qo'shildi!"); }}
         />
       )}
       {detail && (
@@ -1029,7 +1025,7 @@ export default function HealthPage() {
           record={detail}
           animal={animals.find(a => a.id === detail.animal_id)}
           onClose={() => setDetail(null)}
-          onResolved={() => { load(); showToast('✅ Hal etilgan deb belgilandi!'); }}
+          onResolved={() => { invalidateHealth(); showToast('✅ Hal etilgan deb belgilandi!'); }}
         />
       )}
 

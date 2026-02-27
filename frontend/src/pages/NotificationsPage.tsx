@@ -12,7 +12,8 @@
  *   6. .env sozlash yo'riqnomasi
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Mail, CheckCircle, XCircle, AlertCircle,
   Send, Settings, Users, Bell, RefreshCw,
@@ -227,67 +228,47 @@ NOTIFICATION_EMAILS=admin@farm.uz,vet@farm.uz,manager@farm.uz`;
 // ---------------------------------------------------------------------------
 
 export default function NotificationsPage() {
-  const [settings, setSettings]         = useState<SmtpSettings | null>(null);
-  const [loading, setLoading]           = useState(true);
-  const [testEmail, setTestEmail]       = useState('');
-  const [testLoading, setTestLoading]   = useState(false);
-  const [testResult, setTestResult]     = useState<{ ok: boolean; message: string } | null>(null);
-  const [alertId, setAlertId]           = useState('');
-  const [sendLoading, setSendLoading]   = useState(false);
-  const [sendResult, setSendResult]     = useState<any>(null);
-  const [showGuide, setShowGuide]       = useState(false);
-  const [refreshing, setRefreshing]     = useState(false);
+  const [testEmail,   setTestEmail]  = useState('');
+  const [testResult,  setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [alertId,     setAlertId]    = useState('');
+  const [sendResult,  setSendResult] = useState<any>(null);
+  const [showGuide,   setShowGuide]  = useState(false);
 
-  useEffect(() => { loadSettings(); }, []);
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: settings, isLoading: loading, refetch } = useQuery({
+    queryKey: ['notifications', 'settings'],
+    queryFn:  () => apiFetch<SmtpSettings>('/api/v1/notifications/settings'),
+  });
 
-  async function loadSettings() {
-    setLoading(true);
-    try {
-      const data = await apiFetch<SmtpSettings>('/api/v1/notifications/settings');
-      setSettings(data);
-    } catch (err) {
-      console.error(err);
-    } finally { setLoading(false); }
-  }
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const testMutation = useMutation({
+    mutationFn: () => apiFetch<any>('/api/v1/notifications/test', {
+      method: 'POST',
+      body: JSON.stringify({ recipient: testEmail }),
+    }),
+    onSuccess: (result) => setTestResult({
+      ok: result.sent || result.ok,
+      message: result.message || (result.sent ? 'Email yuborildi!' : 'Xato yuz berdi'),
+    }),
+    onError: (e: Error) => setTestResult({ ok: false, message: e.message }),
+  });
 
-  async function handleTestEmail() {
-    if (!testEmail.trim()) return;
-    setTestLoading(true);
-    setTestResult(null);
-    try {
-      const result = await apiFetch<any>('/api/v1/notifications/test', {
-        method: 'POST',
-        body: JSON.stringify({ recipient: testEmail }),
-      });
-      setTestResult({
-        ok:      result.sent || result.ok,
-        message: result.message || (result.sent ? 'Email yuborildi!' : 'Xato yuz berdi'),
-      });
-    } catch (err) {
-      setTestResult({ ok: false, message: err instanceof Error ? err.message : 'Xato' });
-    } finally { setTestLoading(false); }
-  }
+  const sendMutation = useMutation({
+    mutationFn: () => apiFetch<any>(`/api/v1/notifications/send/${alertId}`, {
+      method: 'POST',
+      body: JSON.stringify({ recipients: null }),
+    }),
+    onSuccess: setSendResult,
+    onError: (e: Error) => setSendResult({ sent: false, error: e.message }),
+  });
 
-  async function handleSendAlert() {
-    if (!alertId.trim()) return;
-    setSendLoading(true);
-    setSendResult(null);
-    try {
-      const result = await apiFetch<any>(`/api/v1/notifications/send/${alertId}`, {
-        method: 'POST',
-        body: JSON.stringify({ recipients: null }),
-      });
-      setSendResult(result);
-    } catch (err) {
-      setSendResult({ sent: false, error: err instanceof Error ? err.message : 'Xato' });
-    } finally { setSendLoading(false); }
-  }
+  function handleTestEmail()  { if (testEmail.trim())  testMutation.mutate(); }
+  function handleSendAlert()  { if (alertId.trim())    sendMutation.mutate(); }
+  function handleRefresh()    { refetch(); }
 
-  async function handleRefresh() {
-    setRefreshing(true);
-    await loadSettings();
-    setRefreshing(false);
-  }
+  const testLoading = testMutation.isPending;
+  const sendLoading = sendMutation.isPending;
+  const refreshing  = false;
 
   if (loading) {
     return (

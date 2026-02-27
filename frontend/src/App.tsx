@@ -13,6 +13,7 @@ import {
 import {
   LayoutDashboard, Cpu, Video, Camera, Bell, Mail,
   Users, FileText, Stethoscope, LogOut, ChevronDown, BarChart2,
+  Activity, TrendingUp,
 } from 'lucide-react';
 import { useState, lazy, Suspense } from 'react';
 
@@ -35,6 +36,8 @@ const UsersPage          = lazy(() => import('./pages/UsersPage'));
 const ReportsPage        = lazy(() => import('./pages/ReportsPage'));
 const HealthPage         = lazy(() => import('./pages/HealthPage'));
 const AnalyticsPage      = lazy(() => import('./pages/AnalyticsPage'));
+const BehaviorPage       = lazy(() => import('./pages/BehaviorPage'));
+const ADIMonitoringPage  = lazy(() => import('./pages/ADIMonitoringPage'));
 
 // ─── Page loading spinner ─────────────────────────────────────────────────────
 
@@ -196,6 +199,8 @@ const navItems = [
   { to:'/users',         icon:Users,       label:'Foydalanuvchilar'   },
   { to:'/reports',       icon:FileText,    label:'Hisobotlar'         },
   { to:'/health',        icon:Stethoscope, label:'Veterinariya'       },
+  { to:'/behavior',      icon:Activity,    label:'Xatti-harakat'     },
+  { to:'/adi',           icon:TrendingUp,  label:'ADI Monitor'       },
 ];
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -314,6 +319,8 @@ export default function App() {
                   <Route path="/users"            element={<UsersPage />} />
                   <Route path="/reports"          element={<ReportsPage />} />
                   <Route path="/health"           element={<HealthPage />} />
+                  <Route path="/behavior"         element={<BehaviorPage />} />
+                  <Route path="/adi"              element={<ADIMonitoringPage />} />
                   <Route path="*"            element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>

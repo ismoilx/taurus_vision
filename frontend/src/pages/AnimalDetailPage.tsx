@@ -9,8 +9,9 @@
  *   ✅ Barcha 8 komponent ko'rsatiladi (mavjud bo'lganda)
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Scale, Activity, TrendingUp, TrendingDown,
   Minus, AlertTriangle, CheckCircle, Camera, Upload,
@@ -181,173 +182,114 @@ function ComponentBar({ label, value, color }: { label: string; value: number; c
 export default function AnimalDetailPage() {
   const { id }   = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qClient  = useQueryClient();
+  const numId    = Number(id);
 
-  const [animal,      setAnimal]      = useState<Animal | null>(null);
-  const [weights,     setWeights]     = useState<WeightMeasurement[]>([]);
-  const [adiLogs,     setAdiLogs]     = useState<ADILog[]>([]);
-  const [adiToday,    setAdiToday]    = useState<ADILog | null>(null);
-  const [adiTrend,    setAdiTrend]    = useState<ADITrend | null>(null);
-  const [adiDetailed, setAdiDetailed] = useState<ADILogDetailed | null>(null);  // komponentlar bilan
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState('');
-  const [tab,         setTab]         = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
-
-  // Registration
-  const [regFile,    setRegFile]    = useState<File | null>(null);
-  const [regPreview, setRegPreview] = useState<string>('');
-  const [regLoading, setRegLoading] = useState(false);
-  const [regMsg,     setRegMsg]     = useState('');
-  const [embedCount, setEmbedCount] = useState(0);
+  // UI state (o'zgarmas — bular keshlanmaydi)
+  const [tab,           setTab]           = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
+  const [regFile,       setRegFile]       = useState<File | null>(null);
+  const [regPreview,    setRegPreview]    = useState<string>('');
+  const [regMsg,        setRegMsg]        = useState('');
+  const [showHealthForm, setShowHealthForm] = useState(false);
+  const [healthForm,    setHealthForm]    = useState({
+    record_type: 'checkup', severity: 'normal',
+    diagnosis: '', symptoms: '', treatment: '',
+    medication: '', veterinarian: '', cost: '',
+  });
+  const [healthFormMsg, setHealthFormMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Health records
-  const [healthRecords,     setHealthRecords]     = useState<HealthRecord[]>([]);
-  const [healthLoading,     setHealthLoading]     = useState(false);
-  const [healthTotal,       setHealthTotal]       = useState(0);
-  const [showHealthForm,    setShowHealthForm]    = useState(false);
-  const [healthForm,        setHealthForm]        = useState({
-    record_type: 'checkup',
-    severity:    'normal',
-    diagnosis:   '',
-    symptoms:    '',
-    treatment:   '',
-    medication:  '',
-    veterinarian:'',
-    cost:        '',
+  // ── Queries ───────────────────────────────────────────────────────────────
+
+  const { data: animal, isLoading: loading, isError, error } = useQuery({
+    queryKey: ['animals', numId],
+    queryFn:  () => apiFetch<Animal>(`/api/v1/animals/${id}`),
+    enabled:  !!id,
   });
-  const [healthFormLoading, setHealthFormLoading] = useState(false);
-  const [healthFormMsg,     setHealthFormMsg]     = useState('');
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  const { data: weightsRaw } = useQuery({
+    queryKey: ['weights', numId],
+    queryFn:  () => apiFetch<any>(`/api/v1/weights/animal/${id}`),
+    enabled:  !!id,
+  });
+  const weights: WeightMeasurement[] = Array.isArray(weightsRaw)
+    ? weightsRaw : (weightsRaw?.items ?? []);
 
-  useEffect(() => { if (id) loadAll(); }, [id]);
+  const { data: adiTrend } = useQuery({
+    queryKey: ['adi', 'trend', numId],
+    queryFn:  () => apiFetch<ADITrend>(`/api/v1/adi/animal/${id}/trend?days=30`),
+    enabled:  !!id,
+  });
 
-  async function loadAll() {
-    setLoading(true); setError('');
-    try {
-      const [animalData, weightsData] = await Promise.all([
-        apiFetch<Animal>(`/api/v1/animals/${id}`),
-        apiFetch<any>(`/api/v1/weights/animal/${id}`),
-      ]);
-      setAnimal(animalData);
+  const { data: embsRaw } = useQuery({
+    queryKey: ['embeddings', numId],
+    queryFn:  () => apiFetch<any[]>(`/api/v1/identification/${id}/embeddings`),
+    enabled:  !!id,
+  });
+  const embedCount = embsRaw?.length ?? 0;
 
-      // weights — array yoki { items: [] } bo'lishi mumkin
-      const wArr = Array.isArray(weightsData) ? weightsData
-                 : (weightsData?.items ?? []);
-      setWeights(wArr);
+  const { data: healthResp, isFetching: healthLoading } = useQuery({
+    queryKey: ['health', 'records', numId],
+    queryFn:  () => apiFetch<HealthRecordListResponse>(`/api/v1/health/animals/${id}/records?skip=0&limit=50`),
+    enabled:  !!id && tab === 'health',
+  });
+  const healthRecords = healthResp?.records ?? [];
+  const healthTotal   = healthResp?.total ?? 0;
 
-      // ADI trend — backend current maydonida komponentlarni qaytaradi
-      try {
-        const trend = await apiFetch<ADITrend>(`/api/v1/adi/animal/${id}/trend?days=30`);
-        setAdiTrend(trend);
+  // Derived ADI values
+  const adiDetailed = adiTrend?.current ?? null;
+  const adiToday = adiDetailed
+    ? { id: adiDetailed.id, animal_id: adiDetailed.animal_id,
+        calculation_date: adiDetailed.calculation_date,
+        adi_score: adiDetailed.adi_score, category: adiDetailed.category }
+    : adiTrend?.trend?.length
+    ? (() => { const last = adiTrend.trend[adiTrend.trend.length-1];
+        return { id: 0, animal_id: numId,
+          calculation_date: last.date, adi_score: last.score, category: last.category }; })()
+    : null;
+  const adiLogs: ADILog[] = (adiTrend?.trend ?? []).map((p, i) => ({
+    id: i, animal_id: numId,
+    calculation_date: p.date, adi_score: p.score, category: p.category,
+  }));
 
-        if (trend.current) {
-          // Eng so'nggi kunning to'liq ADI (8 komponent, data_quality)
-          setAdiDetailed(trend.current);
-          setAdiToday({
-            id:               trend.current.id,
-            animal_id:        trend.current.animal_id,
-            calculation_date: trend.current.calculation_date,
-            adi_score:        trend.current.adi_score,
-            category:         trend.current.category,
-          });
-        } else if (trend.trend?.length) {
-          // Batafsil ma'lumot yo'q — faqat grafik uchun oxirgi nuqta
-          const last = trend.trend[trend.trend.length - 1];
-          setAdiToday({
-            id: 0, animal_id: Number(id),
-            calculation_date: last.date,
-            adi_score:        last.score,
-            category:         last.category,
-          });
-        }
+  // ── Mutations ─────────────────────────────────────────────────────────────
 
-        setAdiLogs(
-          (trend.trend ?? []).map((p, i) => ({
-            id: i, animal_id: Number(id),
-            calculation_date: p.date,
-            adi_score:        p.score,
-            category:         p.category,
-          }))
-        );
-      } catch { /* ADI yo'q bo'lishi mumkin — yangi jonivor */ }
+  const createHealthMutation = useMutation({
+    mutationFn: () => apiFetch(`/api/v1/health/animals/${id}/records`, {
+      method: 'POST',
+      body: JSON.stringify({
+        record_type:  healthForm.record_type,
+        severity:     healthForm.severity,
+        diagnosis:    healthForm.diagnosis,
+        symptoms:     healthForm.symptoms    || undefined,
+        treatment:    healthForm.treatment   || undefined,
+        medication:   healthForm.medication  || undefined,
+        veterinarian: healthForm.veterinarian || undefined,
+        cost:         healthForm.cost ? parseFloat(healthForm.cost) : undefined,
+      }),
+    }),
+    onSuccess: () => {
+      setHealthFormMsg("✅ Yozuv muvaffaqiyatli qo'shildi!");
+      setHealthForm({ record_type: 'checkup', severity: 'normal',
+        diagnosis: '', symptoms: '', treatment: '', medication: '', veterinarian: '', cost: '' });
+      setShowHealthForm(false);
+      qClient.invalidateQueries({ queryKey: ['health', 'records', numId] });
+    },
+    onError: (e: Error) => setHealthFormMsg(`❌ ${e.message}`),
+  });
 
-      // Embedding count
-      try {
-        const embs = await apiFetch<any[]>(`/api/v1/identification/${id}/embeddings`);
-        setEmbedCount(embs?.length ?? 0);
-      } catch { setEmbedCount(0); }
-
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Xato');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Load health records ───────────────────────────────────────────────────
-
-  async function loadHealth() {
-    if (!id) return;
-    setHealthLoading(true);
-    try {
-      const resp = await apiFetch<HealthRecordListResponse>(
-        `/api/v1/health/animals/${id}/records?skip=0&limit=50`
-      );
-      setHealthRecords(resp?.records ?? []);
-      setHealthTotal(resp?.total ?? 0);
-    } catch (e) {
-      console.error('Health records load error:', e);
-    } finally {
-      setHealthLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (tab === 'health' && id) loadHealth();
-  }, [tab, id]);
+  const resolveHealthMutation = useMutation({
+    mutationFn: (recordId: number) => apiFetch(`/api/v1/health/records/${recordId}/resolve`, { method: 'POST' }),
+    onSuccess: () => qClient.invalidateQueries({ queryKey: ['health', 'records', numId] }),
+  });
 
   async function handleHealthCreate() {
     if (!id || !healthForm.diagnosis.trim()) return;
-    setHealthFormLoading(true);
     setHealthFormMsg('');
-    try {
-      await apiFetch(`/api/v1/health/animals/${id}/records`, {
-        method: 'POST',
-        body: JSON.stringify({
-          record_type:  healthForm.record_type,
-          severity:     healthForm.severity,
-          diagnosis:    healthForm.diagnosis,
-          symptoms:     healthForm.symptoms    || undefined,
-          treatment:    healthForm.treatment   || undefined,
-          medication:   healthForm.medication  || undefined,
-          veterinarian: healthForm.veterinarian || undefined,
-          cost:         healthForm.cost ? parseFloat(healthForm.cost) : undefined,
-        }),
-      });
-      setHealthFormMsg('✅ Yozuv muvaffaqiyatli qo\'shildi!');
-      setHealthForm({
-        record_type: 'checkup', severity: 'normal',
-        diagnosis: '', symptoms: '', treatment: '',
-        medication: '', veterinarian: '', cost: '',
-      });
-      setShowHealthForm(false);
-      await loadHealth();
-    } catch (e) {
-      setHealthFormMsg(`❌ ${e instanceof Error ? e.message : 'Xato'}`);
-    } finally {
-      setHealthFormLoading(false);
-    }
+    createHealthMutation.mutate();
   }
+  const handleHealthResolve = (recordId: number) => resolveHealthMutation.mutate(recordId);
 
-  async function handleHealthResolve(recordId: number) {
-    try {
-      await apiFetch(`/api/v1/health/records/${recordId}/resolve`, { method: 'POST' });
-      await loadHealth();
-    } catch (e) {
-      console.error('Health resolve error:', e);
-    }
-  }
 
   // ── Registration ──────────────────────────────────────────────────────────
 
@@ -361,10 +303,9 @@ export default function AnimalDetailPage() {
     setRegMsg('');
   }
 
-  async function handleRegister() {
-    if (!regFile || !id) return;
-    setRegLoading(true); setRegMsg('');
-    try {
+  const registerMutation = useMutation({
+    mutationFn: async () => {
+      if (!regFile || !id) throw new Error('Fayl tanlanmagan');
       const form = new FormData();
       form.append('photo', regFile);
       const token = localStorage.getItem('tv_access_token');
@@ -377,16 +318,18 @@ export default function AnimalDetailPage() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || err.detail || `HTTP ${res.status}`);
       }
-      const data = await res.json();
+      return res.json();
+    },
+    onSuccess: (data) => {
       setRegMsg(`✅ Muvaffaqiyatli! Similarity: ${(data.similarity_score * 100).toFixed(1)}%`);
       setRegFile(null); setRegPreview('');
-      setEmbedCount(c => c + 1);
-    } catch (e) {
-      setRegMsg(`❌ ${e instanceof Error ? e.message : 'Xato'}`);
-    } finally {
-      setRegLoading(false);
-    }
-  }
+      qClient.invalidateQueries({ queryKey: ['embeddings', numId] });
+    },
+    onError: (e: Error) => setRegMsg(`❌ ${e.message}`),
+  });
+
+  const regLoading = registerMutation.isPending;
+  function handleRegister() { registerMutation.mutate(); }
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -512,7 +455,7 @@ export default function AnimalDetailPage() {
           </div>
         </div>
 
-        <button onClick={loadAll} style={{
+        <button onClick={() => qClient.invalidateQueries({ queryKey: ["animals", numId] })} style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '7px 14px', borderRadius: 8,
           border: '1px solid #E4E7ED', background: '#fff',
@@ -1156,7 +1099,7 @@ export default function AnimalDetailPage() {
 
               <button
                 onClick={handleHealthCreate}
-                disabled={!healthForm.diagnosis.trim() || healthFormLoading}
+                disabled={!healthForm.diagnosis.trim() || createHealthMutation.isPending}
                 style={{
                   marginTop: 16, width: '100%', padding: '12px', borderRadius: 8,
                   background: healthForm.diagnosis ? '#1E3EB4' : '#E4E7ED',
@@ -1166,7 +1109,7 @@ export default function AnimalDetailPage() {
                   alignItems: 'center', justifyContent: 'center', gap: 8,
                 }}
               >
-                {healthFormLoading ? (
+                {createHealthMutation.isPending ? (
                   <>
                     <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)',
                       borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .6s linear infinite' }} />

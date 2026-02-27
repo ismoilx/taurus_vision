@@ -15,7 +15,8 @@
  *   - Barcha ma'lumotlar Excel (to'liq arxiv)
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   FileText, Download, AlertCircle, CheckCircle,
   Calendar, BarChart2, Heart, Layers, Table,
@@ -212,8 +213,11 @@ export default function ReportsPage() {
   const { state: dl, run } = useDownload();
 
   // Animals list (for animal report selector)
-  const [animals, setAnimals]     = useState<Animal[]>([]);
-  const [loadingAnimals, setLA]   = useState(true);
+  const { data: animalsRes, isLoading: loadingAnimals } = useQuery({
+    queryKey: ['animals', 'list-200'],
+    queryFn:  () => apiFetch<{ items: Animal[] }>('/api/v1/animals/?limit=200'),
+  });
+  const animals = animalsRes?.items ?? [];
 
   // PDF: Animal report
   const [animalId, setAnimalId]   = useState('');
@@ -237,13 +241,6 @@ export default function ReportsPage() {
 
   // Excel: Weights
   const [wExcelIds, setWExcelIds] = useState('');
-
-  useEffect(() => {
-    apiFetch<{ items: Animal[] }>('/api/v1/animals/?limit=200')
-      .then(d => setAnimals(d.items || []))
-      .catch(() => {})
-      .finally(() => setLA(false));
-  }, []);
 
   // ─── DOWNLOAD HANDLERS ──────────────────────────────────────────────────
 

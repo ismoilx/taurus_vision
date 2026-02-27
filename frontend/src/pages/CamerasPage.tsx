@@ -9,7 +9,8 @@
  *   - Pipeline ishlayotganda live stats
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Camera, Plus, RefreshCw, AlertCircle, CheckCircle,
   XCircle, Video, Trash2, Play, Square, Film,
@@ -370,14 +371,14 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         </div>
 
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {error && (
+          {isError && (
             <div style={{
               display: 'flex', gap: 8,
               background: '#FEF2F2', border: '1px solid #FECACA',
               borderRadius: 8, padding: '10px 14px',
             }}>
               <AlertCircle size={14} color="#DC2626" style={{ flexShrink: 0 }} />
-              <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+              <span style={{ fontSize: 13, color: '#DC2626' }}>{error instanceof Error ? error.message : "Yuklab bo'lmadi"}</span>
             </div>
           )}
 
@@ -467,62 +468,53 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
 // ---------------------------------------------------------------------------
 
 export default function CamerasPage() {
-  const [cameras, setCameras]       = useState<CameraConfig[]>([]);
-  const [statuses, setStatuses]     = useState<Record<string, CameraStatus>>({});
-  const [pipelines, setPipelines]   = useState<AllPipelinesStatus | null>(null);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState('');
+  const qClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
   const [pipelineLoading, setPipelineLoading] = useState<Record<string, boolean>>({});
 
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data: cameras = [], isFetching: loading, isError, error } = useQuery({
+    queryKey: ['cameras'],
+    queryFn:  () => apiFetch<CameraConfig[]>('/api/v1/cameras/'),
+  });
 
-  const loadCameras = useCallback(async () => {
-    setLoading(true); setError('');
-    try {
-      const data = await apiFetch<CameraConfig[]>('/api/v1/cameras/');
-      setCameras(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Xato');
-    } finally { setLoading(false); }
-  }, []);
+  const { data: statuses = {} } = useQuery({
+    queryKey: ['cameras', 'stats'],
+    queryFn:  () => apiFetch<Record<string, CameraStatus>>('/api/v1/cameras/stats/all').catch(() => ({})),
+    refetchInterval: 2500,   // WS yo'q — polling orqali yangilanadi
+  });
 
-  const loadStatuses = useCallback(async () => {
-    try {
-      const [camStats, pipelineStats] = await Promise.all([
-        apiFetch<Record<string, CameraStatus>>('/api/v1/cameras/stats/all').catch(() => ({})),
-        apiFetch<AllPipelinesStatus>('/api/v1/pipeline/status').catch(() => null),
-      ]);
-      setStatuses(camStats ?? {});
-      if (pipelineStats) setPipelines(pipelineStats);
-    } catch { /* silent */ }
-  }, []);
+  const { data: pipelines } = useQuery({
+    queryKey: ['pipeline', 'status'],
+    queryFn:  () => apiFetch<AllPipelinesStatus>('/api/v1/pipeline/status').catch(() => null),
+    refetchInterval: 2500,
+  });
 
-  useEffect(() => {
-    loadCameras();
-    loadStatuses();
-    intervalRef.current = setInterval(loadStatuses, 2500);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [loadCameras, loadStatuses]);
+  const invalidate = () => {
+    qClient.invalidateQueries({ queryKey: ['cameras'] });
+    qClient.invalidateQueries({ queryKey: ['pipeline', 'status'] });
+  };
 
-  async function handleDelete(camera: CameraConfig) {
-    if (!window.confirm(`${camera.name} kamerasini o'chirishga ishonchingiz komilmi?`)) return;
-    try {
-      // Avval pipeline ni to'xtatamiz
+  // ── Mutations ─────────────────────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: async (camera: CameraConfig) => {
       if (pipelines?.running_cameras.includes(camera.id)) {
         await apiFetch(`/api/v1/pipeline/stop?camera_id=${camera.id}`, { method: 'POST' }).catch(() => {});
       }
-      await apiFetch(`/api/v1/cameras/${camera.id}`, { method: 'DELETE' });
-      loadCameras();
-    } catch (err) {
-      alert("O'chirish xatolik: " + (err instanceof Error ? err.message : ''));
-    }
+      return apiFetch(`/api/v1/cameras/${camera.id}`, { method: 'DELETE' });
+    },
+    onSuccess: invalidate,
+    onError: (e: Error) => alert("O'chirish xatolik: " + e.message),
+  });
+
+  async function handleDelete(camera: CameraConfig) {
+    if (!window.confirm(`${camera.name} kamerasini o'chirishga ishonchingiz komilmi?`)) return;
+    deleteMutation.mutate(camera);
   }
 
   async function handlePipelineToggle(camera: CameraConfig) {
     const isRunning = pipelines?.running_cameras.includes(camera.id) ?? false;
     setPipelineLoading(p => ({ ...p, [camera.id]: true }));
-
     try {
       if (isRunning) {
         await apiFetch(`/api/v1/pipeline/stop?camera_id=${camera.id}`, { method: 'POST' });
@@ -532,7 +524,7 @@ export default function CamerasPage() {
           body: JSON.stringify({ camera_id: camera.id, skip_frames: 3 }),
         });
       }
-      await loadStatuses();
+      invalidate();
     } catch (err) {
       alert(`Pipeline xatosi: ${err instanceof Error ? err.message : 'Xato'}`);
     } finally {
@@ -567,7 +559,7 @@ export default function CamerasPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => { loadCameras(); loadStatuses(); }} disabled={loading} style={{
+          <button onClick={() => { qClient.invalidateQueries({ queryKey: ["cameras"] }); }} disabled={loading} style={{
             padding: '9px 12px',
             border: '1px solid #D1D5DB', borderRadius: 8, background: '#fff',
             cursor: loading ? 'not-allowed' : 'pointer',
@@ -615,14 +607,14 @@ export default function CamerasPage() {
       )}
 
       {/* Error */}
-      {error && (
+      {isError && (
         <div style={{
           display: 'flex', gap: 10,
           background: '#FEF2F2', border: '1px solid #FECACA',
           borderRadius: 10, padding: '12px 16px', marginBottom: 24,
         }}>
           <AlertCircle size={16} color="#DC2626" />
-          <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+          <span style={{ fontSize: 13, color: '#DC2626' }}>{error instanceof Error ? error.message : "Yuklab bo'lmadi"}</span>
         </div>
       )}
 
@@ -666,7 +658,7 @@ export default function CamerasPage() {
       {showAddModal && (
         <AddCameraModal
           onClose={() => setShowAddModal(false)}
-          onSaved={() => { setShowAddModal(false); loadCameras(); }}
+          onSaved={() => { setShowAddModal(false); qClient.invalidateQueries({ queryKey: ["cameras"] }); }}
         />
       )}
 
