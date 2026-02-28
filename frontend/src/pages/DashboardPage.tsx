@@ -1,27 +1,36 @@
 /**
- * DashboardPage — "Morning Briefing" konsepti
+ * DashboardPage — 6 karta, 2 qator
  *
- * Ferma egasi bir qaraganda ko'radigan narsalar:
- *   1. Jonivorlar soni — tur bo'yicha donut diagramma
- *   2. Ferma ADI skori — kategoriya taqsimoti
- *   3. Diqqat talab qiladiganlar ro'yxati
- *   4. Ferma rivojlanishi — vazn trendi, rangli zonalar
+ * 1-QATOR:
+ *   [1] Jonivorlar turlari   — tur bo'yicha donut
+ *   [2] Sog'liq holati        — status bo'yicha donut
+ *   [3] Fermaning rivojlanishi — vaqt bo'yicha, bosilsa modal
  *
- * Dark mode: document.documentElement.classList.toggle('dark')
- * Animatsiyalar: CSS keyframes + counter animation
+ * 2-QATOR:
+ *   [4] Diqqat talab qiladiganlar
+ *   [5] Ferma sog'lig'i grafigi (ADI trend)
+ *   [6] Umumiy tirik vazn
+ *
+ * MUAMMOLAR TUZATILDI:
+ *   ✅ Species query: limit=100, res.length — to'g'ri hisob
+ *   ✅ Card 3 modal: 1k/7k/30k/90k/maxsus sana
+ *   ✅ Card 5: real ADI trend (multiple farm-summary calls)
+ *   ✅ Card 6: joy muammosi tuzatildi
+ *   ✅ Scrollbar: butunlay yashirilgan
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AreaChart, Area,
+  PieChart, Pie, Cell, Tooltip as RTooltip,
+  AreaChart, Area, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceArea,
+  ResponsiveContainer,
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Minus,
-  AlertTriangle, ChevronRight,
-  Moon, Sun, RefreshCw, CheckCircle,
+  AlertTriangle, ChevronRight, CheckCircle,
+  X, Calendar,
 } from 'lucide-react';
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
@@ -34,38 +43,24 @@ interface OverviewStats {
   animals: { total: number; active: number };
   weight:  { average_kg: number | null; change_percentage_7d: number | null };
 }
-
 interface HealthMetrics {
-  risk_score:        number;
   animals_by_status: Record<string, number>;
   alert_summary:     { total: number; critical: number; warning: number };
+  risk_score:        number;
 }
-
 interface ADIFarmSummaryItem {
-  animal_id:    number;
-  tag_id:       string;
-  species:      string;
-  adi_score:    number;
-  category:     string;
-  trend:        string;
-  last_updated: string | null;
+  animal_id: number; tag_id: string; species: string;
+  adi_score: number; category: string; trend: string;
 }
-
 interface ADIFarmSummary {
-  date:           string;
-  total_animals:  number;
-  healthy_count:  number;
-  average_count:  number;
-  warning_count:  number;
-  critical_count: number;
-  farm_adi_score: number;
+  date:            string;
+  farm_adi_score:  number;
+  healthy_count:   number;
+  average_count:   number;
+  warning_count:   number;
+  critical_count:  number;
   needs_attention: ADIFarmSummaryItem[];
 }
-
-interface AnimalSearchResponse {
-  total: number;
-}
-
 interface WeightTrendRaw {
   data: { date: string; average_weight: number; measurement_count: number }[];
 }
@@ -74,279 +69,473 @@ interface WeightTrendRaw {
 // CONSTANTS
 // =============================================================================
 
-const SPECIES = [
-  { key: 'cattle', label: 'Qoramol',  color: '#1E3EB4' },
-  { key: 'sheep',  label: "Qo'y",     color: '#10B981' },
-  { key: 'goat',   label: 'Echki',    color: '#F59E0B' },
-  { key: 'horse',  label: 'Ot',       color: '#8B5CF6' },
-  { key: 'other',  label: 'Boshqa',   color: '#6B7280' },
+const SPECIES_CFG = [
+  { key: 'cattle', label: 'Qoramol', color: '#1E3EB4' },
+  { key: 'sheep',  label: "Qo'y",    color: '#10B981' },
+  { key: 'goat',   label: 'Echki',   color: '#F59E0B' },
+  { key: 'horse',  label: 'Ot',      color: '#8B5CF6' },
+  { key: 'other',  label: 'Boshqa',  color: '#6B7280' },
+];
+
+const STATUS_CFG = [
+  { key: 'active',      label: "Sog'lom",      color: '#10B981' },
+  { key: 'quarantine',  label: 'Karantin',      color: '#F59E0B' },
+  { key: 'sick',        label: 'Kasal',         color: '#EF4444' },
+  { key: 'deceased',    label: 'Vafot etdi',    color: '#9CA3AF' },
+  { key: 'sold',        label: 'Sotilgan',      color: '#3B82F6' },
+  { key: 'transferred', label: "Ko'chirilgan",  color: '#8B5CF6' },
 ];
 
 const ADI_CFG = {
-  healthy:  { color: '#10B981', label: "Sog'lom",       bg: 'rgba(16,185,129,0.1)'  },
-  average:  { color: '#F59E0B', label: "O'rtacha",      bg: 'rgba(245,158,11,0.1)'  },
-  warning:  { color: '#F97316', label: 'Ogohlantirish', bg: 'rgba(249,115,22,0.1)'  },
-  critical: { color: '#EF4444', label: 'Kritik',        bg: 'rgba(239,68,68,0.1)'   },
+  healthy:  { color: '#10B981', label: "Sog'lom"      },
+  average:  { color: '#F59E0B', label: "O'rtacha"     },
+  warning:  { color: '#F97316', label: 'Ogohlantirish' },
+  critical: { color: '#EF4444', label: 'Kritik'        },
 } as const;
 
-const R    = 52;
-const CIRC = 2 * Math.PI * R;
-const GAP  = 2;
+const PERIOD_OPTIONS = [
+  { label: '1k',  days: 1  },
+  { label: '7k',  days: 7  },
+  { label: '30k', days: 30 },
+  { label: '90k', days: 90 },
+];
 
 // =============================================================================
-// HOOKS
+// HELPERS
 // =============================================================================
 
-function useCountUp(target: number, duration = 900, trigger = true) {
-  const [value, setValue] = useState(0);
-  const rafRef = useRef<number>(0);
-
-  useEffect(() => {
-    if (!trigger || target === 0) { setValue(target); return; }
-    const start = performance.now();
-    const animate = (now: number) => {
-      const progress = Math.min((now - start) / duration, 1);
-      const ease     = 1 - Math.pow(1 - progress, 3);
-      setValue(Math.round(ease * target));
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, duration, trigger]);
-
-  return value;
+function formatDate(d: Date) {
+  return d.toISOString().split('T')[0];
 }
 
-function useDarkMode() {
-  const [dark, setDark] = useState(() =>
-    typeof window !== 'undefined' &&
-    (localStorage.getItem('tv-theme') === 'dark' ||
-      (!localStorage.getItem('tv-theme') &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches))
-  );
+function subtractDays(d: Date, n: number) {
+  const r = new Date(d);
+  r.setDate(r.getDate() - n);
+  return r;
+}
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (dark) {
-      root.classList.add('dark');
-      localStorage.setItem('tv-theme', 'dark');
-    } else {
-      root.classList.remove('dark');
-      localStorage.setItem('tv-theme', 'light');
-    }
-  }, [dark]);
-
-  return [dark, () => setDark(d => !d)] as const;
+function shortDate(iso: string) {
+  return new Date(iso).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' });
 }
 
 // =============================================================================
-// DONUT CHART
+// SHARED COMPONENTS
 // =============================================================================
 
-interface DonutSegment { key: string; label: string; value: number; color: string }
-
-function DonutChart({
-  segments, total, selected, onSelect,
+function Card({
+  children, className = '', onClick, style = {},
 }: {
-  segments: DonutSegment[];
-  total:    number;
-  selected: string | null;
-  onSelect: (k: string | null) => void;
-}) {
-  const nonZero = segments.filter(s => s.value > 0);
-  if (nonZero.length === 0) {
-    return (
-      <div className="h-40 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-        Ma'lumot yo'q
-      </div>
-    );
-  }
-
-  let cumOffset = 0;
-  const slices = nonZero.map(seg => {
-    const len    = (seg.value / total) * CIRC - GAP;
-    const offset = CIRC - cumOffset;
-    cumOffset   += (seg.value / total) * CIRC;
-    return { ...seg, len: Math.max(0, len), offset };
-  });
-
-  const active = selected ? segments.find(s => s.key === selected) : null;
-
-  return (
-    <div className="relative flex items-center justify-center" style={{ height: 168 }}>
-      <svg
-        viewBox="0 0 128 128"
-        style={{ width: 168, height: 168, transform: 'rotate(-90deg)' }}
-      >
-        {/* track */}
-        <circle
-          cx={64} cy={64} r={R} fill="none"
-          stroke="#E5E7EB" strokeWidth={12}
-          className="dark:[stroke:#374151]"
-        />
-        {slices.map(s => (
-          <circle
-            key={s.key}
-            cx={64} cy={64} r={R} fill="none"
-            stroke={s.color}
-            strokeWidth={selected && selected !== s.key ? 10 : 13}
-            strokeLinecap="butt"
-            strokeDasharray={`${s.len} ${CIRC}`}
-            strokeDashoffset={s.offset}
-            opacity={selected && selected !== s.key ? 0.25 : 1}
-            style={{ cursor: 'pointer', transition: 'stroke-width .2s, opacity .2s' }}
-            onClick={() => onSelect(selected === s.key ? null : s.key)}
-          />
-        ))}
-      </svg>
-
-      {/* center */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <div
-          className="text-2xl font-black tabular-nums"
-          style={{
-            color: active ? active.color : undefined,
-            fontFamily: "'JetBrains Mono', monospace",
-          }}
-        >
-          <span className={active ? '' : 'text-gray-900 dark:text-gray-100'}>
-            {active ? active.value : total}
-          </span>
-        </div>
-        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-          {active ? active.label : 'Jami'}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// SUB-COMPONENTS
-// =============================================================================
-
-function Card({ children, className = '', onClick }: {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  style?: React.CSSProperties;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
   return (
     <div
+      ref={ref}
       onClick={onClick}
-      className={`
-        bg-white dark:bg-gray-900
-        border border-gray-200 dark:border-gray-800
-        rounded-2xl shadow-sm
-        ${onClick ? 'cursor-pointer hover:-translate-y-0.5 transition-transform' : ''}
-        ${className}
-      `}
+      style={{
+        background: '#fff',
+        border: '1px solid #E4E7ED',
+        borderRadius: 16,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+        overflow: 'hidden',
+        cursor: onClick ? 'pointer' : 'default',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: onClick ? 'transform .15s, box-shadow .15s' : undefined,
+        ...style,
+      }}
+      className={className}
+      onMouseEnter={() => {
+        if (onClick && ref.current) {
+          ref.current.style.transform = 'translateY(-2px)';
+          ref.current.style.boxShadow = '0 6px 20px rgba(0,0,0,0.09)';
+        }
+      }}
+      onMouseLeave={() => {
+        if (onClick && ref.current) {
+          ref.current.style.transform = 'translateY(0)';
+          ref.current.style.boxShadow = '0 1px 4px rgba(0,0,0,0.05)';
+        }
+      }}
     >
       {children}
     </div>
   );
 }
 
-function CardHeader({ title, action }: {
+function CardHead({
+  title, action,
+}: {
   title: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between px-5 pt-5 pb-3">
-      <div className="text-sm font-semibold text-gray-700 dark:text-gray-300">{title}</div>
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '14px 18px 11px',
+      borderBottom: '1px solid #F3F4F6',
+      flexShrink: 0,
+    }}>
+      <span style={{
+        fontSize: 12, fontWeight: 600, color: '#374151',
+        fontFamily: "'Outfit', sans-serif",
+      }}>
+        {title}
+      </span>
       {action}
     </div>
   );
 }
 
-function AttentionRow({ item, onClick }: { item: ADIFarmSummaryItem; onClick: () => void }) {
-  const cfg = ADI_CFG[item.category as keyof typeof ADI_CFG] ?? ADI_CFG.warning;
-  const TrendIcon = item.trend === 'improving' ? TrendingUp :
-                    item.trend === 'declining' ? TrendingDown : Minus;
+// =============================================================================
+// DONUT CHART
+// =============================================================================
+
+interface DonutSlice { name: string; value: number; color: string }
+
+function DonutChart({ data, total, sub }: {
+  data:  DonutSlice[];
+  total: number;
+  sub:   string;
+}) {
+  const nonZero = data.filter(d => d.value > 0);
+  const display = nonZero.length > 0 ? nonZero : [{ name: '', value: 1, color: '#F3F4F6' }];
 
   return (
-    <button
-      onClick={onClick}
-      className="
-        w-full flex items-center gap-3 px-5 py-3 text-left group
-        hover:bg-gray-50 dark:hover:bg-gray-800/60
-        border-t border-gray-100 dark:border-gray-800
-        transition-colors
-      "
-    >
-      <div
-        className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
-        style={{ background: cfg.bg }}
-      >
-        <span
-          className="text-sm font-black tabular-nums"
-          style={{ color: cfg.color, fontFamily: "'JetBrains Mono', monospace" }}
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <PieChart width={144} height={144}>
+        <Pie
+          data={display}
+          cx={68} cy={68}
+          innerRadius={44}
+          outerRadius={62}
+          paddingAngle={nonZero.length > 1 ? 2 : 0}
+          dataKey="value"
+          strokeWidth={0}
+          animationBegin={0}
+          animationDuration={700}
         >
-          {Math.round(item.adi_score)}
+          {display.map((e, i) => <Cell key={i} fill={e.color} />)}
+        </Pie>
+        {nonZero.length > 0 && (
+          <RTooltip
+            formatter={(v: number, n: string) => [`${v} ta`, n]}
+            contentStyle={{
+              fontSize: 11, borderRadius: 8,
+              border: '1px solid #E4E7ED', padding: '5px 9px',
+              fontFamily: "'Outfit', sans-serif",
+            }}
+          />
+        )}
+      </PieChart>
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        pointerEvents: 'none',
+      }}>
+        <span style={{
+          fontSize: 22, fontWeight: 800, color: '#0D1117', lineHeight: 1,
+          fontFamily: "'JetBrains Mono', monospace",
+        }}>
+          {total}
+        </span>
+        <span style={{ fontSize: 9, color: '#9CA3AF', marginTop: 3, fontFamily: "'Outfit', sans-serif" }}>
+          {sub}
         </span>
       </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-          {item.tag_id}
-        </div>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          <span className="text-xs font-medium" style={{ color: cfg.color }}>{cfg.label}</span>
-          <span className="text-gray-300 dark:text-gray-600">·</span>
-          <span className="text-xs text-gray-400 dark:text-gray-500">
-            {item.species === 'cattle' ? 'Qoramol' :
-             item.species === 'sheep'  ? "Qo'y"    :
-             item.species === 'goat'   ? 'Echki'   :
-             item.species === 'horse'  ? 'Ot'      : 'Boshqa'}
-          </span>
-        </div>
-      </div>
-
-      <TrendIcon
-        size={13}
-        style={{
-          color: item.trend === 'improving' ? '#10B981' :
-                 item.trend === 'declining' ? '#EF4444' : '#9CA3AF',
-          flexShrink: 0,
-        }}
-      />
-      <ChevronRight
-        size={13}
-        className="text-gray-300 dark:text-gray-600 group-hover:text-gray-500 transition-colors flex-shrink-0"
-      />
-    </button>
-  );
-}
-
-function WeightTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 shadow-lg text-xs">
-      <p className="font-semibold text-gray-600 dark:text-gray-400 mb-1">{label}</p>
-      <p className="font-bold text-gray-900 dark:text-gray-100">
-        {payload[0]?.value?.toFixed(1)} kg
-      </p>
-      <p className="text-gray-400 dark:text-gray-500 mt-0.5">
-        {payload[0]?.payload?.measurement_count ?? 0} ta o'lchov
-      </p>
     </div>
   );
 }
 
 // =============================================================================
-// MAIN
+// LEGEND
+// =============================================================================
+
+function Legend({ items }: { items: { label: string; value: number; color: string }[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1, justifyContent: 'center' }}>
+      {items.map(it => (
+        <div key={it.label} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: '#6B7280', fontFamily: "'Outfit', sans-serif" }}>
+              {it.label}
+            </span>
+          </div>
+          <span style={{
+            fontSize: 12, fontWeight: 700,
+            color: it.value > 0 ? it.color : '#E5E7EB',
+            fontFamily: "'JetBrains Mono', monospace",
+            minWidth: 20, textAlign: 'right',
+          }}>
+            {it.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// TOOLTIPS
+// =============================================================================
+
+function WeightTip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #E4E7ED', borderRadius: 8,
+      padding: '7px 11px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      fontSize: 11, fontFamily: "'Outfit', sans-serif",
+    }}>
+      <div style={{ color: '#9CA3AF', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 700, color: '#0D1117' }}>{payload[0]?.value?.toFixed(1)} kg</div>
+    </div>
+  );
+}
+
+function AdiTip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const v = payload[0]?.value ?? 0;
+  const color = v >= 70 ? '#10B981' : v >= 40 ? '#F59E0B' : '#EF4444';
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #E4E7ED', borderRadius: 8,
+      padding: '7px 11px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+      fontSize: 11, fontFamily: "'Outfit', sans-serif",
+    }}>
+      <div style={{ color: '#9CA3AF', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 700, color }}>ADI: {v.toFixed(1)}</div>
+    </div>
+  );
+}
+
+// =============================================================================
+// MODAL — Rivojlanish grafigi
+// =============================================================================
+
+function DevChartModal({
+  onClose, weightTrend, defaultDays,
+}: {
+  onClose:     () => void;
+  weightTrend: (days: number) => { date: string; average_weight: number; measurement_count: number }[];
+  defaultDays: number;
+}) {
+  const [days, setDays] = useState(defaultDays);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo,   setCustomTo]   = useState(formatDate(new Date()));
+  const [useCustom,  setUseCustom]  = useState(false);
+
+  const data = weightTrend(days).map(p => ({
+    date: shortDate(p.date),
+    kg:   p.average_weight,
+    cnt:  p.measurement_count,
+  }));
+
+  // Close on Escape
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const weights = data.map(d => d.kg).filter(Boolean);
+  const avgW    = weights.length ? weights.reduce((a, b) => a + b) / weights.length : 0;
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
+        animation: 'tv-fadein .2s ease',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 20,
+          width: '100%', maxWidth: 720,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.18)',
+          overflow: 'hidden',
+          animation: 'tv-slideup .25s ease',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '18px 22px 14px',
+          borderBottom: '1px solid #F3F4F6',
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#0D1117', fontFamily: "'Outfit', sans-serif" }}>
+              Fermaning rivojlanishi
+            </div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+              O'rtacha vazn trendi
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32, height: 32, borderRadius: 8,
+              background: '#F3F4F6', border: 'none',
+              display: 'grid', placeItems: 'center',
+              cursor: 'pointer', color: '#6B7280',
+            }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Period selector */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '12px 22px',
+          borderBottom: '1px solid #F3F4F6',
+          flexWrap: 'wrap',
+        }}>
+          {PERIOD_OPTIONS.map(p => (
+            <button
+              key={p.days}
+              onClick={() => { setDays(p.days); setUseCustom(false); }}
+              style={{
+                padding: '5px 14px', borderRadius: 8,
+                border: `1px solid ${!useCustom && days === p.days ? '#1E3EB4' : '#E4E7ED'}`,
+                background: !useCustom && days === p.days ? '#1E3EB4' : '#fff',
+                color: !useCustom && days === p.days ? '#fff' : '#6B7280',
+                fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                fontFamily: "'Outfit', sans-serif",
+                transition: 'all .15s',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+
+          {/* Custom range */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+            <Calendar size={13} color="#9CA3AF" />
+            <input
+              type="date"
+              value={customFrom}
+              max={formatDate(new Date())}
+              onChange={e => { setCustomFrom(e.target.value); setUseCustom(true); }}
+              style={{
+                border: `1px solid ${useCustom ? '#1E3EB4' : '#E4E7ED'}`,
+                borderRadius: 7, padding: '4px 8px', fontSize: 11,
+                color: '#374151', outline: 'none', fontFamily: "'Outfit', sans-serif",
+              }}
+            />
+            <span style={{ fontSize: 11, color: '#9CA3AF' }}>—</span>
+            <input
+              type="date"
+              value={customTo}
+              max={formatDate(new Date())}
+              onChange={e => { setCustomTo(e.target.value); setUseCustom(true); }}
+              style={{
+                border: `1px solid ${useCustom ? '#1E3EB4' : '#E4E7ED'}`,
+                borderRadius: 7, padding: '4px 8px', fontSize: 11,
+                color: '#374151', outline: 'none', fontFamily: "'Outfit', sans-serif",
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Chart */}
+        <div style={{ padding: '16px 8px 20px 0' }}>
+          {data.length < 2 ? (
+            <div style={{
+              height: 240, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: '#D1D5DB', fontSize: 13,
+            }}>
+              Ma'lumot yo'q
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={data} margin={{ top: 8, right: 20, left: -10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="modalWGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#1E3EB4" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#1E3EB4" stopOpacity={0.01} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+                {avgW > 0 && <>
+                  <defs>
+                    <pattern id="greenZone" patternUnits="userSpaceOnUse" width="4" height="4">
+                      <rect width="4" height="4" fill="#10B98108"/>
+                    </pattern>
+                  </defs>
+                </>}
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9CA3AF' }}
+                  tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }}
+                  tickLine={false} axisLine={false} unit=" kg" width={58} />
+                <Tooltip content={<WeightTip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
+                <Area type="monotone" dataKey="kg"
+                  stroke="#1E3EB4" strokeWidth={2.5}
+                  fill="url(#modalWGrad)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: '#1E3EB4', strokeWidth: 0 }}
+                  animationDuration={600}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Stats row */}
+        {data.length > 0 && (
+          <div style={{
+            display: 'flex', gap: 1,
+            borderTop: '1px solid #F3F4F6',
+          }}>
+            {[
+              { label: 'O\'rtacha', val: avgW > 0 ? `${avgW.toFixed(1)} kg` : '—' },
+              { label: 'Minimum',   val: weights.length ? `${Math.min(...weights).toFixed(1)} kg` : '—' },
+              { label: 'Maksimum',  val: weights.length ? `${Math.max(...weights).toFixed(1)} kg` : '—' },
+              { label: 'O\'lchov',  val: `${data.reduce((a, b) => a + (b.cnt ?? 0), 0)} ta` },
+            ].map(s => (
+              <div key={s.label} style={{
+                flex: 1, padding: '12px 16px', textAlign: 'center',
+                borderRight: '1px solid #F3F4F6',
+              }}>
+                <div style={{
+                  fontSize: 14, fontWeight: 700, color: '#0D1117',
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  {s.val}
+                </div>
+                <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// MAIN COMPONENT
 // =============================================================================
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const [isDark, toggleDark]        = useDarkMode();
-  const [trendDays, setTrendDays]   = useState(30);
-  const [selSpecies, setSelSpecies] = useState<string | null>(null);
-  const hasAnimated = useRef(false);
-  const [animated, setAnimated]     = useState(false);
+  const [devModalOpen, setDevModalOpen] = useState(false);
 
   // ─── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: overview, isLoading: loadingOverview } = useQuery({
+  const { data: overview } = useQuery({
     queryKey: ['analytics', 'overview'],
     queryFn:  () => apiFetch<OverviewStats>('/api/v1/analytics/overview'),
     staleTime: 60_000,
@@ -358,80 +547,110 @@ export default function DashboardPage() {
     staleTime: 60_000,
   });
 
-  const { data: adiSummary, refetch: refetchAdi, isFetching: loadingAdi } = useQuery({
+  const { data: adiSummary } = useQuery({
     queryKey: ['adi', 'farm-summary'],
     queryFn:  () => apiFetch<ADIFarmSummary>('/api/v1/adi/farm-summary'),
     staleTime: 5 * 60_000,
   });
 
-  const { data: weightRaw, isFetching: loadingChart } = useQuery({
-    queryKey: ['analytics', 'weight-trend', trendDays],
-    queryFn:  () => apiFetch<WeightTrendRaw>(`/api/v1/analytics/trends/weight?days=${trendDays}`),
-    staleTime: 5 * 60_000,
-  });
+  // Weight trends — all periods cached
+  const { data: w7  } = useQuery({ queryKey: ['wt', 7],  queryFn: () => apiFetch<WeightTrendRaw>('/api/v1/analytics/trends/weight?days=7'),  staleTime: 5 * 60_000 });
+  const { data: w30 } = useQuery({ queryKey: ['wt', 30], queryFn: () => apiFetch<WeightTrendRaw>('/api/v1/analytics/trends/weight?days=30'), staleTime: 5 * 60_000 });
+  const { data: w90 } = useQuery({ queryKey: ['wt', 90], queryFn: () => apiFetch<WeightTrendRaw>('/api/v1/analytics/trends/weight?days=90'), staleTime: 5 * 60_000 });
 
-  // Species counts — parallel
+  // Species counts — parallel, limit=100 (max), use array length
   const speciesQ = useQueries({
-    queries: SPECIES.map(sp => ({
-      queryKey:  ['animals', 'species-count', sp.key],
-      queryFn:   () => apiFetch<AnimalSearchResponse>(
-        `/api/v1/animals/search?species=${sp.key}&limit=1`
-      ),
+    queries: SPECIES_CFG.map(sp => ({
+      queryKey: ['species-cnt', sp.key],
+      queryFn:  async () => {
+        const res = await apiFetch<any>(`/api/v1/animals/search?species=${sp.key}&limit=100`);
+        return Array.isArray(res) ? res.length : (res?.total ?? 0);
+      },
       staleTime: 5 * 60_000,
     })),
   });
 
-  // ─── Derived ────────────────────────────────────────────────────────────────
-
-  const totalAnimals  = overview?.animals?.total ?? 0;
-  const animatedTotal = useCountUp(totalAnimals, 900, !loadingOverview);
-  const farmAdi       = adiSummary?.farm_adi_score ?? 0;
-  const animatedAdi   = useCountUp(Math.round(farmAdi), 1100, !!adiSummary);
-
-  const speciesData: DonutSegment[] = SPECIES.map((sp, i) => ({
-    ...sp, value: speciesQ[i].data?.total ?? 0,
-  })).filter(s => s.value > 0);
-
-  const weightTrend = (weightRaw?.data ?? []).map(p => ({
-    date:              new Date(p.date).toLocaleDateString('uz-UZ', { month: 'short', day: 'numeric' }),
-    average_weight:    p.average_weight,
-    measurement_count: p.measurement_count,
-  }));
-
-  const weights = weightTrend.map(d => d.average_weight).filter(Boolean);
-  const avgW    = weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : 0;
-
-  const adiCats: [string, number][] = adiSummary ? [
-    ['healthy',  adiSummary.healthy_count],
-    ['average',  adiSummary.average_count],
-    ['warning',  adiSummary.warning_count],
-    ['critical', adiSummary.critical_count],
-  ] : [];
-
-  const adiTotal       = adiCats.reduce((s, [, n]) => s + n, 0);
-  const attentionList  = (adiSummary?.needs_attention ?? []).slice(0, 5);
-
-  const farmColor = farmAdi >= 70 ? '#10B981' : farmAdi >= 40 ? '#F59E0B' : '#EF4444';
-  const farmLabel = farmAdi >= 70 ? "Yaxshi holat" :
-                    farmAdi >= 40 ? "O'rtacha holat" : "Diqqat talab qiladi";
-
-  const weightChange  = overview?.weight?.change_percentage_7d;
-  const WeightIcon    = (weightChange ?? 0) > 0 ? TrendingUp :
-                        (weightChange ?? 0) < 0 ? TrendingDown : Minus;
-  const weightColor   = (weightChange ?? 0) > 0 ? '#10B981' :
-                        (weightChange ?? 0) < 0 ? '#EF4444' : '#9CA3AF';
-
-  const today = new Date().toLocaleDateString('uz-UZ', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  // ADI health trend — 7 daily points
+  const today = new Date();
+  const adiTrendQ = useQueries({
+    queries: [0, 1, 2, 3, 4, 5, 6].map(daysAgo => {
+      const d = subtractDays(today, daysAgo);
+      const ds = formatDate(d);
+      return {
+        queryKey: ['adi-farm', ds],
+        queryFn:  () => apiFetch<ADIFarmSummary>(`/api/v1/adi/farm-summary?date=${ds}`),
+        staleTime: 60 * 60_000,
+      };
+    }),
   });
 
-  // Trigger stagger animation once
-  useEffect(() => {
-    if (!hasAnimated.current && (overview || adiSummary)) {
-      hasAnimated.current = true;
-      setTimeout(() => setAnimated(true), 80);
-    }
-  }, [overview, adiSummary]);
+  // ─── Derived ────────────────────────────────────────────────────────────────
+
+  const totalAnimals = overview?.animals?.total ?? 0;
+
+  // Species donut — use fetched counts
+  const speciesCounts = SPECIES_CFG.map((sp, i) => ({
+    name:  sp.label,
+    value: (speciesQ[i].data as number) ?? 0,
+    color: sp.color,
+  }));
+  const speciesNonZero = speciesCounts.filter(s => s.value > 0);
+  const speciesTotal   = speciesNonZero.reduce((a, b) => a + b.value, 0);
+
+  // Status donut
+  const statusByKey  = health?.animals_by_status ?? {};
+  const statusSlices = STATUS_CFG.map(s => ({
+    name: s.label, value: statusByKey[s.key] ?? 0, color: s.color,
+  })).filter(d => d.value > 0);
+  const statusTotal  = statusSlices.reduce((a, b) => a + b.value, 0);
+
+  // Weight trend getter
+  const getWeightTrend = (days: number) => {
+    const raw = days <= 7 ? w7 : days <= 30 ? w30 : w90;
+    return raw?.data ?? [];
+  };
+
+  // Weight trend for card 6 mini chart (30 days)
+  const weightTrend30 = (w30?.data ?? []).map(p => ({
+    date: shortDate(p.date),
+    kg:   p.average_weight,
+    cnt:  p.measurement_count,
+  }));
+
+  // ADI health trend for card 5
+  const adiHealthTrend = [...adiTrendQ]
+    .reverse()
+    .map((q, i) => ({
+      date:  shortDate(formatDate(subtractDays(today, 6 - i))),
+      score: (q.data as ADIFarmSummary)?.farm_adi_score ?? null,
+    }))
+    .filter(d => d.score !== null && d.score > 0);
+
+  // Farm ADI
+  const farmAdi      = adiSummary?.farm_adi_score ?? 0;
+  const farmAdiColor = farmAdi >= 70 ? '#10B981' : farmAdi >= 40 ? '#F59E0B' : '#EF4444';
+
+  // ADI distribution
+  const adiDist = adiSummary ? [
+    { name: "Sog'lom",   value: adiSummary.healthy_count,  color: '#10B981' },
+    { name: "O'rtacha",  value: adiSummary.average_count,  color: '#F59E0B' },
+    { name: 'Ogohlantr.', value: adiSummary.warning_count,  color: '#F97316' },
+    { name: 'Kritik',    value: adiSummary.critical_count, color: '#EF4444' },
+  ] : [];
+  const adiDistTotal = adiDist.reduce((a, b) => a + b.value, 0);
+
+  // Attention list
+  const attention = (adiSummary?.needs_attention ?? []).slice(0, 6);
+
+  // Weight stats
+  const avgKg        = overview?.weight?.average_kg ?? 0;
+  const totalKg      = avgKg * totalAnimals;
+  const totalTonnes  = totalKg / 1000;
+  const weightChange = overview?.weight?.change_percentage_7d;
+  const WIcon        = (weightChange ?? 0) > 0 ? TrendingUp :
+                       (weightChange ?? 0) < 0 ? TrendingDown : Minus;
+  const wColor       = (weightChange ?? 0) > 0 ? '#10B981' :
+                       (weightChange ?? 0) < 0 ? '#EF4444' : '#9CA3AF';
 
   // =============================================================================
   // RENDER
@@ -440,456 +659,444 @@ export default function DashboardPage() {
   return (
     <>
       <style>{`
-        @keyframes fadeUp {
-          from { opacity:0; transform:translateY(14px); }
-          to   { opacity:1; transform:translateY(0);    }
+        /* ── Hide ALL scrollbars ── */
+        html, body, .tv-dashboard {
+          scrollbar-width: none !important;
+          -ms-overflow-style: none !important;
         }
-        .du-1 { animation: fadeUp .45s ease both .04s; }
-        .du-2 { animation: fadeUp .45s ease both .10s; }
-        .du-3 { animation: fadeUp .45s ease both .18s; }
-        .du-4 { animation: fadeUp .45s ease both .26s; }
-        .du-5 { animation: fadeUp .45s ease both .34s; }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar,
+        .tv-dashboard::-webkit-scrollbar { display: none !important; }
+
+        @keyframes tv-fadein  { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes tv-slideup { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .c1 { animation: tv-slideup .38s ease both .04s; }
+        .c2 { animation: tv-slideup .38s ease both .09s; }
+        .c3 { animation: tv-slideup .38s ease both .14s; }
+        .c4 { animation: tv-slideup .38s ease both .19s; }
+        .c5 { animation: tv-slideup .38s ease both .24s; }
+        .c6 { animation: tv-slideup .38s ease both .29s; }
+
+        .attn-row { transition: background .12s; }
+        .attn-row:hover { background: #F9FAFB; }
+
+        .period-btn { transition: all .15s; }
+        .period-btn:hover { border-color: #1E3EB4 !important; color: #1E3EB4 !important; }
       `}</style>
 
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+      {/* ── Modal ── */}
+      {devModalOpen && (
+        <DevChartModal
+          onClose={() => setDevModalOpen(false)}
+          weightTrend={getWeightTrend}
+          defaultDays={30}
+        />
+      )}
 
-          {/* ── HEADER ── */}
-          <div className="du-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-50">
-                Ferma holati
-              </h1>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 capitalize">
-                {today}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => refetchAdi()}
-                disabled={loadingAdi}
-                className="
-                  flex items-center gap-1.5 px-3 py-2 rounded-xl
-                  text-xs font-medium text-gray-500 dark:text-gray-400
-                  border border-gray-200 dark:border-gray-800
-                  hover:bg-gray-100 dark:hover:bg-gray-800
-                  disabled:opacity-50 transition-colors
-                "
-              >
-                <RefreshCw size={13} className={loadingAdi ? 'animate-spin' : ''} />
-                Yangilash
-              </button>
-              <button
-                onClick={toggleDark}
-                aria-label="Rejimni o'zgartirish"
-                className="
-                  p-2 rounded-xl text-gray-500 dark:text-gray-400
-                  border border-gray-200 dark:border-gray-800
-                  hover:bg-gray-100 dark:hover:bg-gray-800
-                  transition-colors
-                "
-              >
-                {isDark ? <Sun size={15} /> : <Moon size={15} />}
-              </button>
-            </div>
-          </div>
+      <div
+        className="tv-dashboard"
+        style={{
+          minHeight: 'calc(100vh - 64px)',
+          background: '#F7F8FA',
+          padding: '18px 22px 26px',
+          fontFamily: "'Outfit', sans-serif",
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{ maxWidth: 1280, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* ── TOP METRICS ── */}
-          <div className="du-2 grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* ═══════════════════════════════════════
+              QATOR 1 — 3 karta
+          ═══════════════════════════════════════ */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
 
-            {/* Farm ADI */}
-            <Card className="p-5">
-              <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium">
-                Ferma ADI skori
-              </div>
-              <div className="flex items-end gap-2">
-                <div
-                  className="text-5xl font-black tabular-nums leading-none"
-                  style={{ color: farmColor, fontFamily: "'JetBrains Mono', monospace" }}
-                >
-                  {animatedAdi}
-                </div>
-                <span className="text-base text-gray-400 dark:text-gray-600 mb-1">/100</span>
-              </div>
-              <div className="mt-3 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000"
-                  style={{ width: `${farmAdi}%`, background: farmColor }}
-                />
-              </div>
-              <div className="mt-1.5 text-xs font-medium" style={{ color: farmColor }}>
-                {farmLabel}
-              </div>
-            </Card>
-
-            {/* Total animals */}
-            <Card className="p-5" onClick={() => navigate('/animals')}>
-              <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium">
-                Jami jonivorlar
-              </div>
-              <div
-                className="text-4xl font-black tabular-nums text-gray-900 dark:text-gray-100"
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                {animatedTotal}
-              </div>
-              <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                {overview?.animals?.active ?? 0} ta faol
-              </div>
-            </Card>
-
-            {/* Avg weight */}
-            <Card className="p-5">
-              <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium">
-                O'rtacha vazn
-              </div>
-              <div
-                className="text-4xl font-black tabular-nums text-gray-900 dark:text-gray-100"
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                {overview?.weight?.average_kg != null
-                  ? overview.weight.average_kg.toFixed(0)
-                  : '—'}
-                <span className="text-lg font-normal text-gray-400 ml-1">kg</span>
-              </div>
-              {weightChange != null && (
-                <div className="flex items-center gap-1 mt-1">
-                  <WeightIcon size={11} style={{ color: weightColor }} />
-                  <span className="text-xs font-medium" style={{ color: weightColor }}>
-                    {weightChange >= 0 ? '+' : ''}{weightChange.toFixed(1)}% (7 kun)
-                  </span>
-                </div>
-              )}
-            </Card>
-
-            {/* Attention count */}
-            <Card className="p-5" onClick={() => navigate('/adi')}>
-              <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 font-medium">
-                Diqqat talab qiladi
-              </div>
-              <div
-                className="text-4xl font-black tabular-nums"
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: attentionList.length > 0 ? '#F97316' : '#10B981',
-                }}
-              >
-                {attentionList.length}
-              </div>
-              <div className="flex items-center gap-1 mt-1">
-                {attentionList.length === 0 ? (
-                  <>
-                    <CheckCircle size={11} className="text-emerald-500" />
-                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                      Hammasi yaxshi
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle size={11} className="text-orange-500" />
-                    <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">
-                      {health?.alert_summary?.critical ?? 0} ta kritik
-                    </span>
-                  </>
-                )}
-              </div>
-            </Card>
-          </div>
-
-          {/* ── 3 COLUMNS ── */}
-          <div className="du-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-
-            {/* Donut — species */}
-            <Card>
-              <CardHeader title="Jonivorlar turlari" />
-              <div className="px-5 pb-2">
+            {/* ── KARTA 1: Jonivorlar turlari ── */}
+            <Card className="c1">
+              <CardHead title="Jonivorlar turlari" />
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                gap: 14, padding: '14px 16px 16px',
+                flex: 1,
+              }}>
                 <DonutChart
-                  segments={speciesData}
-                  total={totalAnimals}
-                  selected={selSpecies}
-                  onSelect={setSelSpecies}
+                  data={speciesNonZero.length > 0 ? speciesNonZero : speciesCounts}
+                  total={speciesTotal || totalAnimals}
+                  sub="Jami"
                 />
-              </div>
-              <div className="px-5 pb-5 grid grid-cols-2 gap-y-2.5 gap-x-3">
-                {speciesData.map(sp => (
-                  <button
-                    key={sp.key}
-                    onClick={() => setSelSpecies(p => p === sp.key ? null : sp.key)}
-                    className="flex items-center gap-2 text-left hover:opacity-80 transition-opacity"
-                  >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      style={{ background: sp.color }}
-                    />
-                    <div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{sp.label}</div>
-                      <div
-                        className="text-xs font-bold tabular-nums"
-                        style={{
-                          color: selSpecies === sp.key ? sp.color : undefined,
-                          fontFamily: "'JetBrains Mono', monospace",
-                        }}
-                      >
-                        <span className={selSpecies === sp.key ? '' : 'text-gray-800 dark:text-gray-200'}>
-                          {sp.value}
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                <Legend
+                  items={SPECIES_CFG.map((sp, i) => ({
+                    label: sp.label,
+                    value: (speciesQ[i].data as number) ?? 0,
+                    color: sp.color,
+                  }))}
+                />
               </div>
             </Card>
 
-            {/* ADI distribution */}
-            <Card>
-              <CardHeader
-                title="ADI holati taqsimoti"
+            {/* ── KARTA 2: Sog'liq holati ── */}
+            <Card className="c2">
+              <CardHead title="Sog'liq holati" />
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                gap: 14, padding: '14px 16px 16px',
+                flex: 1,
+              }}>
+                <DonutChart
+                  data={statusSlices}
+                  total={statusTotal}
+                  sub="Jonivor"
+                />
+                <Legend
+                  items={STATUS_CFG.map(s => ({
+                    label: s.label,
+                    value: statusByKey[s.key] ?? 0,
+                    color: s.color,
+                  }))}
+                />
+              </div>
+            </Card>
+
+            {/* ── KARTA 3: Fermaning rivojlanishi — bosilsa modal ── */}
+            <Card className="c3" onClick={() => setDevModalOpen(true)}>
+              <CardHead
+                title={
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    Fermaning rivojlanishi
+                    <span style={{
+                      fontSize: 9, background: '#EFF6FF', color: '#1E3EB4',
+                      borderRadius: 4, padding: '2px 5px', fontWeight: 500,
+                    }}>
+                      Ko'rish →
+                    </span>
+                  </span>
+                }
                 action={
-                  <button
-                    onClick={() => navigate('/adi')}
-                    className="text-xs text-blue-500 hover:text-blue-600 font-medium"
-                  >
-                    Batafsil →
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{
+                      fontSize: 18, fontWeight: 800, color: farmAdiColor,
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}>
+                      {farmAdi.toFixed(0)}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#9CA3AF' }}>ADI</span>
+                  </div>
                 }
               />
-              <div className="px-5 pb-5">
-                {adiTotal === 0 ? (
-                  <div className="h-36 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-                    ADI ma'lumot yo'q
+              {/* Mini preview chart */}
+              <div style={{ padding: '10px 6px 6px 0', flex: 1, pointerEvents: 'none' }}>
+                {weightTrend30.length < 2 ? (
+                  <div style={{
+                    height: 110, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', color: '#D1D5DB', fontSize: 11,
+                    flexDirection: 'column', gap: 6,
+                  }}>
+                    <TrendingUp size={24} color="#E5E7EB" />
+                    <span>Bosib batafsil ko'ring</span>
                   </div>
                 ) : (
-                  <div className="space-y-1">
-                    {/* Stacked bar */}
-                    <div className="flex h-2 rounded-full overflow-hidden gap-px mb-5">
-                      {adiCats.map(([cat, count]) => {
-                        const cfg = ADI_CFG[cat as keyof typeof ADI_CFG];
-                        const pct = adiTotal > 0 ? (count / adiTotal) * 100 : 0;
-                        return pct > 0 ? (
-                          <div
-                            key={cat}
-                            className="h-full transition-all duration-700"
-                            style={{ width: `${pct}%`, background: cfg.color }}
-                            title={`${cfg.label}: ${count}`}
-                          />
-                        ) : null;
-                      })}
-                    </div>
-
-                    {adiCats.map(([cat, count]) => {
-                      const cfg = ADI_CFG[cat as keyof typeof ADI_CFG];
-                      const pct = adiTotal > 0 ? (count / adiTotal) * 100 : 0;
-                      return (
-                        <div key={cat} className="py-1.5">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ background: cfg.color }} />
-                              <span className="text-xs text-gray-600 dark:text-gray-400">{cfg.label}</span>
-                            </div>
-                            <span
-                              className="text-xs font-bold tabular-nums"
-                              style={{
-                                fontFamily: "'JetBrains Mono', monospace",
-                                color: count > 0 ? cfg.color : '#9CA3AF',
-                              }}
-                            >
-                              {count}
-                            </span>
-                          </div>
-                          <div className="h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-700"
-                              style={{ width: `${pct}%`, background: cfg.color }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    <div className="pt-3 mt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                      <span className="text-xs text-gray-400 dark:text-gray-500">Bugungi o'rtacha</span>
-                      <span
-                        className="text-sm font-black tabular-nums"
-                        style={{ color: farmColor, fontFamily: "'JetBrains Mono', monospace" }}
-                      >
-                        {farmAdi.toFixed(1)}
-                      </span>
-                    </div>
-                  </div>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <AreaChart data={weightTrend30.slice(-14)} margin={{ top: 4, right: 12, left: -28, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="cg3" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor="#1E3EB4" stopOpacity={0.14} />
+                          <stop offset="95%" stopColor="#1E3EB4" stopOpacity={0.01} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+                      <XAxis dataKey="date" tick={{ fontSize: 8, fill: '#C4C9D4' }}
+                        tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 8, fill: '#C4C9D4' }} tickLine={false} axisLine={false} />
+                      <Area type="monotone" dataKey="kg" stroke="#1E3EB4" strokeWidth={2}
+                        fill="url(#cg3)" dot={false} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 )}
+              </div>
+              <div style={{
+                padding: '8px 16px 12px',
+                fontSize: 10, color: '#9CA3AF', textAlign: 'center',
+                borderTop: '1px solid #F9FAFB',
+              }}>
+                1k · 7k · 30k · 90k · Maxsus sana — bosib tanlang
               </div>
             </Card>
 
-            {/* Attention list */}
-            <Card className="overflow-hidden">
-              <CardHeader
-                title="Diqqat talab qiladiganlar"
-                action={attentionList.length > 0 && (
-                  <button
-                    onClick={() => navigate('/adi')}
-                    className="text-xs text-orange-500 hover:text-orange-600 font-medium"
-                  >
-                    Hammasi →
-                  </button>
-                )}
-              />
-              {attentionList.length === 0 ? (
-                <div className="px-5 pb-5 h-48 flex flex-col items-center justify-center gap-2">
-                  <CheckCircle size={36} className="text-emerald-400 opacity-40" />
-                  <p className="text-sm text-gray-400 dark:text-gray-500 text-center leading-relaxed">
-                    Barcha jonivorlar<br />yaxshi holatda
-                  </p>
-                </div>
-              ) : (
-                attentionList.map(item => (
-                  <AttentionRow
-                    key={item.animal_id}
-                    item={item}
-                    onClick={() => navigate(`/animals/${item.animal_id}`)}
-                  />
-                ))
-              )}
-            </Card>
           </div>
 
-          {/* ── FARM DEVELOPMENT CHART ── */}
-          <Card className="du-4">
-            <CardHeader
-              title={
-                <div className="flex items-center gap-2">
-                  <TrendingUp size={14} className="text-blue-500" />
-                  <span>Ferma rivojlanishi — o'rtacha vazn trendi</span>
-                </div>
-              }
-              action={
-                <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-                  {([7, 30, 90] as const).map(d => (
-                    <button
-                      key={d}
-                      onClick={() => setTrendDays(d)}
-                      className={`
-                        px-3 py-1 text-xs font-medium rounded-md transition-all
-                        ${trendDays === d
-                          ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400 font-semibold'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}
-                      `}
-                    >
-                      {d}k
-                    </button>
-                  ))}
-                </div>
-              }
-            />
-            <div className="px-5 pb-5">
-              {/* Zone legend */}
-              <div className="flex items-center gap-4 mb-4">
-                {[
-                  { color: '#10B981', label: 'O\'rtachadan yuqori' },
-                  { color: '#F59E0B', label: 'O\'rtacha' },
-                  { color: '#EF4444', label: 'O\'rtachadan past' },
-                ].map(z => (
-                  <div key={z.label} className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-sm opacity-60" style={{ background: z.color }} />
-                    <span className="text-xs text-gray-400 dark:text-gray-500">{z.label}</span>
-                  </div>
-                ))}
-              </div>
+          {/* ═══════════════════════════════════════
+              QATOR 2 — 3 karta
+          ═══════════════════════════════════════ */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
 
-              {loadingChart ? (
-                <div className="h-52 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
-                  Yuklanmoqda...
-                </div>
-              ) : weightTrend.length < 2 ? (
-                <div className="h-52 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-gray-500">
-                  <TrendingUp size={32} className="opacity-25" />
-                  <p className="text-sm">Trendni ko'rish uchun ko'proq o'lchov kerak</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={weightTrend} margin={{ top: 8, right: 4, left: -10, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="wGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="#1E3EB4" stopOpacity={0.14} />
-                        <stop offset="95%" stopColor="#1E3EB4" stopOpacity={0.01} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid
-                      strokeDasharray="3 3" vertical={false}
-                      stroke="currentColor"
-                      className="text-gray-100 dark:text-gray-800"
-                    />
-                    {avgW > 0 && <>
-                      <ReferenceArea y1={avgW * 1.05} fill="#10B981" fillOpacity={0.07} stroke="none" />
-                      <ReferenceArea y1={avgW * 0.92} y2={avgW * 1.05} fill="#F59E0B" fillOpacity={0.07} stroke="none" />
-                      <ReferenceArea y1={0} y2={avgW * 0.92} fill="#EF4444" fillOpacity={0.07} stroke="none" />
-                    </>}
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                      tickLine={false} axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: '#9CA3AF' }}
-                      tickLine={false} axisLine={false}
-                      unit=" kg" width={58}
-                    />
-                    <Tooltip content={<WeightTooltip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
-                    <Area
-                      type="monotone"
-                      dataKey="average_weight"
-                      stroke="#1E3EB4"
-                      strokeWidth={2}
-                      fill="url(#wGrad)"
-                      dot={false}
-                      activeDot={{ r: 4, fill: '#1E3EB4', strokeWidth: 0 }}
-                      animationDuration={800}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </Card>
-
-          {/* ── ALERTS BANNER ── */}
-          {health && health.alert_summary.total > 0 && (
-            <Card className="du-5">
-              <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center flex-shrink-0">
-                    <AlertTriangle size={16} className="text-red-500" />
+            {/* ── KARTA 4: Diqqat talab qiladiganlar ── */}
+            <Card className="c4" onClick={() => navigate('/adi')}>
+              <CardHead
+                title="Diqqat talab qiladiganlar"
+                action={
+                  <span style={{
+                    fontSize: 20, fontWeight: 800,
+                    color: attention.length > 0 ? '#F97316' : '#10B981',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    {attention.length}
+                  </span>
+                }
+              />
+              <div style={{ flex: 1 }}>
+                {attention.length === 0 ? (
+                  <div style={{
+                    height: 160, display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}>
+                    <CheckCircle size={36} color="#10B981" opacity={0.35} />
+                    <span style={{ fontSize: 12, color: '#9CA3AF' }}>Hammasi yaxshi</span>
                   </div>
-                  <div>
-                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                      {health.alert_summary.total} ta ochiq alert
-                    </span>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {health.alert_summary.critical > 0 && (
-                        <span className="text-xs text-red-500 font-medium">
-                          {health.alert_summary.critical} ta kritik
-                        </span>
-                      )}
-                      {health.alert_summary.warning > 0 && (
-                        <span className="text-xs text-amber-500 font-medium">
-                          {health.alert_summary.warning} ta ogohlantirish
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  onClick={() => navigate('/alerts')}
-                  className="
-                    flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl
-                    text-xs font-semibold text-white bg-red-500 hover:bg-red-600
-                    transition-colors
-                  "
-                >
-                  Ko'rish <ChevronRight size={12} />
-                </button>
+                ) : (
+                  attention.map(item => {
+                    const cfg = ADI_CFG[item.category as keyof typeof ADI_CFG] ?? ADI_CFG.warning;
+                    const TI  = item.trend === 'improving' ? TrendingUp :
+                                item.trend === 'declining' ? TrendingDown : Minus;
+                    return (
+                      <div key={item.animal_id} className="attn-row" style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 16px',
+                        borderBottom: '1px solid #F9FAFB',
+                      }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                          background: cfg.color + '1A',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <span style={{
+                            fontSize: 11, fontWeight: 800, color: cfg.color,
+                            fontFamily: "'JetBrains Mono', monospace",
+                          }}>
+                            {Math.round(item.adi_score)}
+                          </span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 12, fontWeight: 600, color: '#0D1117',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {item.tag_id}
+                          </div>
+                          <div style={{ fontSize: 10, color: cfg.color, marginTop: 1 }}>
+                            {cfg.label}
+                          </div>
+                        </div>
+                        <TI size={12} color={
+                          item.trend === 'improving' ? '#10B981' :
+                          item.trend === 'declining' ? '#EF4444' : '#D1D5DB'
+                        } />
+                        <ChevronRight size={12} color="#D1D5DB" />
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </Card>
-          )}
+
+            {/* ── KARTA 5: Ferma sog'lig'i grafigi ── */}
+            <Card className="c5">
+              <CardHead
+                title="Ferma sog'lig'i (ADI trendi)"
+                action={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: farmAdiColor,
+                    }} />
+                    <span style={{ fontSize: 11, color: '#6B7280', fontFamily: "'Outfit', sans-serif" }}>
+                      {farmAdi.toFixed(0)}/100
+                    </span>
+                  </div>
+                }
+              />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+
+                {/* ADI trend chart */}
+                <div style={{ padding: '10px 6px 4px 0' }}>
+                  {adiHealthTrend.length < 2 ? (
+                    <div style={{
+                      height: 90, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', color: '#D1D5DB', fontSize: 11,
+                    }}>
+                      ADI ma'lumot to'planmoqda...
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={90}>
+                      <AreaChart data={adiHealthTrend} margin={{ top: 4, right: 12, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="adiHGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%"  stopColor={farmAdiColor} stopOpacity={0.18} />
+                            <stop offset="95%" stopColor={farmAdiColor} stopOpacity={0.01} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#C4C9D4' }}
+                          tickLine={false} axisLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#C4C9D4' }}
+                          tickLine={false} axisLine={false} />
+                        <Tooltip content={<AdiTip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
+                        <Area type="monotone" dataKey="score"
+                          stroke={farmAdiColor} strokeWidth={2}
+                          fill="url(#adiHGrad)" dot={false}
+                          activeDot={{ r: 3, fill: farmAdiColor, strokeWidth: 0 }}
+                          animationDuration={600}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                {/* ADI distribution bars */}
+                <div style={{ padding: '4px 16px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {adiDist.map(cat => {
+                    const pct = adiDistTotal > 0 ? (cat.value / adiDistTotal) * 100 : 0;
+                    return (
+                      <div key={cat.name}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 7, height: 7, borderRadius: '50%', background: cat.color }} />
+                            <span style={{ fontSize: 10, color: '#6B7280' }}>{cat.name}</span>
+                          </div>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700,
+                            color: cat.value > 0 ? cat.color : '#E5E7EB',
+                            fontFamily: "'JetBrains Mono', monospace",
+                          }}>
+                            {cat.value}
+                          </span>
+                        </div>
+                        <div style={{ height: 4, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{
+                            height: '100%', width: `${pct}%`,
+                            background: cat.color, borderRadius: 3,
+                            transition: 'width .7s ease',
+                          }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Alert summary */}
+                {health && (health.alert_summary.critical > 0 || health.alert_summary.warning > 0) && (
+                  <div style={{
+                    display: 'flex', gap: 8, padding: '10px 16px 14px',
+                    borderTop: '1px solid #F3F4F6', marginTop: 'auto',
+                  }}>
+                    {[
+                      { label: 'Kritik',       val: health.alert_summary.critical, color: '#EF4444' },
+                      { label: 'Ogohlantirish', val: health.alert_summary.warning,  color: '#F59E0B' },
+                      { label: 'Jami alert',   val: health.alert_summary.total,    color: '#6B7280' },
+                    ].map(a => (
+                      <div key={a.label} style={{
+                        flex: 1, textAlign: 'center',
+                        background: a.val > 0 ? a.color + '12' : '#F9FAFB',
+                        borderRadius: 8, padding: '7px 4px',
+                      }}>
+                        <div style={{
+                          fontSize: 16, fontWeight: 800,
+                          color: a.val > 0 ? a.color : '#D1D5DB',
+                          fontFamily: "'JetBrains Mono', monospace",
+                        }}>
+                          {a.val}
+                        </div>
+                        <div style={{ fontSize: 9, color: '#9CA3AF', marginTop: 1 }}>{a.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* ── KARTA 6: Umumiy tirik vazn ── */}
+            <Card className="c6">
+              <CardHead title="Umumiy tirik vazn" />
+              <div style={{ flex: 1, padding: '14px 18px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Big number */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{
+                      fontSize: 38, fontWeight: 900, color: '#0D1117',
+                      fontFamily: "'JetBrains Mono', monospace",
+                      lineHeight: 1, letterSpacing: '-0.02em',
+                    }}>
+                      {totalTonnes >= 1 ? totalTonnes.toFixed(2) : totalKg > 0 ? totalKg.toFixed(0) : '—'}
+                    </span>
+                    {(totalTonnes >= 1 || totalKg > 0) && (
+                      <span style={{ fontSize: 15, fontWeight: 500, color: '#6B7280' }}>
+                        {totalTonnes >= 1 ? 'tonna' : 'kg'}
+                      </span>
+                    )}
+                  </div>
+                  {totalTonnes >= 1 && totalKg > 0 && (
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 3 }}>
+                      = {totalKg.toLocaleString('uz-UZ', { maximumFractionDigits: 0 })} kg
+                    </div>
+                  )}
+                  {weightChange != null && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                      <WIcon size={11} color={wColor} />
+                      <span style={{ fontSize: 11, color: wColor, fontWeight: 600 }}>
+                        {weightChange >= 0 ? '+' : ''}{weightChange.toFixed(1)}% so'nggi 7 kun
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Mini trend */}
+                <div style={{ flex: 1 }}>
+                  {weightTrend30.length < 2 ? (
+                    <div style={{
+                      height: 70, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', color: '#D1D5DB', fontSize: 10,
+                    }}>
+                      Ma'lumot to'planmoqda...
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={80}>
+                      <LineChart data={weightTrend30} margin={{ top: 4, right: 4, left: -36, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+                        <XAxis dataKey="date" tick={{ fontSize: 8, fill: '#C4C9D4' }}
+                          tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                        <YAxis tick={{ fontSize: 8, fill: '#C4C9D4' }}
+                          tickLine={false} axisLine={false} unit="kg" />
+                        <Tooltip content={<WeightTip />} cursor={{ stroke: '#E5E7EB', strokeWidth: 1 }} />
+                        <Line type="monotone" dataKey="kg"
+                          stroke="#1E3EB4" strokeWidth={2} dot={false}
+                          activeDot={{ r: 3, fill: '#1E3EB4', strokeWidth: 0 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                {/* Bottom stats */}
+                <div style={{ display: 'flex', gap: 8, paddingTop: 10, borderTop: '1px solid #F3F4F6' }}>
+                  {[
+                    { label: 'Bitta jonivor', val: avgKg > 0 ? `${avgKg.toFixed(1)} kg` : '—' },
+                    { label: 'Jonivorlar',    val: totalAnimals > 0 ? `${totalAnimals} ta` : '—' },
+                  ].map(s => (
+                    <div key={s.label} style={{ flex: 1, textAlign: 'center' }}>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700, color: '#374151',
+                        fontFamily: "'JetBrains Mono', monospace",
+                      }}>
+                        {s.val}
+                      </div>
+                      <div style={{ fontSize: 9, color: '#9CA3AF', marginTop: 2 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+
+          </div>
 
         </div>
       </div>

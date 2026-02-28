@@ -40,6 +40,47 @@ function CowIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+
+// ─── Live Clock ───────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const hh = String(time.getHours()).padStart(2, '0');
+  const mm = String(time.getMinutes()).padStart(2, '0');
+  const ss = String(time.getSeconds()).padStart(2, '0');
+
+  const days = ['Yak', 'Dush', 'Sesh', 'Chor', 'Pay', 'Jum', 'Shan'];
+  const months = ['Yan','Fev','Mar','Apr','May','Iyn','Iyl','Avg','Sen','Okt','Noy','Dek'];
+  const dayName = days[time.getDay()];
+  const date = `${dayName}, ${time.getDate()} ${months[time.getMonth()]}`;
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+      paddingRight: 12, borderRight: '1px solid var(--border)',
+      marginRight: 12, flexShrink: 0,
+    }}>
+      <div style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 15, fontWeight: 600, letterSpacing: '0.04em',
+        color: 'var(--text-primary)', lineHeight: 1,
+      }}>
+        {hh}<span style={{ opacity: 0.4, animation: 'tv-blink 1s step-end infinite' }}>:</span>{mm}<span style={{ opacity: 0.4, animation: 'tv-blink 1s step-end infinite' }}>:</span>{ss}
+      </div>
+      <div style={{
+        fontSize: 9, color: 'var(--text-muted)', marginTop: 3,
+        fontFamily: "'Outfit', sans-serif", letterSpacing: '0.04em',
+      }}>
+        {date}
+      </div>
+    </div>
+  );
+}
+
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 
 const LoginPage         = lazy(() => import('./pages/LoginPage'));
@@ -623,11 +664,12 @@ function Layout({ children }: { children: React.ReactNode }) {
             ))}
           </div>
 
-          {/* User menu — RIGHT */}
+          {/* Clock + User menu — RIGHT */}
           <div style={{
             display: 'flex', alignItems: 'center',
             flexShrink: 0, paddingLeft: 12,
           }}>
+            <LiveClock />
             <UserMenu />
           </div>
         </div>
@@ -694,6 +736,7 @@ export default function App() {
               to   { opacity: 1; transform: translateY(0);    }
             }
             @keyframes tv-fade-in { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes tv-blink { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
 
             /* ── Desktop hover effect ── */
             .tv-nav-item:hover .tv-nav-hover-bg {
