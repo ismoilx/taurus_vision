@@ -54,7 +54,7 @@ router = APIRouter(prefix="/adi", tags=["ADI"], dependencies=[Depends(get_curren
 )
 async def get_farm_summary(
     date: Optional[str] = Query(None, description="YYYY-MM-DD. None = bugun",
-                                regex=r"^\d{4}-\d{2}-\d{2}$"),
+                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: AsyncSession = Depends(get_db),
 ) -> ADIFarmSummary:
     """Ferma darajasidagi ADI xulosasi."""
@@ -114,7 +114,7 @@ async def get_farm_summary(
 async def get_animal_adi(
     animal_id: int,
     date: Optional[str] = Query(None, description="YYYY-MM-DD. None = bugun",
-                                regex=r"^\d{4}-\d{2}-\d{2}$"),
+                                pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: AsyncSession = Depends(get_db),
 ) -> ADILogResponse:
     """Bitta jonivorning ADI natijasini qaytaradi."""

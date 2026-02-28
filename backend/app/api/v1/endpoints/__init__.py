@@ -1,52 +1,6 @@
 """
-Taurus Vision — API v1 Router
+Taurus Vision — API v1 Endpoints Package
 
-Barcha v1 endpoint router larini birlashtiradi.
+Bu paket barcha endpoint modullarini o'z ichiga oladi.
+Asosiy router `app/api/v1/__init__.py` da yig'iladi.
 """
-
-from fastapi import APIRouter
-
-from app.api.v1.endpoints import (
-    auth,
-    animals,
-    weights,
-    live,
-    detection,
-    pipeline,
-    cameras,
-    analytics,
-    reports,
-    export,
-    registration,
-    adi,
-    alerts,
-    health,          # ← QO'SHILDI
-)
-
-router = APIRouter(prefix="/v1")
-
-# --- Authentication (public + protected) ---
-router.include_router(auth.router)
-
-# --- Core Farm Data ---
-router.include_router(animals.router)
-router.include_router(weights.router)
-router.include_router(detection.router)
-router.include_router(registration.router)
-
-# --- Live Monitoring ---
-router.include_router(live.router)
-router.include_router(pipeline.router)
-router.include_router(cameras.router)
-
-# --- Analytics & Reporting ---
-router.include_router(analytics.router)
-router.include_router(reports.router)
-router.include_router(export.router)
-
-# --- ADI & Alerts ---
-router.include_router(adi.router)
-router.include_router(alerts.router)
-
-# --- Health Records ---
-router.include_router(health.router)   # ← QO'SHILDI

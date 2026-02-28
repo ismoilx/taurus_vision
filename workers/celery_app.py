@@ -74,6 +74,7 @@ from workers.tasks import (  # noqa: E402, F401
     analysis_tasks,
     detection_tasks,
     notification_tasks,
+    prediction_tasks,
 )
 # ── Sprint 9-10 tasklar qo'shildi ─────────────────────────────────────────────
 _sprint910_tasks = {
@@ -105,3 +106,23 @@ _sprint910_tasks = {
     },
 }
 celery_app.conf.beat_schedule.update(_sprint910_tasks)
+
+# ── Sprint 13-14: Health Prediction tasks ─────────────────────────────────────
+_prediction_tasks = {
+    "daily-predictions": {
+        "task":     "predictions.run_daily",
+        "schedule": crontab(hour=1, minute=0),   # 01:00 UTC — ADI dan keyin
+        "options":  {"queue": "default"},
+    },
+    "train-prediction-models": {
+        "task":     "predictions.train_models",
+        "schedule": crontab(hour=5, minute=0),   # 05:00 UTC — kechasi
+        "options":  {"queue": "default"},
+    },
+    "cleanup-old-predictions": {
+        "task":     "predictions.cleanup_old",
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),  # Yakshanba 03:00
+        "options":  {"queue": "maintenance"},
+    },
+}
+celery_app.conf.beat_schedule.update(_prediction_tasks)

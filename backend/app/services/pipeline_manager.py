@@ -32,13 +32,11 @@ import time
 import psutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
-from app.services.detection_pipeline import DetectionPipeline
 from app.services.camera.simulated_camera import SimulatedCameraService
 from app.services.camera.base import CameraServiceInterface
 from app.services.ai.yolo_service import get_yolo_service
-from app.api.v1.websocket import get_ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +166,7 @@ class PipelineEntry:
     camera_type:    str
     camera_config:  dict
     camera_service: CameraServiceInterface
-    pipeline:       DetectionPipeline
+    pipeline:       "Any"  # DetectionPipeline — lazy import
     task:           Optional[asyncio.Task] = None
     started_at:     datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -255,12 +253,14 @@ class PipelineManager:
             )
 
             try:
+                from app.api.v1.websocket import get_ws_manager  # noqa: PLC0415
                 ws_manager = get_ws_manager()
             except RuntimeError:
                 ws_manager = None
                 logger.warning(f"[{camera_id}] WebSocket manager yo'q")
 
             yolo     = get_yolo_service()
+            from app.services.detection_pipeline import DetectionPipeline  # noqa: PLC0415
             pipeline = DetectionPipeline(
                 camera_service = camera_service,
                 yolo_service   = yolo,

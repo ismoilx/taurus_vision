@@ -224,7 +224,7 @@ async def get_weight_trends(
     aggregation: str = Query(
         "daily",
         description="Data aggregation level",
-        regex="^(daily|weekly|monthly)$"
+        pattern="^(daily|weekly|monthly)$"
     ),
     db: AsyncSession = Depends(get_db)
 ) -> WeightTrendsResponse:

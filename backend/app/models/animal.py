@@ -177,6 +177,14 @@ class Animal(BaseModel):
         order_by="Alert.triggered_at.desc()",
     )
 
+    health_predictions: Mapped[list["HealthPrediction"]] = relationship(  # type: ignore[name-defined]
+        "HealthPrediction",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="dynamic",          # dynamic: kunlik yozuvlar, lazy load optimal
+        order_by="HealthPrediction.prediction_date.desc()",
+    )
+
     # ------------------------------------------------------------------ #
     # Table Constraints                                                    #
     # ------------------------------------------------------------------ #

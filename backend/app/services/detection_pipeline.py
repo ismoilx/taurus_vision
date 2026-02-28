@@ -38,7 +38,9 @@ from app.services.ai.base import Detection as YOLODetection
 from app.services.identification_service import IdentificationService
 from app.services.alert_service import AlertService
 from app.services.adi_service import ADIService
-from app.api.v1.websocket import ConnectionManager
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.api.v1.websocket import ConnectionManager
 from app.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.animal import Animal
@@ -138,7 +140,7 @@ class DetectionPipeline:
         self,
         camera_service: CameraServiceInterface,
         yolo_service:   YoloService,
-        ws_manager:     Optional[ConnectionManager] = None,
+        ws_manager:     Optional["ConnectionManager"] = None,  # noqa: F821
     ) -> None:
         self.camera     = camera_service
         self.yolo       = yolo_service

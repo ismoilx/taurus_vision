@@ -291,17 +291,17 @@ class PredictionRepository:
                     func.count(HealthPrediction.id).label("total"),
                     func.avg(HealthPrediction.risk_score).label("avg_score"),
                     func.max(HealthPrediction.risk_score).label("max_score"),
-                    func.sum(
-                        func.cast(HealthPrediction.risk_level == "low", type_=func.Integer())
+                    func.count(
+                        func.nullif(HealthPrediction.risk_level != "low", True)
                     ).label("low_count"),
-                    func.sum(
-                        func.cast(HealthPrediction.risk_level == "medium", type_=func.Integer())
+                    func.count(
+                        func.nullif(HealthPrediction.risk_level != "medium", True)
                     ).label("medium_count"),
-                    func.sum(
-                        func.cast(HealthPrediction.risk_level == "high", type_=func.Integer())
+                    func.count(
+                        func.nullif(HealthPrediction.risk_level != "high", True)
                     ).label("high_count"),
-                    func.sum(
-                        func.cast(HealthPrediction.risk_level == "critical", type_=func.Integer())
+                    func.count(
+                        func.nullif(HealthPrediction.risk_level != "critical", True)
                     ).label("critical_count"),
                 )
                 .where(HealthPrediction.prediction_date == target_date)
