@@ -398,7 +398,7 @@ export default function AnimalDetailPage() {
     <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
       <div style={{ textAlign: 'center' }}>
         <AlertTriangle size={40} color="#EF4444" style={{ margin: '0 auto 12px' }} />
-        <p style={{ color: '#EF4444', marginBottom: 16 }}>{error || 'Jonivor topilmadi'}</p>
+        <p style={{ color: '#EF4444', marginBottom: 16 }}>{error?.message || 'Jonivor topilmadi'}</p>
         <button onClick={() => navigate('/animals')}
           style={{ color: '#1E3EB4', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>
           ← Orqaga

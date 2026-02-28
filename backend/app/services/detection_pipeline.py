@@ -334,6 +334,21 @@ class DetectionPipeline:
             except Exception as e:
                 logger.warning(f"WebSocket broadcast failed: {e}")
 
+        # STEP 6: MJPEG overlay uchun pipeline_manager ni yangilash
+        if saved_detection and saved_detection.bbox:
+            try:
+                from app.services.pipeline_manager import get_pipeline_manager
+                pm = get_pipeline_manager()
+                pm.update_latest_detection(
+                    camera_id=  self.camera.camera_id,
+                    bbox=       saved_detection.bbox,
+                    animal_tag= animal_tag_id,
+                    confidence= saved_detection.confidence,
+                    class_name= saved_detection.class_name or "animal",
+                )
+            except Exception:
+                pass  # MJPEG overlay ixtiyoriy — xato pipeline ni to'xtatmaydi
+
     # ================================================================ #
     # IDENTIFICATION                                                     #
     # ================================================================ #

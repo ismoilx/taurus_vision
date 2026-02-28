@@ -1,0 +1,21 @@
+# ============================================================
+# Taurus Vision — Server override (zxzx.uz)
+# ============================================================
+#
+# FOYDALANISH (server da):
+#   docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+#
+# BU FAYL NIMA QILADI:
+#   - HMR ni HTTPS / WSS rejimga o'tkazadi (port 443)
+#   - Vite proksi BACKEND_URL ni Docker tarmog'iga moslashtiradi
+#
+# LOKAL MASHINADA bu faylni ISHLATMANG.
+# ============================================================
+
+services:
+  frontend:
+    environment:
+      # HTTPS proksi orqali HMR ishlashi uchun
+      VITE_HMR_CLIENT_PORT: "443"
+      # Docker tarmog'ida backend manzili (o'zgarmaydi)
+      BACKEND_URL: "http://backend:8000"

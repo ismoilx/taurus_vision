@@ -4,13 +4,14 @@ Taurus Vision — Camera Management API
 /api/v1/cameras/ prefiksi ostidagi barcha kamera endpointlari.
 
 ENDPOINTLAR:
-    GET    /cameras/           — Barcha kameralar ro'yxati (DB + runtime holat)
-    POST   /cameras/           — Yangi kamera qo'shish (DB ga saqlash + CameraManager ga ro'yxatdan o'tkazish)
-    DELETE /cameras/{id}       — Kamerani o'chirish (DB + CameraManager dan)
-    GET    /cameras/stats/all  — Barcha kameralar runtime statistikasi
-    GET    /cameras/health     — Kamera tizimi sog'liq holati
-    POST   /cameras/{id}/start — Kamerani ishga tushirish (CameraManager)
-    POST   /cameras/{id}/stop  — Kamerani to'xtatish (CameraManager)
+    GET    /cameras/              — Barcha kameralar ro'yxati (DB + runtime holat)
+    POST   /cameras/              — Yangi kamera qo'shish
+    DELETE /cameras/{id}          — Kamerani o'chirish
+    GET    /cameras/stats/all     — Barcha kameralar runtime statistikasi
+    GET    /cameras/health        — Kamera tizimi sog'liq holati
+    POST   /cameras/{id}/start    — Kamerani ishga tushirish
+    POST   /cameras/{id}/stop     — Kamerani to'xtatish
+    GET    /cameras/{id}/stream   — MJPEG video stream (bbox overlay bilan)
 
 DB vs RUNTIME:
     DB (Camera model):       konfiguratsiya — camera_id, name, type, source, fps
@@ -21,20 +22,28 @@ AUTENTIFIKATSIYA:
     Yozish operatsiyalari: MANAGER+ (require_manager)
 """
 
+import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, AsyncGenerator
 
-from fastapi import APIRouter, Depends, status
+import cv2
+import numpy as np
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel as PydanticModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import decode_token
+from app.core.exceptions import AuthenticationError
 from app.api.v1.deps import CurrentUser, CurrentManager
 from app.repositories.camera_repository import CameraRepository
+from app.repositories.user_repository import UserRepository
 from app.models.camera import CameraType
 from app.services.camera.camera_manager import camera_manager
 from app.services.camera.camera_factory import CameraFactory
+from app.services.pipeline_manager import get_pipeline_manager
 
 logger = logging.getLogger(__name__)
 
@@ -587,3 +596,267 @@ async def stop_camera(
         "camera_id": camera_id,
         "message":   "Kamera to'xtatildi" if ok else "To'xtatishda xato",
     }
+
+# =============================================================================
+# MJPEG VIDEO STREAM — Kameradan real-time kadrlar + bbox overlay
+# =============================================================================
+
+# BBox rang sozlamalari
+_COLOR_IDENTIFIED   = (34, 197, 94)    # Yashil — tanilgan jonivor
+_COLOR_UNIDENTIFIED = (239, 68, 68)    # Qizil — tanilmagan
+_COLOR_TEXT_BG      = (0, 0, 0)        # Qora — matn fon
+_BOX_THICKNESS      = 2
+_FONT               = cv2.FONT_HERSHEY_SIMPLEX
+_FONT_SCALE         = 0.65
+_FONT_THICKNESS     = 2
+
+# Kadr hajmi cheklov (CPU tejash uchun)
+_STREAM_MAX_WIDTH   = 1280
+_STREAM_JPEG_QUALITY = 75
+
+
+def _draw_detection_overlay(
+    frame: np.ndarray,
+    det: dict,
+) -> np.ndarray:
+    """
+    Kadrga YOLO detection bbox va jonivor nomini chizadi.
+
+    Args:
+        frame: BGR numpy kadr
+        det:   pipeline_manager.get_latest_detection() natijasi
+                {bbox: {x,y,w,h}, animal_tag, confidence, class_name}
+
+    Returns:
+        Annotatsiya qilingan kadr (nusxa)
+    """
+    h, w = frame.shape[:2]
+    bbox       = det["bbox"]          # normalized 0-1
+    animal_tag = det.get("animal_tag")
+    confidence = det.get("confidence", 0.0)
+    identified = animal_tag is not None and animal_tag != "UNKNOWN"
+
+    # Piksel koordinatalari
+    x1 = int(bbox.get("x", 0) * w)
+    y1 = int(bbox.get("y", 0) * h)
+    x2 = int((bbox.get("x", 0) + bbox.get("w", 0.1)) * w)
+    y2 = int((bbox.get("y", 0) + bbox.get("h", 0.2)) * h)
+
+    # Chegaralarni tekshirish
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w - 1, x2), min(h - 1, y2)
+    if x2 <= x1 or y2 <= y1:
+        return frame
+
+    color = _COLOR_IDENTIFIED if identified else _COLOR_UNIDENTIFIED
+
+    # Asosiy to'rtburchak
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, _BOX_THICKNESS)
+
+    # Burchak aksenti (estetik)
+    clen = min(20, (x2 - x1) // 4, (y2 - y1) // 4)
+    for px, py in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+        dx = clen if px == x1 else -clen
+        dy = clen if py == y1 else -clen
+        cv2.line(frame, (px, py), (px + dx, py), color, _BOX_THICKNESS + 1)
+        cv2.line(frame, (px, py), (px, py + dy), color, _BOX_THICKNESS + 1)
+
+    # Label matn
+    label     = animal_tag if identified else "?"
+    conf_str  = f"{confidence:.0%}"
+    text_line = f"{label}  {conf_str}"
+
+    (tw, th), baseline = cv2.getTextSize(
+        text_line, _FONT, _FONT_SCALE, _FONT_THICKNESS
+    )
+
+    # Matn fon paneli
+    pad       = 4
+    label_y   = max(y1 - baseline - pad * 2, th + baseline + pad * 2)
+    rect_x1   = x1
+    rect_y1   = label_y - th - baseline - pad * 2
+    rect_x2   = x1 + tw + pad * 2
+    rect_y2   = label_y
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (rect_x1, rect_y1), (rect_x2, rect_y2), color, -1)
+    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
+
+    cv2.putText(
+        frame, text_line,
+        (x1 + pad, label_y - baseline - pad),
+        _FONT, _FONT_SCALE,
+        (255, 255, 255), _FONT_THICKNESS, cv2.LINE_AA,
+    )
+
+    return frame
+
+
+async def _mjpeg_frame_generator(
+    camera_id: str,
+    db,
+) -> AsyncGenerator[bytes, None]:
+    """
+    Kameradan MJPEG kadr generatori.
+
+    - Pipeline aktiv bo'lsa: cam_service.get_frame() orqali kadrlar olinadi
+    - RTSP + Simulated + USB kamera servislarini bir xil interfeys orqali ishlaydi
+    - Oxirgi detection 2s dan yangi bo'lsa bbox + label overlay chiziladi
+    - Pipeline to'xtatilsa: "No Signal" kadr (1 FPS)
+    """
+    pm        = get_pipeline_manager()
+    no_signal = _make_no_signal_frame(camera_id)
+    boundary  = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+
+    while True:
+        try:
+            cam_service = pm.get_camera_service(camera_id)
+
+            if cam_service is None or not getattr(cam_service, "_is_active", False):
+                # Pipeline to'xtatilgan — "No Signal" ko'rsatish (1 FPS yetarli)
+                _, jpeg = cv2.imencode(
+                    ".jpg", no_signal,
+                    [cv2.IMWRITE_JPEG_QUALITY, _STREAM_JPEG_QUALITY],
+                )
+                yield boundary + jpeg.tobytes() + b"\r\n"
+                await asyncio.sleep(1.0)
+                continue
+
+            # CameraServiceInterface.get_frame() → CameraFrame
+            # Barcha kamera turlari (RTSP, Simulated, USB) uchun bir xil metod
+            try:
+                cam_frame = await cam_service.get_frame()
+            except Exception:
+                await asyncio.sleep(0.1)
+                continue
+
+            if cam_frame is None:
+                await asyncio.sleep(0.05)
+                continue
+
+            # CameraFrame.frame — numpy ndarray (BGR)
+            frame = cam_frame.frame.copy()
+
+            # Hajmni cheklash (network band tejash)
+            h, w = frame.shape[:2]
+            if w > _STREAM_MAX_WIDTH:
+                scale  = _STREAM_MAX_WIDTH / w
+                new_w  = int(w * scale)
+                new_h  = int(h * scale)
+                frame  = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            # Bbox + label overlay (detection 2s dan yangi bo'lsa)
+            det = pm.get_latest_detection(camera_id)
+            if det:
+                frame = _draw_detection_overlay(frame, det)
+
+            # JPEG encode va MJPEG multipart
+            ok, jpeg = cv2.imencode(
+                ".jpg", frame,
+                [cv2.IMWRITE_JPEG_QUALITY, _STREAM_JPEG_QUALITY],
+            )
+            if ok:
+                yield boundary + jpeg.tobytes() + b"\r\n"
+
+            # ~20 FPS — ko'z uchun yetarli, CPU uchun tejamli
+            await asyncio.sleep(0.05)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.warning(f"[{camera_id}] MJPEG generator xatosi: {exc}")
+            await asyncio.sleep(0.5)
+
+
+def _make_no_signal_frame(camera_id: str) -> np.ndarray:
+    """'No Signal' kadr — pipeline to'xtatilganda ko'rsatiladi."""
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    frame[:] = (20, 20, 30)   # To'q ko'k-qora fon
+
+    # Grid pattern
+    for i in range(0, 640, 40):
+        cv2.line(frame, (i, 0), (i, 360), (35, 35, 45), 1)
+    for i in range(0, 360, 40):
+        cv2.line(frame, (0, i), (640, i), (35, 35, 45), 1)
+
+    # Kamera belgisi
+    cx, cy = 320, 150
+    cv2.circle(frame, (cx, cy), 45, (80, 80, 100), 2)
+    cv2.circle(frame, (cx, cy), 20, (80, 80, 100), 2)
+    cv2.rectangle(frame, (cx - 55, cy - 30), (cx + 55, cy + 30), (80, 80, 100), 2)
+    pts = np.array([[cx + 40, cy - 25], [cx + 65, cy - 40], [cx + 65, cy + 10], [cx + 40, cy + 5]])
+    cv2.polylines(frame, [pts], True, (80, 80, 100), 2)
+
+    cv2.putText(
+        frame, "NO SIGNAL",
+        (200, 230), _FONT, 1.1, (120, 120, 140), 2, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame, f"Camera: {camera_id}",
+        (190, 270), _FONT, 0.6, (80, 80, 100), 1, cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame, "Pipeline to'xtatilgan",
+        (175, 300), _FONT, 0.6, (70, 70, 90), 1, cv2.LINE_AA,
+    )
+    return frame
+
+
+@router.get(
+    "/{camera_id}/stream",
+    summary="MJPEG video stream",
+    description=(
+        "Kameradan real-time video oqimi — MJPEG multipart format. "
+        "Aktiv detection bo'lsa bbox va jonivor nomi overlay qilinadi. "
+        "Pipeline to'xtatilgan bo'lsa 'No Signal' ko'rsatiladi. "
+        "Autentifikatsiya: ?token=<jwt_access_token> query parametri."
+    ),
+    response_class=StreamingResponse,
+    tags=["Cameras"],
+)
+async def stream_camera_mjpeg(
+    camera_id: str,
+    token:     Optional[str] = Query(
+        default=None,
+        description="JWT access token (?token=<access_token>)",
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Kamera MJPEG video stream endpoint.
+
+    Browser va frontend `<img src="/api/v1/cameras/{id}/stream?token=...">` orqali ishlatadi.
+    Detection pipeline aktiv bo'lsa kadrlar ustiga bbox + jonivor nomi chiziladi.
+
+    Auth: HTTP Bearer token WebSocket kabi ?token= parametr orqali uzatiladi.
+    """
+    # --- Autentifikatsiya ---
+    if not token:
+        from fastapi.responses import Response
+        return Response(status_code=401, content="Token talab qilinadi")
+
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            raise AuthenticationError("Access token talab qilinadi")
+
+        user_id = int(payload.get("sub", 0))
+        user_repo = UserRepository(db)
+        user = await user_repo.get_by_id(user_id)
+        if not user or not user.is_active:
+            from fastapi.responses import Response
+            return Response(status_code=403, content="Ruxsat yo'q")
+    except (AuthenticationError, ValueError, Exception):
+        from fastapi.responses import Response
+        return Response(status_code=401, content="Token noto'g'ri")
+
+    return StreamingResponse(
+        _mjpeg_frame_generator(camera_id, db),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control":   "no-cache, no-store, must-revalidate",
+            "Pragma":          "no-cache",
+            "Expires":         "0",
+            "X-Accel-Buffering": "no",  # Nginx buffering o'chirish
+        },
+    )

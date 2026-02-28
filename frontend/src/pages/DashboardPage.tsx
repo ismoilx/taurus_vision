@@ -16,7 +16,7 @@ import {
 import {
   Activity, Scale, Camera, Users,
   TrendingUp, Play, Square,
-  Heart, Zap,
+  Heart, Zap, Brain, ShieldAlert, ShieldCheck,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
@@ -41,6 +41,17 @@ interface OverviewStats {
 interface WeightTrendPoint { date: string; average_weight: number; measurement_count: number }
 interface HourlyDetection  { hour: string; detections: number }
 interface HealthMetrics    { risk_score: number; alert_summary: { total: number; critical: number; warning: number } }
+
+interface FarmPredictionSummary {
+  date:            string;
+  total_predicted: number;
+  avg_risk_score:  number;
+  low_count:       number;
+  medium_count:    number;
+  high_count:      number;
+  critical_count:  number;
+  at_risk_animals: { animal_id: number; tag_id: string; risk_level: string; risk_score: number }[];
+}
 
 // =============================================================================
 // STAT CARD
@@ -171,6 +182,14 @@ export default function DashboardPage() {
     useQuery({
       queryKey: queryKeys.analytics.health,
       queryFn:  () => apiFetch<HealthMetrics>('/api/v1/analytics/health/metrics'),
+    });
+
+  // Prediction farm summary — 5 daqiqa kesh
+  const { data: prediction = null } =
+    useQuery({
+      queryKey: queryKeys.predictions.farmSummary(),
+      queryFn:  () => apiFetch<FarmPredictionSummary>('/api/v1/predictions/farm-summary'),
+      staleTime: 5 * 60 * 1000,
     });
 
   // ─── Mutations ─────────────────────────────────────────────────────────────
@@ -352,6 +371,133 @@ export default function DashboardPage() {
             <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Yuklanmoqda...</div>
           )}
         </div>
+      </div>
+
+      {/* ── Prediction Risk Summary ── */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-semibold text-gray-800">AI Sog'liq Bashorati</span>
+            {prediction && (
+              <span className="text-xs text-gray-400">{prediction.total_predicted} jonivor</span>
+            )}
+          </div>
+          <button
+            onClick={() => navigate('/predictions')}
+            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+          >
+            Batafsil →
+          </button>
+        </div>
+
+        {prediction ? (
+          <div className="flex flex-col gap-3">
+            {/* Distribution bar */}
+            {prediction.total_predicted > 0 && (
+              <div>
+                <div className="flex h-3 rounded-full overflow-hidden gap-0.5 mb-2">
+                  {([
+                    ['low',      prediction.low_count,      '#10b981'],
+                    ['medium',   prediction.medium_count,   '#f59e0b'],
+                    ['high',     prediction.high_count,     '#f97316'],
+                    ['critical', prediction.critical_count, '#ef4444'],
+                  ] as const).map(([key, count, color]) => {
+                    const pct = prediction.total_predicted > 0
+                      ? (count / prediction.total_predicted) * 100 : 0;
+                    return pct > 0 ? (
+                      <div
+                        key={key}
+                        className="h-full rounded-sm"
+                        style={{ width: `${pct}%`, background: color }}
+                        title={`${count} ta`}
+                      />
+                    ) : null;
+                  })}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { label: 'Xavfsiz',   count: prediction.low_count,      color: '#10b981', bg: '#ecfdf5' },
+                    { label: "O'rtacha",  count: prediction.medium_count,   color: '#f59e0b', bg: '#fffbeb' },
+                    { label: 'Yuqori',    count: prediction.high_count,     color: '#f97316', bg: '#fff7ed' },
+                    { label: 'Kritik',    count: prediction.critical_count, color: '#ef4444', bg: '#fef2f2' },
+                  ].map(({ label, count, color, bg }) => (
+                    <div key={label} className="rounded-xl p-2.5 text-center" style={{ background: bg }}>
+                      <div className="text-lg font-black tabular-nums" style={{ color }}>{count}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Critical/High animals quick list */}
+            {prediction.at_risk_animals.filter(a =>
+              a.risk_level === 'critical' || a.risk_level === 'high'
+            ).length > 0 ? (
+              <div className="border-t border-gray-100 pt-3">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-500" />
+                  <span className="text-xs font-semibold text-gray-600">Darhol e'tibor talab qiladi</span>
+                </div>
+                <div className="space-y-1.5">
+                  {prediction.at_risk_animals
+                    .filter(a => a.risk_level === 'critical' || a.risk_level === 'high')
+                    .slice(0, 3)
+                    .map(a => (
+                      <div
+                        key={a.animal_id}
+                        onClick={() => navigate(`/animals/${a.animal_id}`)}
+                        className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 cursor-pointer transition-colors"
+                      >
+                        <span className="text-xs font-medium text-gray-700">{a.tag_id}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold tabular-nums"
+                            style={{ color: a.risk_level === 'critical' ? '#ef4444' : '#f97316' }}>
+                            {Math.round(a.risk_score)}
+                          </span>
+                          <span className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                            style={{
+                              background: a.risk_level === 'critical' ? '#fef2f2' : '#fff7ed',
+                              color: a.risk_level === 'critical' ? '#7f1d1d' : '#7c2d12',
+                            }}>
+                            {a.risk_level === 'critical' ? 'Kritik' : 'Yuqori'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  {prediction.at_risk_animals.filter(a =>
+                    a.risk_level === 'critical' || a.risk_level === 'high'
+                  ).length > 3 && (
+                    <button
+                      onClick={() => navigate('/predictions')}
+                      className="w-full text-xs text-indigo-600 py-1 hover:text-indigo-800 font-medium"
+                    >
+                      + {prediction.at_risk_animals.filter(a =>
+                        a.risk_level === 'critical' || a.risk_level === 'high'
+                      ).length - 3} ta ko'proq →
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : prediction.total_predicted > 0 ? (
+              <div className="flex items-center gap-2 text-emerald-600 border-t border-gray-100 pt-3">
+                <ShieldCheck className="w-4 h-4" />
+                <span className="text-xs font-medium">Barcha jonivorlar xavfsiz holda</span>
+              </div>
+            ) : null}
+
+            {prediction.total_predicted === 0 && (
+              <div className="text-xs text-gray-400 text-center py-3">
+                Hali bashorat hisoblanmagan — /predictions sahifasida ishga tushiring
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-20 text-gray-400 text-sm">
+            Yuklanmoqda...
+          </div>
+        )}
       </div>
 
       {/* ── Hourly detection heatmap ── */}

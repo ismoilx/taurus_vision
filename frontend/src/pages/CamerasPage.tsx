@@ -371,14 +371,14 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         </div>
 
         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {isError && (
+          {!!error && (
             <div style={{
               display: 'flex', gap: 8,
               background: '#FEF2F2', border: '1px solid #FECACA',
               borderRadius: 8, padding: '10px 14px',
             }}>
               <AlertCircle size={14} color="#DC2626" style={{ flexShrink: 0 }} />
-              <span style={{ fontSize: 13, color: '#DC2626' }}>{error instanceof Error ? error.message : "Yuklab bo'lmadi"}</span>
+              <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
             </div>
           )}
 
@@ -478,9 +478,9 @@ export default function CamerasPage() {
     queryFn:  () => apiFetch<CameraConfig[]>('/api/v1/cameras/'),
   });
 
-  const { data: statuses = {} } = useQuery({
+  const { data: statuses = {} as Record<string, CameraStatus> } = useQuery({
     queryKey: ['cameras', 'stats'],
-    queryFn:  () => apiFetch<Record<string, CameraStatus>>('/api/v1/cameras/stats/all').catch(() => ({})),
+    queryFn:  () => apiFetch<Record<string, CameraStatus>>('/api/v1/cameras/stats/all').catch(() => ({} as Record<string, CameraStatus>)),
     refetchInterval: 2500,   // WS yo'q — polling orqali yangilanadi
   });
 

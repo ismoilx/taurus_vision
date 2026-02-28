@@ -70,4 +70,10 @@ export const queryKeys = {
     list: (filter: string) => ['alerts', filter] as const,
     stats: ['alerts', 'stats'] as const,
   },
+
+  predictions: {
+    farmSummary: (date?: string) => ['predictions', 'farm-summary', date ?? 'today'] as const,
+    atRisk:      ['predictions', 'at-risk'] as const,
+    modelStatus: ['predictions', 'model-status'] as const,
+  },
 } as const;

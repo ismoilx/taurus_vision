@@ -169,8 +169,21 @@ services:
     container_name: taurus-frontend
     restart: unless-stopped
     environment:
-      VITE_API_URL: "https://api.zxzx.uz"
-      VITE_WS_URL: "wss://api.zxzx.uz"
+      # VITE_API_URL va VITE_WS_URL BO'SH — Vite proksi ishlaydi.
+      # Brauzer /api/... ga nisbiy so'rov yuboradi → Vite → backend.
+      VITE_API_URL: ""
+      VITE_WS_URL: ""
+      VITE_APP_NAME: "Taurus Vision"
+      VITE_APP_VERSION: "0.1.0"
+
+      # Proksi maqsad — Docker tarmog'ida backend xizmati
+      BACKEND_URL: "http://backend:8000"
+
+      # HMR: Agar bu server HTTPS proksi orqali ishlasa (masalan, Nginx 443 port)
+      # bu qatorni faollashtirib qo'ying:
+      # VITE_HMR_CLIENT_PORT: "443"
+      #
+      # Lokal localhost:5173 da ishlatganda bu kerak emas — o'chirib qo'ying.
     ports:
       - "5173:5173"
     volumes:

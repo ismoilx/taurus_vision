@@ -673,6 +673,11 @@ export default function HealthPage() {
 
   const invalidateHealth = () => qClient.invalidateQueries({ queryKey: ['health'] });
 
+  const load = () => {
+    qClient.invalidateQueries({ queryKey: ['health'] });
+    qClient.invalidateQueries({ queryKey: ['animals'] });
+  };
+
   // ── Queries ───────────────────────────────────────────────────────────────
   const { data: animalsRes, isLoading: loading } = useQuery({
     queryKey: ['animals', 'list-200'],

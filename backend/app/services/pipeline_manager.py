@@ -202,6 +202,8 @@ class PipelineManager:
             self._optimizer:     StreamOptimizer           = StreamOptimizer()
             self._balancer:      LoadBalancer              = LoadBalancer()
             self._watchdog_task: Optional[asyncio.Task]   = None
+            # Har kamera uchun oxirgi detection — MJPEG stream bbox overlay uchun
+            self._latest_detections: dict[str, dict] = {}
             self._initialized    = True
             logger.info(
                 "PipelineManager initialized",
@@ -383,6 +385,54 @@ class PipelineManager:
             extra={"extra_data": {"total": len(camera_ids), "stopped": stopped}},
         )
         return stopped
+
+    # ================================================================
+    # LIVE DETECTION TRACKING — MJPEG bbox overlay uchun
+    # ================================================================
+
+    def update_latest_detection(
+        self,
+        camera_id:  str,
+        bbox:       dict,               # {x, y, w, h} normalized 0-1
+        animal_tag: Optional[str],      # None = tanilmadi
+        confidence: float,
+        class_name: str = "animal",
+    ) -> None:
+        """
+        Kamera uchun oxirgi detection ma'lumotini yangilaydi.
+
+        Detection pipeline har detection bo'lganda shu metodini chaqiradi.
+        MJPEG stream endpoint bbox ni kadrga chizish uchun bu ma'lumotdan oladi.
+        Thread-safe — asyncio single-thread da ishlaydi.
+        """
+        self._latest_detections[camera_id] = {
+            "bbox":       bbox,
+            "animal_tag": animal_tag,
+            "confidence": confidence,
+            "class_name": class_name,
+            "ts":         time.monotonic(),  # float — age hisoblash uchun
+        }
+
+    def get_latest_detection(self, camera_id: str) -> Optional[dict]:
+        """
+        Kamera uchun oxirgi detectionni qaytaradi.
+
+        Returns:
+            dict(bbox, animal_tag, confidence, ts) yoki None
+            2 soniyadan eski detection None qaytaradi (eskirgan)
+        """
+        det = self._latest_detections.get(camera_id)
+        if det is None:
+            return None
+        age = time.monotonic() - det["ts"]
+        if age > 2.0:            # 2s dan eski → ko'rsatmaymiz
+            return None
+        return det
+
+    def get_camera_service(self, camera_id: str) -> Optional[CameraServiceInterface]:
+        """Pipeline ichidagi kamera servisini qaytaradi (MJPEG uchun)."""
+        entry = self._pipelines.get(camera_id)
+        return entry.camera_service if entry else None
 
     # ================================================================
     # STATUS
