@@ -1,25 +1,10 @@
 """
 Taurus Vision — Camera Management API
 
-/api/v1/cameras/ prefiksi ostidagi barcha kamera endpointlari.
-
-ENDPOINTLAR:
-    GET    /cameras/              — Barcha kameralar ro'yxati (DB + runtime holat)
-    POST   /cameras/              — Yangi kamera qo'shish
-    DELETE /cameras/{id}          — Kamerani o'chirish
-    GET    /cameras/stats/all     — Barcha kameralar runtime statistikasi
-    GET    /cameras/health        — Kamera tizimi sog'liq holati
-    POST   /cameras/{id}/start    — Kamerani ishga tushirish
-    POST   /cameras/{id}/stop     — Kamerani to'xtatish
-    GET    /cameras/{id}/stream   — MJPEG video stream (bbox overlay bilan)
-
-DB vs RUNTIME:
-    DB (Camera model):       konfiguratsiya — camera_id, name, type, source, fps
-    CameraManager (xotira):  runtime holat  — is_active, fps, frames_captured
-
-AUTENTIFIKATSIYA:
-    Barcha endpointlar: VIEWER+ (get_current_active_user)
-    Yozish operatsiyalari: MANAGER+ (require_manager)
+Asosiy tuzatishlar:
+  1. MJPEG stream frame_cache dan oladi (race condition yo'q)
+  2. Pipeline stop — timeout bilan (osilib qolmaydi)
+  3. Barcha holat pipeline_manager dan (camera_manager olib tashlangan)
 """
 
 import asyncio
@@ -30,76 +15,47 @@ from typing import Optional, AsyncGenerator
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel as PydanticModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token
-from app.core.exceptions import AuthenticationError
+from app.core.exceptions import AuthenticationError, BusinessRuleViolationError
 from app.api.v1.deps import CurrentUser, CurrentManager
 from app.repositories.camera_repository import CameraRepository
 from app.repositories.user_repository import UserRepository
 from app.models.camera import CameraType
-from app.services.camera.camera_manager import camera_manager
-from app.services.camera.camera_factory import CameraFactory
 from app.services.pipeline_manager import get_pipeline_manager
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
 
-# =============================================================================
-# PYDANTIC SCHEMAS
-# =============================================================================
+# ─── Schemas ─────────────────────────────────────────────────────────────────
 
 class CameraCreateRequest(PydanticModel):
-    """
-    Yangi kamera qo'shish uchun request body.
-
-    Frontend AddCameraModal yuboradigan formatga to'liq mos.
-    """
-    name:       str        = Field(..., min_length=1, max_length=100, description="Kamera nomi")
-    type:       CameraType = Field(CameraType.SIMULATED,              description="simulated | usb | rtsp")
-    source:     Optional[str] = Field(None,                           description="RTSP URL (rtsp uchun)")
-    device_id:  Optional[int] = Field(None, ge=0,                     description="USB device indeksi")
-    fps:        int        = Field(10,  ge=1, le=60,                  description="FPS (1–60)")
-    enabled:    bool       = Field(True,                              description="Darhol faollashtirish")
+    name:      str        = Field(..., min_length=1, max_length=100)
+    type:      CameraType = Field(CameraType.SIMULATED)
+    source:    Optional[str] = None
+    device_id: Optional[int] = Field(None, ge=0)
+    fps:       int        = Field(10, ge=1, le=60)
+    enabled:   bool       = Field(True)
 
 
 class CameraResponse(PydanticModel):
-    """
-    Kamera konfiguratsiyasi response.
-
-    Frontend CameraConfig interfeysi bilan to'liq mos:
-        id       → camera_id (string)
-        name     → name
-        type     → type
-        source   → source
-        device_id → device_index
-        fps      → fps
-        enabled  → is_enabled
-        status   → runtime holat
-    """
-    id:         str
-    name:       str
-    type:       CameraType
-    source:     Optional[str]
-    device_id:  Optional[int]
-    fps:        int
-    enabled:    bool
-    status:     str  # 'active' | 'inactive' | 'error'
-
+    id:        str
+    name:      str
+    type:      CameraType
+    source:    Optional[str]
+    device_id: Optional[int]
+    fps:       int
+    enabled:   bool
+    status:    str
     model_config = {"from_attributes": True}
 
 
 class CameraStatusResponse(PydanticModel):
-    """
-    Kamera runtime statistikasi.
-
-    Frontend CameraStatus interfeysi bilan mos.
-    """
     camera_id:       str
     is_active:       bool
     fps:             float
@@ -109,7 +65,6 @@ class CameraStatusResponse(PydanticModel):
 
 
 class CameraHealthResponse(PydanticModel):
-    """Kamera tizimi sog'liq holati."""
     total_cameras:     int
     enabled_cameras:   int
     active_cameras:    int
@@ -117,797 +72,344 @@ class CameraHealthResponse(PydanticModel):
     timestamp:         str
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
-def _runtime_status(camera_id: str) -> str:
-    """
-    CameraManager dan runtime holatni oladi.
-
-    Returns:
-        'active'   — kamera ishlayapti
-        'inactive' — kamera to'xtatilgan
-        'error'    — kamera xatolikda
-    """
-    try:
-        cam = camera_manager.get_camera(camera_id)
-        if cam is None:
-            return "inactive"
-        if cam.is_opened():
-            return "active"
-        return "inactive"
-    except Exception:
-        return "error"
+def _pm_status(camera_id: str) -> str:
+    return "active" if get_pipeline_manager().is_running(camera_id) else "inactive"
 
 
-def _build_camera_response(camera) -> CameraResponse:
-    """Camera ORM model → CameraResponse Pydantic."""
+def _build_response(camera) -> CameraResponse:
     return CameraResponse(
-        id        = camera.camera_id,
-        name      = camera.name,
-        type      = camera.type,
-        source    = camera.source,
-        device_id = camera.device_index,
-        fps       = camera.fps,
-        enabled   = camera.is_enabled,
-        status    = _runtime_status(camera.camera_id),
+        id=camera.camera_id, name=camera.name, type=camera.type,
+        source=camera.source, device_id=camera.device_index,
+        fps=camera.fps, enabled=camera.is_enabled,
+        status=_pm_status(camera.camera_id),
     )
 
 
-def _to_status_response(camera_id: str, raw: dict) -> CameraStatusResponse:
-    """
-    CameraManager.get_stats() raw dict → CameraStatusResponse.
-
-    SimulatedCamera.get_stats() qaytaradi:
-        {"camera_id", "type", "connected", "running",
-         "frame_count", "error_count", "fps", "resolution", ...}
-
-    Bularni frontend kutgan formatga o'giramiz.
-    """
-    is_active       = raw.get("running", False) or raw.get("connected", False)
-    frames_captured = raw.get("frame_count", 0) or raw.get("frames_captured", 0)
-    fps             = float(raw.get("fps", 0.0))
-    error           = raw.get("error", None) or (
-        f"{raw.get('error_count', 0)} xato" if raw.get("error_count", 0) > 0 else None
-    )
-
+def _build_stats(camera_id: str) -> CameraStatusResponse:
+    pm    = get_pipeline_manager()
+    entry = pm.get_status(camera_id)
+    if not entry.get("running"):
+        return CameraStatusResponse(
+            camera_id=camera_id, is_active=False,
+            fps=0.0, frames_captured=0,
+            last_frame_time=None, error=None,
+        )
+    stats = entry.get("stats") or {}
     return CameraStatusResponse(
-        camera_id       = camera_id,
-        is_active       = is_active,
-        fps             = fps,
-        frames_captured = frames_captured,
-        last_frame_time = datetime.utcnow().isoformat() if is_active else None,
-        error           = error,
+        camera_id=camera_id, is_active=True,
+        fps=float(stats.get("fps", 0.0)),
+        frames_captured=int(stats.get("processed_frames", 0)),
+        last_frame_time=datetime.utcnow().isoformat(),
+        error=None,
     )
 
 
-def _start_camera_in_manager(camera_id: str, camera_type: CameraType,
-                               source: Optional[str], device_index: Optional[int],
-                               fps: int) -> bool:
-    """
-    CameraManager da kamerani ro'yxatdan o'tkazib ishga tushiradi.
+# ─── Static endpoints ────────────────────────────────────────────────────────
 
-    Agar allaqachon ro'yxatda bo'lsa — o'tkazib yuboradi.
-
-    Returns:
-        True — muvaffaqiyatli, False — xatolik
-    """
-    try:
-        if camera_id in camera_manager.list_cameras():
-            logger.debug(f"Camera {camera_id} allaqachon CameraManager da")
-            return True
-
-        config = {
-            "camera_id": camera_id,
-            "type":      camera_type.value,
-            "fps":       fps,
-        }
-        if source:       config["url"]          = source
-        if device_index is not None: config["device_index"] = device_index
-
-        camera_obj = CameraFactory.create_camera(config)
-        if camera_obj is None:
-            logger.error(f"CameraFactory {camera_id} uchun None qaytardi")
-            return False
-
-        camera_manager.register_camera(
-            camera_id  = camera_id,
-            camera     = camera_obj,
-            auto_start = True,
-        )
-        logger.info(f"Camera {camera_id} CameraManager ga qo'shildi va ishga tushirildi")
-        return True
-
-    except Exception as exc:
-        logger.error(
-            f"CameraManager ga qo'shishda xato: {exc}",
-            extra={"extra_data": {"camera_id": camera_id}},
-        )
-        return False
-
-
-# =============================================================================
-# ENDPOINTS — STATIC (dynamic dan oldin turishi shart)
-# =============================================================================
-
-@router.get(
-    "/",
-    response_model=list[CameraResponse],
-    status_code=status.HTTP_200_OK,
-    summary="Barcha kameralar ro'yxati",
-    description=(
-        "DB da saqlangan barcha kamera konfiguratsiyalarini qaytaradi. "
-        "Har bir kamera uchun runtime holat (active/inactive/error) ham qo'shiladi."
-    ),
-)
+@router.get("/", response_model=list[CameraResponse])
 async def list_cameras(
-    only_enabled: bool             = False,
-    current_user: CurrentUser      = ...,
-    db:           AsyncSession     = Depends(get_db),
-) -> list[CameraResponse]:
-    """
-    Barcha kameralar ro'yxati — DB + runtime holat.
-
-    Args:
-        only_enabled: True bo'lsa faqat yoqilgan kameralar
-        current_user: Autentifikatsiya tekshiruvi
-        db:           DB session
-
-    Returns:
-        List[CameraResponse] — konfiguratsiya + runtime holat
-    """
-    repo    = CameraRepository(db)
-    cameras = await repo.get_all(only_enabled=only_enabled)
-    return [_build_camera_response(c) for c in cameras]
+    only_enabled: bool = False,
+    _: CurrentUser = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    cameras = await CameraRepository(db).get_all(only_enabled=only_enabled)
+    return [_build_response(c) for c in cameras]
 
 
-@router.post(
-    "/",
-    response_model=CameraResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Yangi kamera qo'shish",
-    description=(
-        "Yangi kamera konfiguratsiyasini DB ga saqlaydi va "
-        "enabled=True bo'lsa darhol CameraManager ga ro'yxatdan o'tkazadi."
-    ),
-)
+@router.post("/", response_model=CameraResponse, status_code=201)
 async def create_camera(
-    body:         CameraCreateRequest,
-    current_user: CurrentManager   = ...,
-    db:           AsyncSession     = Depends(get_db),
-) -> CameraResponse:
-    """
-    Yangi kamera yaratish.
-
-    Args:
-        body:         Kamera konfiguratsiyasi
-        current_user: MANAGER yoki ADMIN talab qilinadi
-        db:           DB session
-
-    Returns:
-        Yaratilgan CameraResponse
-
-    Raises:
-        409: camera_id allaqachon mavjud
-    """
-    repo   = CameraRepository(db)
-    camera = await repo.create(
-        name         = body.name,
-        camera_type  = body.type,
-        source       = body.source,
-        device_index = body.device_id,
-        fps          = body.fps,
-        is_enabled   = body.enabled,
+    body: CameraCreateRequest,
+    _: CurrentManager = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    camera = await CameraRepository(db).create(
+        name=body.name, camera_type=body.type, source=body.source,
+        device_index=body.device_id, fps=body.fps, is_enabled=body.enabled,
     )
-
-    # Enabled bo'lsa darhol CameraManager ga qo'shish
     if body.enabled:
-        _start_camera_in_manager(
-            camera_id    = camera.camera_id,
-            camera_type  = camera.type,
-            source       = camera.source,
-            device_index = camera.device_index,
-            fps          = camera.fps,
+        pm = get_pipeline_manager()
+        ok, reason = await pm.start_camera(
+            camera_id=camera.camera_id, camera_type=camera.type.value,
+            source=camera.source, device_index=camera.device_index, fps=camera.fps,
         )
+        if not ok:
+            logger.warning(f"Camera yaratildi lekin pipeline ishlamadi: {reason}")
+    return _build_response(camera)
 
-    return _build_camera_response(camera)
 
-
-@router.get(
-    "/stats/all",
-    response_model=dict[str, CameraStatusResponse],
-    status_code=status.HTTP_200_OK,
-    summary="Barcha kameralar runtime statistikasi",
-    description=(
-        "CameraManager dan barcha kameralarning real-time holatini oladi. "
-        "Frontend dashboard uchun har 3 soniyada so'raladi."
-    ),
-)
+@router.get("/stats/all", response_model=dict[str, CameraStatusResponse])
 async def get_all_stats(
-    current_user: CurrentUser  = ...,
-    db:           AsyncSession = Depends(get_db),
-) -> dict[str, CameraStatusResponse]:
-    """
-    Barcha kameralar statistikasi.
-
-    DB dagi kameralar ro'yxatidan boshlab,
-    har biri uchun CameraManager dan runtime ma'lumot oladi.
-
-    Returns:
-        Dict[camera_id, CameraStatusResponse]
-    """
-    repo    = CameraRepository(db)
-    cameras = await repo.get_all()
-
-    result: dict[str, CameraStatusResponse] = {}
-
-    for cam in cameras:
-        try:
-            raw = camera_manager.get_camera_stats(cam.camera_id)
-            if raw is not None:
-                result[cam.camera_id] = _to_status_response(cam.camera_id, raw)
-            else:
-                # CameraManager da yo'q — DB da bor lekin run etilmagan
-                result[cam.camera_id] = CameraStatusResponse(
-                    camera_id       = cam.camera_id,
-                    is_active       = False,
-                    fps             = 0.0,
-                    frames_captured = 0,
-                    last_frame_time = None,
-                    error           = None,
-                )
-        except Exception as exc:
-            logger.warning(f"Stats olishda xato {cam.camera_id}: {exc}")
-            result[cam.camera_id] = CameraStatusResponse(
-                camera_id       = cam.camera_id,
-                is_active       = False,
-                fps             = 0.0,
-                frames_captured = 0,
-                last_frame_time = None,
-                error           = str(exc),
-            )
-
-    return result
+    _: CurrentUser = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    cameras = await CameraRepository(db).get_all()
+    return {c.camera_id: _build_stats(c.camera_id) for c in cameras}
 
 
-@router.get(
-    "/health",
-    response_model=CameraHealthResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Kamera tizimi sog'lig'i",
-)
-async def get_camera_health(
-    current_user: CurrentUser  = ...,
-    db:           AsyncSession = Depends(get_db),
-) -> CameraHealthResponse:
-    """
-    Kamera tizimining umumiy sog'liq holati.
-
-    Returns:
-        CameraHealthResponse — jami, yoqilgan, faol kameralar soni
-    """
-    repo         = CameraRepository(db)
-    all_cameras  = await repo.get_all()
-    enabled      = [c for c in all_cameras if c.is_enabled]
-    active_count = sum(
-        1 for c in all_cameras
-        if _runtime_status(c.camera_id) == "active"
-    )
-
-    total = len(all_cameras)
-
+@router.get("/health", response_model=CameraHealthResponse)
+async def camera_health(
+    _: CurrentUser = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    all_cams  = await CameraRepository(db).get_all()
+    running   = get_pipeline_manager().list_running()
+    active    = sum(1 for c in all_cams if c.camera_id in running)
+    total     = len(all_cams)
     return CameraHealthResponse(
-        total_cameras     = total,
-        enabled_cameras   = len(enabled),
-        active_cameras    = active_count,
-        health_percentage = (active_count / total * 100) if total > 0 else 0.0,
-        timestamp         = datetime.utcnow().isoformat(),
+        total_cameras=total,
+        enabled_cameras=len([c for c in all_cams if c.is_enabled]),
+        active_cameras=active,
+        health_percentage=(active / total * 100) if total else 0.0,
+        timestamp=datetime.utcnow().isoformat(),
     )
 
 
-@router.post(
-    "/start-all",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-    summary="Barcha kameralarni ishga tushirish",
-)
-async def start_all_cameras(
-    current_user: CurrentManager = ...,
-    db:           AsyncSession   = Depends(get_db),
-) -> dict:
-    """Barcha yoqilgan kameralarni CameraManager orqali ishga tushiradi."""
-    repo    = CameraRepository(db)
-    cameras = await repo.get_all(only_enabled=True)
-
-    started = 0
+@router.post("/start-all", response_model=dict)
+async def start_all(
+    _: CurrentManager = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    cameras = await CameraRepository(db).get_all(only_enabled=True)
+    pm = get_pipeline_manager()
+    started, failed = 0, []
     for cam in cameras:
-        ok = _start_camera_in_manager(
-            camera_id    = cam.camera_id,
-            camera_type  = cam.type,
-            source       = cam.source,
-            device_index = cam.device_index,
-            fps          = cam.fps,
+        if pm.is_running(cam.camera_id):
+            started += 1; continue
+        ok, reason = await pm.start_camera(
+            camera_id=cam.camera_id, camera_type=cam.type.value,
+            source=cam.source, device_index=cam.device_index, fps=cam.fps,
         )
-        if ok:
-            started += 1
-
-    return {"started": started, "total": len(cameras), "message": f"{started}/{len(cameras)} kamera ishga tushdi"}
-
-
-@router.post(
-    "/stop-all",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-    summary="Barcha kameralarni to'xtatish",
-)
-async def stop_all_cameras(
-    current_user: CurrentManager = ...,
-) -> dict:
-    """Barcha faol kameralarni to'xtatadi."""
-    stopped = camera_manager.stop_all()
-    return {"stopped": stopped, "message": f"{stopped} kamera to'xtatildi"}
+        if ok: started += 1
+        else: failed.append({"camera_id": cam.camera_id, "reason": reason})
+    return {"started": started, "total": len(cameras), "failed": failed}
 
 
-@router.get(
-    "/detect-webcams",
-    response_model=list[dict],
-    status_code=status.HTTP_200_OK,
-    summary="Mavjud webcam qurilmalarni aniqlash",
-    description=(
-        "Serverga ulangan USB/webcam qurilmalarni avtomatik aniqlaydi. "
-        "Indeks 0 dan 4 gacha sinab ko'riladi. "
-        "Faqat ochilishi mumkin bo'lgan qurilmalar qaytariladi. "
-        "Frontend da 'Webcam qo'shish' tugmasi uchun ishlatiladi."
-    ),
-)
-async def detect_webcams(
-    current_user: CurrentUser = ...,
-) -> list[dict]:
-    """
-    Serverga ulangan webcam qurilmalarni aniqlaydi.
+@router.post("/stop-all", response_model=dict)
+async def stop_all(_: CurrentManager = ...):
+    stopped = await get_pipeline_manager().stop_all()
+    return {"stopped": stopped}
 
-    OpenCV VideoCapture orqali 0–4 indekslarni sinab ko'radi.
-    Har bir mavjud qurilma uchun indeks va tavsif qaytaradi.
 
-    Returns:
-        [{"device_index": 0, "label": "Webcam 0 (/dev/video0)"}]
-
-    Note:
-        Bu operatsiya bir necha soniya olishi mumkin (har qurilma uchun timeout).
-        Docker container ichida host qurilmalariga kirish uchun
-        docker-compose.yml da `devices: [/dev/video0:/dev/video0]` bo'lishi kerak.
-    """
+@router.get("/detect-webcams", response_model=list[dict])
+async def detect_webcams(_: CurrentUser = ...):
     found: list[dict] = []
-
-    for index in range(5):  # 0–4 indekslarni sinash
-        try:
-            cap = cv2.VideoCapture(index)
-            if cap.isOpened():
-                # Qurilma nomi (Linux: /dev/videoN, Windows: index raqami)
-                label = f"Webcam {index} (/dev/video{index})"
-                found.append({
-                    "device_index": index,
-                    "label": label,
-                    "suggested_id": f"CAM-WEB-{index:02d}",
-                    "suggested_name": f"Webcam {index}",
-                })
-                cap.release()
-        except Exception:
-            pass
-
-    logger.info(f"Webcam aniqlash: {len(found)} ta qurilma topildi")
+    def _scan():
+        for i in range(5):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    found.append({
+                        "device_index": i,
+                        "label": f"Webcam {i} (/dev/video{i})",
+                        "suggested_name": f"Webcam {i}",
+                    })
+                    cap.release()
+            except Exception:
+                pass
+    await asyncio.to_thread(_scan)
     return found
 
 
-# =============================================================================
-# ENDPOINTS — DYNAMIC /{camera_id} (ENG PASTDA turishi shart!)
-# =============================================================================
+# ─── Dynamic endpoints /{camera_id} ─────────────────────────────────────────
 
-@router.delete(
-    "/{camera_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Kamerani o'chirish",
-    description="Kamerani DB dan o'chiradi va CameraManager dan to'xtatadi.",
-)
+@router.delete("/{camera_id}", status_code=204)
 async def delete_camera(
-    camera_id:    str,
-    current_user: CurrentManager = ...,
-    db:           AsyncSession   = Depends(get_db),
-) -> None:
-    """
-    Kamerani o'chirish.
-
-    Args:
-        camera_id:    O'chiriladigan kamera identifikatori
-        current_user: MANAGER yoki ADMIN
-        db:           DB session
-
-    Raises:
-        404: Kamera topilmasa
-    """
+    camera_id: str,
+    _: CurrentManager = ...,
+    db: AsyncSession = Depends(get_db),
+):
     repo = CameraRepository(db)
-    # EntityNotFoundError → 404 (exception_handlers da)
     await repo.get_by_camera_id_or_raise(camera_id)
-
-    # CameraManager dan to'xtatish
-    if camera_id in camera_manager.list_cameras():
-        camera_manager.unregister_camera(camera_id)
-
-    # DB dan o'chirish
+    pm = get_pipeline_manager()
+    if pm.is_running(camera_id):
+        await pm.stop_camera(camera_id)
     await repo.delete(camera_id)
 
 
-@router.get(
-    "/{camera_id}/stats",
-    response_model=CameraStatusResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Bitta kamera statistikasi",
-)
-async def get_camera_stats(
-    camera_id:    str,
-    current_user: CurrentUser  = ...,
-    db:           AsyncSession = Depends(get_db),
-) -> CameraStatusResponse:
-    """
-    Bitta kamera runtime statistikasi.
-
-    Args:
-        camera_id:    Kamera identifikatori
-        current_user: Autentifikatsiya
-        db:           DB session
-
-    Returns:
-        CameraStatusResponse
-
-    Raises:
-        404: Kamera topilmasa
-    """
-    repo = CameraRepository(db)
-    await repo.get_by_camera_id_or_raise(camera_id)
-
-    raw = camera_manager.get_camera_stats(camera_id)
-    if raw is None:
-        return CameraStatusResponse(
-            camera_id       = camera_id,
-            is_active       = False,
-            fps             = 0.0,
-            frames_captured = 0,
-            last_frame_time = None,
-            error           = None,
-        )
-
-    return _to_status_response(camera_id, raw)
+@router.get("/{camera_id}/stats", response_model=CameraStatusResponse)
+async def camera_stats(
+    camera_id: str,
+    _: CurrentUser = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    await CameraRepository(db).get_by_camera_id_or_raise(camera_id)
+    return _build_stats(camera_id)
 
 
-@router.post(
-    "/{camera_id}/start",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-    summary="Kamerani ishga tushirish",
-)
+@router.post("/{camera_id}/start", response_model=dict)
 async def start_camera(
-    camera_id:    str,
-    current_user: CurrentManager = ...,
-    db:           AsyncSession   = Depends(get_db),
-) -> dict:
-    """
-    Bitta kamerani CameraManager orqali ishga tushiradi.
-
-    Raises:
-        404: Kamera topilmasa
-        500: Ishga tushirib bo'lmasa
-    """
-    repo   = CameraRepository(db)
-    camera = await repo.get_by_camera_id_or_raise(camera_id)
-
-    ok = _start_camera_in_manager(
-        camera_id    = camera.camera_id,
-        camera_type  = camera.type,
-        source       = camera.source,
-        device_index = camera.device_index,
-        fps          = camera.fps,
+    camera_id: str,
+    _: CurrentManager = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    camera = await CameraRepository(db).get_by_camera_id_or_raise(camera_id)
+    pm = get_pipeline_manager()
+    if pm.is_running(camera_id):
+        raise BusinessRuleViolationError(message=f"Pipeline '{camera_id}' allaqachon ishlayapti")
+    ok, reason = await pm.start_camera(
+        camera_id=camera.camera_id, camera_type=camera.type.value,
+        source=camera.source, device_index=camera.device_index, fps=camera.fps,
     )
-
     if not ok:
-        from app.core.exceptions import BusinessRuleViolationError
-        raise BusinessRuleViolationError(
-            message=f"Kamera {camera_id} ni ishga tushirib bo'lmadi"
-        )
-
-    return {"success": True, "camera_id": camera_id, "message": "Kamera ishga tushirildi"}
+        raise BusinessRuleViolationError(message=f"Pipeline ishga tushmadi: {reason}")
+    return {"success": True, "camera_id": camera_id}
 
 
-@router.post(
-    "/{camera_id}/stop",
-    response_model=dict,
-    status_code=status.HTTP_200_OK,
-    summary="Kamerani to'xtatish",
-)
+@router.post("/{camera_id}/stop", response_model=dict)
 async def stop_camera(
-    camera_id:    str,
-    current_user: CurrentManager = ...,
-    db:           AsyncSession   = Depends(get_db),
-) -> dict:
-    """
-    Bitta kamerani to'xtatadi.
-
-    Raises:
-        404: Kamera topilmasa
-    """
-    repo = CameraRepository(db)
-    await repo.get_by_camera_id_or_raise(camera_id)
-
-    if camera_id not in camera_manager.list_cameras():
-        return {"success": True, "camera_id": camera_id, "message": "Kamera allaqachon to'xtatilgan"}
-
-    ok = camera_manager.stop_camera(camera_id)
-    return {
-        "success":   ok,
-        "camera_id": camera_id,
-        "message":   "Kamera to'xtatildi" if ok else "To'xtatishda xato",
-    }
-
-# =============================================================================
-# MJPEG VIDEO STREAM — Kameradan real-time kadrlar + bbox overlay
-# =============================================================================
-
-# BBox rang sozlamalari
-_COLOR_IDENTIFIED   = (34, 197, 94)    # Yashil — tanilgan jonivor
-_COLOR_UNIDENTIFIED = (239, 68, 68)    # Qizil — tanilmagan
-_COLOR_TEXT_BG      = (0, 0, 0)        # Qora — matn fon
-_BOX_THICKNESS      = 2
-_FONT               = cv2.FONT_HERSHEY_SIMPLEX
-_FONT_SCALE         = 0.65
-_FONT_THICKNESS     = 2
-
-# Kadr hajmi cheklov (CPU tejash uchun)
-_STREAM_MAX_WIDTH   = 1280
-_STREAM_JPEG_QUALITY = 75
+    camera_id: str,
+    _: CurrentManager = ...,
+    db: AsyncSession = Depends(get_db),
+):
+    await CameraRepository(db).get_by_camera_id_or_raise(camera_id)
+    pm = get_pipeline_manager()
+    if not pm.is_running(camera_id):
+        return {"success": True, "camera_id": camera_id, "message": "Allaqachon to'xtatilgan"}
+    ok, reason = await pm.stop_camera(camera_id)
+    return {"success": ok, "camera_id": camera_id, "message": "" if ok else reason}
 
 
-def _draw_detection_overlay(
-    frame: np.ndarray,
-    det: dict,
-) -> np.ndarray:
-    """
-    Kadrga YOLO detection bbox va jonivor nomini chizadi.
+# ─── MJPEG Stream ────────────────────────────────────────────────────────────
+#
+# MUAMMO (ESKI):
+#   MJPEG generator va DetectionPipeline bir vaqtda camera.get_frame() chaqirar edi.
+#   OpenCV VideoCapture thread-safe emas → race condition → 1s da crash.
+#
+# YECHIM (YANGI):
+#   DetectionPipeline har frame olganda pm.update_latest_frame(id, frame) chaqiradi.
+#   MJPEG generator shu cache dan oladi (pm.get_latest_frame).
+#   Ikki joy bitta VideoCapture ga tegmaydi.
 
-    Args:
-        frame: BGR numpy kadr
-        det:   pipeline_manager.get_latest_detection() natijasi
-                {bbox: {x,y,w,h}, animal_tag, confidence, class_name}
+_FONT      = cv2.FONT_HERSHEY_SIMPLEX
+_CLR_ID    = (34, 197, 94)
+_CLR_UNID  = (239, 68, 68)
+_JPEG_Q    = 75
+_MAX_W     = 1280
 
-    Returns:
-        Annotatsiya qilingan kadr (nusxa)
-    """
+
+def _draw_bbox(frame: np.ndarray, det: dict) -> np.ndarray:
     h, w = frame.shape[:2]
-    bbox       = det["bbox"]          # normalized 0-1
-    animal_tag = det.get("animal_tag")
-    confidence = det.get("confidence", 0.0)
-    identified = animal_tag is not None and animal_tag != "UNKNOWN"
+    b    = det["bbox"]
+    tag  = det.get("animal_tag")
+    conf = det.get("confidence", 0.0)
+    idd  = tag is not None and tag != "UNKNOWN"
+    col  = _CLR_ID if idd else _CLR_UNID
 
-    # Piksel koordinatalari
-    x1 = int(bbox.get("x", 0) * w)
-    y1 = int(bbox.get("y", 0) * h)
-    x2 = int((bbox.get("x", 0) + bbox.get("w", 0.1)) * w)
-    y2 = int((bbox.get("y", 0) + bbox.get("h", 0.2)) * h)
-
-    # Chegaralarni tekshirish
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w - 1, x2), min(h - 1, y2)
+    x1 = max(0, int(b.get("x", 0) * w))
+    y1 = max(0, int(b.get("y", 0) * h))
+    x2 = min(w-1, int((b.get("x",0)+b.get("w",0.1)) * w))
+    y2 = min(h-1, int((b.get("y",0)+b.get("h",0.2)) * h))
     if x2 <= x1 or y2 <= y1:
         return frame
 
-    color = _COLOR_IDENTIFIED if identified else _COLOR_UNIDENTIFIED
+    cv2.rectangle(frame, (x1,y1), (x2,y2), col, 2)
+    cl = min(18, (x2-x1)//4, (y2-y1)//4)
+    for px, py in [(x1,y1),(x2,y1),(x1,y2),(x2,y2)]:
+        cv2.line(frame,(px,py),(px+(cl if px==x1 else -cl),py),col,3)
+        cv2.line(frame,(px,py),(px,py+(cl if py==y1 else -cl)),col,3)
 
-    # Asosiy to'rtburchak
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, _BOX_THICKNESS)
-
-    # Burchak aksenti (estetik)
-    clen = min(20, (x2 - x1) // 4, (y2 - y1) // 4)
-    for px, py in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
-        dx = clen if px == x1 else -clen
-        dy = clen if py == y1 else -clen
-        cv2.line(frame, (px, py), (px + dx, py), color, _BOX_THICKNESS + 1)
-        cv2.line(frame, (px, py), (px, py + dy), color, _BOX_THICKNESS + 1)
-
-    # Label matn
-    label     = animal_tag if identified else "?"
-    conf_str  = f"{confidence:.0%}"
-    text_line = f"{label}  {conf_str}"
-
-    (tw, th), baseline = cv2.getTextSize(
-        text_line, _FONT, _FONT_SCALE, _FONT_THICKNESS
-    )
-
-    # Matn fon paneli
-    pad       = 4
-    label_y   = max(y1 - baseline - pad * 2, th + baseline + pad * 2)
-    rect_x1   = x1
-    rect_y1   = label_y - th - baseline - pad * 2
-    rect_x2   = x1 + tw + pad * 2
-    rect_y2   = label_y
-
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (rect_x1, rect_y1), (rect_x2, rect_y2), color, -1)
-    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-
-    cv2.putText(
-        frame, text_line,
-        (x1 + pad, label_y - baseline - pad),
-        _FONT, _FONT_SCALE,
-        (255, 255, 255), _FONT_THICKNESS, cv2.LINE_AA,
-    )
-
+    txt = f"{tag if idd else '?'}  {conf:.0%}"
+    (tw,th),bl = cv2.getTextSize(txt, _FONT, 0.55, 2)
+    p = 3
+    ly = max(y1-bl-p*2, th+bl+p*2)
+    ov = frame.copy()
+    cv2.rectangle(ov,(x1,ly-th-bl-p*2),(x1+tw+p*2,ly),col,-1)
+    cv2.addWeighted(ov,0.7,frame,0.3,0,frame)
+    cv2.putText(frame,txt,(x1+p,ly-bl-p),_FONT,0.55,(255,255,255),2,cv2.LINE_AA)
     return frame
 
 
-async def _mjpeg_frame_generator(
-    camera_id: str,
-    db,
-) -> AsyncGenerator[bytes, None]:
-    """
-    Kameradan MJPEG kadr generatori.
+def _no_signal_frame(camera_id: str) -> bytes:
+    """Pipeline to'xtatilganda ko'rsatiladigan kadr."""
+    f = np.zeros((360,640,3), dtype=np.uint8)
+    f[:] = (18,18,28)
+    for i in range(0,640,40): cv2.line(f,(i,0),(i,360),(32,32,42),1)
+    for i in range(0,360,40): cv2.line(f,(0,i),(640,i),(32,32,42),1)
+    cv2.putText(f,"NO SIGNAL",(198,210),_FONT,1.1,(90,90,110),2,cv2.LINE_AA)
+    cv2.putText(f,f"ID: {camera_id}",(198,250),_FONT,0.55,(60,60,80),1,cv2.LINE_AA)
+    cv2.putText(f,"Pipeline to'xtatilgan",(165,280),_FONT,0.55,(50,50,70),1,cv2.LINE_AA)
+    _, j = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 50])
+    return j.tobytes()
 
-    - Pipeline aktiv bo'lsa: cam_service.get_frame() orqali kadrlar olinadi
-    - RTSP + Simulated + USB kamera servislarini bir xil interfeys orqali ishlaydi
-    - Oxirgi detection 2s dan yangi bo'lsa bbox + label overlay chiziladi
-    - Pipeline to'xtatilsa: "No Signal" kadr (1 FPS)
+
+async def _mjpeg_generator(camera_id: str) -> AsyncGenerator[bytes, None]:
     """
-    pm        = get_pipeline_manager()
-    no_signal = _make_no_signal_frame(camera_id)
-    boundary  = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+    MJPEG kadr generatori.
+
+    Frame manbai: pm.get_latest_frame(camera_id)
+    - Pipeline aktiv: DetectionPipeline cache ga yozadi → biz o'qiymiz
+    - Pipeline to'xtatilgan: no-signal kadr (1 FPS)
+
+    MUHIM: camera.get_frame() CHAQIRILMAYDI — race condition yo'q.
+    """
+    pm       = get_pipeline_manager()
+    boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+    no_sig   = _no_signal_frame(camera_id)
 
     while True:
         try:
-            cam_service = pm.get_camera_service(camera_id)
+            raw = pm.get_latest_frame(camera_id)
 
-            if cam_service is None or not getattr(cam_service, "_is_active", False):
-                # Pipeline to'xtatilgan — "No Signal" ko'rsatish (1 FPS yetarli)
-                _, jpeg = cv2.imencode(
-                    ".jpg", no_signal,
-                    [cv2.IMWRITE_JPEG_QUALITY, _STREAM_JPEG_QUALITY],
-                )
-                yield boundary + jpeg.tobytes() + b"\r\n"
+            if raw is None:
+                # Pipeline hali kadr bermaganida yoki to'xtatilganda
+                yield boundary + no_sig + b"\r\n"
                 await asyncio.sleep(1.0)
                 continue
 
-            # CameraServiceInterface.get_frame() → CameraFrame
-            # Barcha kamera turlari (RTSP, Simulated, USB) uchun bir xil metod
-            try:
-                cam_frame = await cam_service.get_frame()
-            except Exception:
-                await asyncio.sleep(0.1)
-                continue
+            frame = raw.copy()
 
-            if cam_frame is None:
-                await asyncio.sleep(0.05)
-                continue
-
-            # CameraFrame.frame — numpy ndarray (BGR)
-            frame = cam_frame.frame.copy()
-
-            # Hajmni cheklash (network band tejash)
+            # O'lchamni cheklaymiz
             h, w = frame.shape[:2]
-            if w > _STREAM_MAX_WIDTH:
-                scale  = _STREAM_MAX_WIDTH / w
-                new_w  = int(w * scale)
-                new_h  = int(h * scale)
-                frame  = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            if w > _MAX_W:
+                sc    = _MAX_W / w
+                frame = cv2.resize(frame, (int(w*sc), int(h*sc)),
+                                   interpolation=cv2.INTER_LINEAR)
 
-            # Bbox + label overlay (detection 2s dan yangi bo'lsa)
+            # Bbox overlay
             det = pm.get_latest_detection(camera_id)
             if det:
-                frame = _draw_detection_overlay(frame, det)
+                frame = _draw_bbox(frame, det)
 
-            # JPEG encode va MJPEG multipart
-            ok, jpeg = cv2.imencode(
-                ".jpg", frame,
-                [cv2.IMWRITE_JPEG_QUALITY, _STREAM_JPEG_QUALITY],
-            )
+            ok, j = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_Q])
             if ok:
-                yield boundary + jpeg.tobytes() + b"\r\n"
+                yield boundary + j.tobytes() + b"\r\n"
 
-            # ~20 FPS — ko'z uchun yetarli, CPU uchun tejamli
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.04)   # ~25 FPS
 
         except asyncio.CancelledError:
             break
         except Exception as exc:
-            logger.warning(f"[{camera_id}] MJPEG generator xatosi: {exc}")
+            logger.warning(f"[{camera_id}] MJPEG xato: {exc}")
             await asyncio.sleep(0.5)
 
 
-def _make_no_signal_frame(camera_id: str) -> np.ndarray:
-    """'No Signal' kadr — pipeline to'xtatilganda ko'rsatiladi."""
-    frame = np.zeros((360, 640, 3), dtype=np.uint8)
-    frame[:] = (20, 20, 30)   # To'q ko'k-qora fon
-
-    # Grid pattern
-    for i in range(0, 640, 40):
-        cv2.line(frame, (i, 0), (i, 360), (35, 35, 45), 1)
-    for i in range(0, 360, 40):
-        cv2.line(frame, (0, i), (640, i), (35, 35, 45), 1)
-
-    # Kamera belgisi
-    cx, cy = 320, 150
-    cv2.circle(frame, (cx, cy), 45, (80, 80, 100), 2)
-    cv2.circle(frame, (cx, cy), 20, (80, 80, 100), 2)
-    cv2.rectangle(frame, (cx - 55, cy - 30), (cx + 55, cy + 30), (80, 80, 100), 2)
-    pts = np.array([[cx + 40, cy - 25], [cx + 65, cy - 40], [cx + 65, cy + 10], [cx + 40, cy + 5]])
-    cv2.polylines(frame, [pts], True, (80, 80, 100), 2)
-
-    cv2.putText(
-        frame, "NO SIGNAL",
-        (200, 230), _FONT, 1.1, (120, 120, 140), 2, cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame, f"Camera: {camera_id}",
-        (190, 270), _FONT, 0.6, (80, 80, 100), 1, cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame, "Pipeline to'xtatilgan",
-        (175, 300), _FONT, 0.6, (70, 70, 90), 1, cv2.LINE_AA,
-    )
-    return frame
-
-
-@router.get(
-    "/{camera_id}/stream",
-    summary="MJPEG video stream",
-    description=(
-        "Kameradan real-time video oqimi — MJPEG multipart format. "
-        "Aktiv detection bo'lsa bbox va jonivor nomi overlay qilinadi. "
-        "Pipeline to'xtatilgan bo'lsa 'No Signal' ko'rsatiladi. "
-        "Autentifikatsiya: ?token=<jwt_access_token> query parametri."
-    ),
-    response_class=StreamingResponse,
-    tags=["Cameras"],
-)
-async def stream_camera_mjpeg(
+@router.get("/{camera_id}/stream")
+async def stream_mjpeg(
     camera_id: str,
-    token:     Optional[str] = Query(
-        default=None,
-        description="JWT access token (?token=<access_token>)",
-    ),
+    token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Kamera MJPEG video stream endpoint.
-
-    Browser va frontend `<img src="/api/v1/cameras/{id}/stream?token=...">` orqali ishlatadi.
-    Detection pipeline aktiv bo'lsa kadrlar ustiga bbox + jonivor nomi chiziladi.
-
-    Auth: HTTP Bearer token WebSocket kabi ?token= parametr orqali uzatiladi.
-    """
-    # --- Autentifikatsiya ---
     if not token:
-        from fastapi.responses import Response
-        return Response(status_code=401, content="Token talab qilinadi")
-
+        return Response(status_code=401, content="Token kerak")
     try:
         payload = decode_token(token)
         if payload.get("type") != "access":
-            raise AuthenticationError("Access token talab qilinadi")
-
-        user_id = int(payload.get("sub", 0))
-        user_repo = UserRepository(db)
-        user = await user_repo.get_by_id(user_id)
+            raise AuthenticationError("Access token kerak")
+        uid  = int(payload.get("sub", 0))
+        user = await UserRepository(db).get_by_id(uid)
         if not user or not user.is_active:
-            from fastapi.responses import Response
             return Response(status_code=403, content="Ruxsat yo'q")
-    except (AuthenticationError, ValueError, Exception):
-        from fastapi.responses import Response
+    except Exception:
         return Response(status_code=401, content="Token noto'g'ri")
 
     return StreamingResponse(
-        _mjpeg_frame_generator(camera_id, db),
+        _mjpeg_generator(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
-            "Cache-Control":   "no-cache, no-store, must-revalidate",
-            "Pragma":          "no-cache",
-            "Expires":         "0",
-            "X-Accel-Buffering": "no",  # Nginx buffering o'chirish
+            "Cache-Control":     "no-cache, no-store, must-revalidate",
+            "Pragma":            "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )

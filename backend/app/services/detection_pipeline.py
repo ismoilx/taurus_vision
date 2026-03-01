@@ -138,13 +138,15 @@ class DetectionPipeline:
 
     def __init__(
         self,
-        camera_service: CameraServiceInterface,
-        yolo_service:   YoloService,
-        ws_manager:     Optional["ConnectionManager"] = None,  # noqa: F821
+        camera_service:  CameraServiceInterface,
+        yolo_service:    YoloService,
+        ws_manager:      Optional["ConnectionManager"] = None,  # noqa: F821
+        frame_cache_cb = None,   # Callable[[str, np.ndarray], None] — MJPEG uchun frame cache
     ) -> None:
-        self.camera     = camera_service
-        self.yolo       = yolo_service
-        self.ws_manager = ws_manager
+        self.camera          = camera_service
+        self.yolo            = yolo_service
+        self.ws_manager      = ws_manager
+        self._frame_cache_cb = frame_cache_cb   # PipelineManager.update_latest_frame
 
         self._running = False
         self._task:   Optional[asyncio.Task] = None
@@ -226,6 +228,14 @@ class DetectionPipeline:
                 if frame is None:
                     await asyncio.sleep(0.1)
                     continue
+
+                # MJPEG stream uchun oxirgi frame ni cache ga saqlash
+                # (MJPEG generator shu frame ni ishlatadi — race condition yo'q)
+                if self._frame_cache_cb is not None:
+                    try:
+                        self._frame_cache_cb(self.camera.camera_id, frame.frame)
+                    except Exception:
+                        pass
 
                 last_frame_time = time.monotonic()
                 await self._process_frame(frame)

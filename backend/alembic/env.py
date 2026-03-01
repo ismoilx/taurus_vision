@@ -108,6 +108,9 @@ from app.models import (  # noqa
     HealthRecord,
     ADILog,
     Alert,
+    User,
+    Camera,
+    HealthPrediction,
 )
 
 # Alembic Config object

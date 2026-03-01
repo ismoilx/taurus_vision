@@ -26,6 +26,7 @@ import { useState, lazy, Suspense, useEffect } from 'react';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WebSocketProvider } from './context/WebSocketContext';
+import { SystemLoadingScreen } from './components/SystemLoadingScreen';
 import './App.css';
 
 // ─── Cow Icon ────────────────────────────────────────────────────────────────
@@ -702,6 +703,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
+    <SystemLoadingScreen>
     <AuthProvider>
       <Router>
         <>
@@ -801,5 +803,6 @@ export default function App() {
         </>
       </Router>
     </AuthProvider>
+    </SystemLoadingScreen>
   );
 }

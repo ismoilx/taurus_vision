@@ -289,7 +289,7 @@ async def start_video_pipeline(
             detail="Video pipeline allaqachon ishlayapti. Avval to'xtating.",
         )
 
-    ok = await manager.start_camera(
+    ok, reason = await manager.start_camera(
         camera_id   = camera_id,
         camera_type = "simulated",
         fps         = camera_fps,

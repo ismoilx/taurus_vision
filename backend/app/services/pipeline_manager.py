@@ -202,6 +202,8 @@ class PipelineManager:
             self._watchdog_task: Optional[asyncio.Task]   = None
             # Har kamera uchun oxirgi detection — MJPEG stream bbox overlay uchun
             self._latest_detections: dict[str, dict] = {}
+            # Har kamera uchun oxirgi frame — MJPEG stream uchun (race condition yo'q)
+            self._latest_frames: dict[str, "np.ndarray"] = {}
             self._initialized    = True
             logger.info(
                 "PipelineManager initialized",
@@ -265,6 +267,7 @@ class PipelineManager:
                 camera_service = camera_service,
                 yolo_service   = yolo,
                 ws_manager     = ws_manager,
+                frame_cache_cb = self.update_latest_frame,
             )
 
             effective_skip = skip_frames if skip_frames is not None \
@@ -329,23 +332,44 @@ class PipelineManager:
     # ================================================================
 
     async def stop_camera(self, camera_id: str) -> tuple[bool, str]:
-        """Bitta kamera pipelineni to'xtatadi."""
+        """
+        Bitta kamera pipelineni to'xtatadi.
+
+        OpenCV VideoCapture.release() ba'zan minutlab bloklanishi mumkin.
+        Shuning uchun camera_service.stop() ni 3 soniya timeout bilan o'raymiz.
+        Timeout bo'lsa ham entry o'chiriladi — stream to'xtaydi.
+        """
         entry = self._pipelines.get(camera_id)
         if entry is None:
             return False, f"Pipeline '{camera_id}' topilmadi."
 
         try:
+            # 1. Asyncio taskni bekor qilamiz
             if entry.task and not entry.task.done():
                 entry.task.cancel()
                 try:
-                    await asyncio.wait_for(asyncio.shield(entry.task), timeout=5.0)
+                    await asyncio.wait_for(asyncio.shield(entry.task), timeout=2.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
 
+            # 2. Pipeline flagini o'chiramiz
             entry.pipeline._running = False
-            await entry.camera_service.stop()
 
-            del self._pipelines[camera_id]
+            # 3. camera_service.stop() — OpenCV release() bloklanmasin uchun timeout
+            try:
+                await asyncio.wait_for(entry.camera_service.stop(), timeout=3.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[{camera_id}] camera_service.stop() 3s da tugamadi "
+                    "(OpenCV release bloklanishi). Force stop."
+                )
+            except Exception as exc:
+                logger.warning(f"[{camera_id}] camera_service.stop() xatosi: {exc}")
+
+            # 4. Cache lardan o'chirish
+            self._pipelines.pop(camera_id, None)
+            self._latest_detections.pop(camera_id, None)
+            self._latest_frames.pop(camera_id, None)
 
             logger.info(
                 "Pipeline to'xtatildi",
@@ -368,6 +392,8 @@ class PipelineManager:
                 extra={"extra_data": {"camera_id": camera_id, "error": error_msg}},
             )
             self._pipelines.pop(camera_id, None)
+            self._latest_detections.pop(camera_id, None)
+            self._latest_frames.pop(camera_id, None)
             return False, f"Stop xatosi: {error_msg}"
 
     async def stop_all(self) -> int:
@@ -393,41 +419,41 @@ class PipelineManager:
     def update_latest_detection(
         self,
         camera_id:  str,
-        bbox:       dict,               # {x, y, w, h} normalized 0-1
-        animal_tag: Optional[str],      # None = tanilmadi
+        bbox:       dict,
+        animal_tag: Optional[str],
         confidence: float,
         class_name: str = "animal",
     ) -> None:
-        """
-        Kamera uchun oxirgi detection ma'lumotini yangilaydi.
-
-        Detection pipeline har detection bo'lganda shu metodini chaqiradi.
-        MJPEG stream endpoint bbox ni kadrga chizish uchun bu ma'lumotdan oladi.
-        Thread-safe — asyncio single-thread da ishlaydi.
-        """
         self._latest_detections[camera_id] = {
             "bbox":       bbox,
             "animal_tag": animal_tag,
             "confidence": confidence,
             "class_name": class_name,
-            "ts":         time.monotonic(),  # float — age hisoblash uchun
+            "ts":         time.monotonic(),
         }
 
     def get_latest_detection(self, camera_id: str) -> Optional[dict]:
-        """
-        Kamera uchun oxirgi detectionni qaytaradi.
-
-        Returns:
-            dict(bbox, animal_tag, confidence, ts) yoki None
-            2 soniyadan eski detection None qaytaradi (eskirgan)
-        """
         det = self._latest_detections.get(camera_id)
         if det is None:
             return None
         age = time.monotonic() - det["ts"]
-        if age > 2.0:            # 2s dan eski → ko'rsatmaymiz
+        if age > 2.0:
             return None
         return det
+
+    # ── Frame cache — MJPEG stream uchun ────────────────────────────
+
+    def update_latest_frame(self, camera_id: str, frame: "np.ndarray") -> None:
+        """
+        DetectionPipeline har frame olganda shu metodini chaqiradi.
+        MJPEG stream bevosita camera.get_frame() chaqirmay, shu cache dan oladi.
+        Natija: OpenCV VideoCapture da race condition bo'lmaydi.
+        """
+        self._latest_frames[camera_id] = frame
+
+    def get_latest_frame(self, camera_id: str) -> Optional["np.ndarray"]:
+        """MJPEG stream uchun eng so'nggi kamera kadrini qaytaradi."""
+        return self._latest_frames.get(camera_id)
 
     def get_camera_service(self, camera_id: str) -> Optional[CameraServiceInterface]:
         """Pipeline ichidagi kamera servisini qaytaradi (MJPEG uchun)."""

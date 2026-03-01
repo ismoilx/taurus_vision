@@ -1,12 +1,9 @@
 /**
- * Taurus Vision — Cameras Page (Sprint 10)
+ * Taurus Vision — Cameras Page
  *
- * Multi-camera pipeline boshqaruvi.
- * Har bir kamera kartasida:
- *   - Real-time holat (active/inactive/error)
- *   - Pipeline Start / Stop tugmasi
- *   - FPS va kadrlar statistikasi
- *   - Pipeline ishlayotganda live stats
+ * Kameralarni qo'shish, o'chirish, pipeline start/stop.
+ * Barcha holat /api/v1/pipeline/status dan olinadi (poll 3s).
+ * Kamera qo'shganda pipeline avtomatik ishga tushadi (enabled=true).
  */
 
 import { useState } from 'react';
@@ -14,13 +11,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Camera, Plus, RefreshCw, AlertCircle, CheckCircle,
   XCircle, Video, Trash2, Play, Square, Film,
-  Activity, Eye, Wifi, WifiOff,
+  Activity, Eye,
 } from 'lucide-react';
 import { apiFetch } from '../utils/apiFetch';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CameraConfig {
   id:       string;
@@ -30,16 +25,7 @@ interface CameraConfig {
   device_id?: number;
   fps?:     number;
   enabled:  boolean;
-  status?:  'active' | 'inactive' | 'error';
-}
-
-interface CameraStatus {
-  camera_id:       string;
-  is_active:       boolean;
-  fps:             number;
-  frames_captured: number;
-  last_frame_time: string | null;
-  error:           string | null;
+  status:   'active' | 'inactive' | 'error';
 }
 
 interface PipelineStatus {
@@ -47,13 +33,12 @@ interface PipelineStatus {
   running:    boolean;
   started_at: string | null;
   stats: {
-    fps:             number;
+    fps:              number;
     processed_frames: number;
-    yolo_detections: number;
-    identified:      number;
-    unidentified:    number;
-    uptime_seconds:  number;
-    errors:          number;
+    yolo_detections:  number;
+    identified:       number;
+    uptime_seconds:   number;
+    errors:           number;
   } | null;
 }
 
@@ -63,65 +48,48 @@ interface AllPipelinesStatus {
   pipelines:       Record<string, PipelineStatus>;
 }
 
-// ---------------------------------------------------------------------------
-// Camera Card
-// ---------------------------------------------------------------------------
+// ─── Camera Card ──────────────────────────────────────────────────────────────
 
 function CameraCard({
-  camera,
-  camStatus,
-  pipelineStatus,
-  onDelete,
-  onPipelineToggle,
-  pipelineLoading,
+  camera, pipelineStatus, onDelete, onPipelineToggle, pipelineLoading,
 }: {
   camera:          CameraConfig;
-  camStatus?:      CameraStatus;
   pipelineStatus?: PipelineStatus;
   onDelete:        () => void;
   onPipelineToggle: () => void;
   pipelineLoading: boolean;
 }) {
-  const isActive    = camStatus?.is_active ?? false;
-  const hasError    = !!camStatus?.error;
-  const pRunning    = pipelineStatus?.running ?? false;
-  const stats       = pipelineStatus?.stats;
-
-  const statusColor = isActive ? '#10B981' : hasError ? '#DC2626' : '#9CA3AF';
-  const statusBg    = isActive ? '#ECFDF5' : hasError ? '#FEF2F2' : '#F3F4F6';
-  const statusLabel = isActive ? 'Faol' : hasError ? 'Xatolik' : 'Nofaol';
+  const pRunning = pipelineStatus?.running ?? false;
+  const stats    = pipelineStatus?.stats;
 
   return (
     <div style={{
       background: '#fff',
       border: `1px solid ${pRunning ? '#A7F3D0' : '#E4E7ED'}`,
-      borderRadius: 14,
-      overflow: 'hidden',
+      borderRadius: 12, overflow: 'hidden',
       boxShadow: pRunning
-        ? '0 1px 3px rgba(16,185,129,0.15)'
-        : '0 1px 3px rgba(0,0,0,0.05)',
+        ? '0 1px 4px rgba(16,185,129,.12)'
+        : '0 1px 3px rgba(0,0,0,.05)',
       transition: 'box-shadow .2s, border-color .2s',
     }}>
-      {/* Card Header */}
+      {/* Header */}
       <div style={{
-        padding: '16px 18px',
+        padding: '14px 16px',
         borderBottom: '1px solid #F3F4F6',
-        display: 'flex',
-        alignItems: 'flex-start',
+        display: 'flex', alignItems: 'flex-start',
         justifyContent: 'space-between',
-        background: pRunning ? 'rgba(16,185,129,0.03)' : '#fff',
+        background: pRunning ? 'rgba(16,185,129,.03)' : '#fff',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
-            width: 42, height: 42, borderRadius: 10,
-            background: statusBg,
-            display: 'grid', placeItems: 'center',
-            flexShrink: 0,
+            width: 38, height: 38, borderRadius: 9,
+            background: pRunning ? '#ECFDF5' : '#F3F4F6',
+            display: 'grid', placeItems: 'center', flexShrink: 0,
           }}>
-            <Camera size={19} color={statusColor} />
+            <Camera size={17} color={pRunning ? '#10B981' : '#9CA3AF'}/>
           </div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#0D1117' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>
               {camera.name}
             </div>
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>
@@ -131,184 +99,129 @@ function CameraCard({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Pipeline holat badge */}
           {pRunning && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 5,
-              padding: '3px 10px',
-              background: '#ECFDF5',
-              border: '1px solid #A7F3D0',
-              borderRadius: 20,
+              padding: '2px 9px',
+              background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 20,
             }}>
               <div style={{
-                width: 6, height: 6, borderRadius: '50%',
-                background: '#10B981',
+                width: 5, height: 5, borderRadius: '50%', background: '#10B981',
                 animation: 'pulse-dot 1.5s infinite',
-              }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#059669' }}>
-                Pipeline
-              </span>
+              }}/>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#059669' }}>LIVE</span>
             </div>
           )}
-
           <button onClick={onDelete} style={{
-            padding: 7, background: 'none', border: 'none',
-            cursor: 'pointer', borderRadius: 7, color: '#DC2626',
-            opacity: 0.6, transition: 'opacity .15s',
+            padding: 6, background: 'none', border: 'none',
+            cursor: 'pointer', borderRadius: 6, color: '#DC2626', opacity: 0.6,
           }}>
-            <Trash2 size={14} />
+            <Trash2 size={13}/>
           </button>
         </div>
       </div>
 
-      {/* Stats qatori */}
-      <div style={{ padding: '12px 18px' }}>
-
-        {/* Kamera holati */}
+      {/* Body */}
+      <div style={{ padding: '12px 16px' }}>
+        {/* Holat qatori */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '8px 0',
-          borderBottom: '1px solid #F9FAFB',
+          padding: '6px 0', borderBottom: '1px solid #F9FAFB',
         }}>
-          <span style={{ fontSize: 12, color: '#6B7280' }}>Holat</span>
+          <span style={{ fontSize: 12, color: '#6B7280' }}>Pipeline</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            {isActive
-              ? <CheckCircle size={13} color="#10B981" />
-              : hasError
-              ? <XCircle size={13} color="#DC2626" />
-              : <XCircle size={13} color="#9CA3AF" />}
+            {pRunning
+              ? <CheckCircle size={12} color="#10B981"/>
+              : <XCircle size={12} color="#9CA3AF"/>}
             <span style={{ fontSize: 12, fontWeight: 600, color: '#0D1117' }}>
-              {statusLabel}
+              {pRunning ? 'Ishlayapti' : 'To\'xtatilgan'}
             </span>
           </div>
         </div>
 
-        {/* Camera FPS */}
-        {camStatus && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px 0',
-            borderBottom: '1px solid #F9FAFB',
-          }}>
-            <span style={{ fontSize: 12, color: '#6B7280' }}>Kamera FPS</span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#0D1117', fontFamily: 'monospace' }}>
-              {camStatus.fps.toFixed(1)}
-            </span>
-          </div>
-        )}
-
-        {/* Pipeline statistika — faqat ishlayotganda */}
-        {pRunning && stats && (
-          <>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 8,
-              marginTop: 10,
-              padding: '10px',
-              background: '#F0FDF4',
-              border: '1px solid #D1FAE5',
-              borderRadius: 8,
-            }}>
-              {[
-                { icon: Activity, label: 'FPS', value: stats.fps.toFixed(1), color: '#10B981' },
-                { icon: Film,     label: 'Kadrlar', value: stats.processed_frames.toLocaleString(), color: '#3B82F6' },
-                { icon: Eye,      label: 'Aniqlangan', value: stats.yolo_detections.toLocaleString(), color: '#8B5CF6' },
-                { icon: CheckCircle, label: 'Tanildi', value: stats.identified.toLocaleString(), color: '#059669' },
-              ].map(({ icon: Icon, label, value, color }) => (
-                <div key={label} style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                  <Icon size={12} color={color} />
-                  <span style={{ fontSize: 11, color: '#6B7280' }}>{label}:</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#0D1117', fontFamily: 'monospace' }}>
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Uptime */}
-            <div style={{
-              fontSize: 11, color: '#6B7280', textAlign: 'center',
-              marginTop: 6,
-            }}>
-              Vaqt: {stats.uptime_seconds < 60
-                ? `${Math.floor(stats.uptime_seconds)}s`
-                : `${Math.floor(stats.uptime_seconds / 60)}m ${Math.floor(stats.uptime_seconds % 60)}s`}
-              {stats.errors > 0 && (
-                <span style={{ color: '#F59E0B', marginLeft: 8 }}>
-                  ⚠ {stats.errors} xato
-                </span>
-              )}
-            </div>
-          </>
-        )}
-
         {/* RTSP URL */}
         {camera.type === 'rtsp' && camera.source && (
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 8 }}>
             <code style={{
               fontSize: 10, color: '#6B7280',
-              background: '#F9FAFB', padding: '4px 8px',
-              borderRadius: 5, display: 'block', overflowX: 'auto',
+              background: '#F9FAFB', padding: '3px 7px',
+              borderRadius: 4, display: 'block', overflowX: 'auto',
             }}>
               {camera.source}
             </code>
           </div>
         )}
 
-        {/* Error */}
-        {hasError && camStatus?.error && (
+        {/* USB device */}
+        {camera.type === 'usb' && (
           <div style={{
-            display: 'flex', gap: 6,
-            background: '#FEF2F2', border: '1px solid #FECACA',
-            borderRadius: 7, padding: '7px 10px', marginTop: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '6px 0', borderBottom: '1px solid #F9FAFB',
           }}>
-            <AlertCircle size={13} color="#DC2626" style={{ flexShrink: 0, marginTop: 1 }} />
-            <p style={{ fontSize: 11, color: '#DC2626', margin: 0 }}>{camStatus.error}</p>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>Device</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#0D1117', fontFamily: 'monospace' }}>
+              /dev/video{camera.device_id ?? 0}
+            </span>
+          </div>
+        )}
+
+        {/* Pipeline statistika */}
+        {pRunning && stats && (
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 6, marginTop: 10,
+            padding: '9px', background: '#F0FDF4',
+            border: '1px solid #D1FAE5', borderRadius: 8,
+          }}>
+            {[
+              { icon: Activity, label: 'FPS',       value: stats.fps.toFixed(1),                   color: '#10B981' },
+              { icon: Film,     label: 'Kadrlar',   value: stats.processed_frames.toLocaleString(), color: '#3B82F6' },
+              { icon: Eye,      label: 'Aniqlandi', value: stats.yolo_detections.toLocaleString(),  color: '#8B5CF6' },
+              { icon: CheckCircle, label: 'Tanildi', value: stats.identified.toLocaleString(),      color: '#059669' },
+            ].map(({ icon: Icon, label, value, color }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Icon size={11} color={color}/>
+                <span style={{ fontSize: 10, color: '#6B7280' }}>{label}:</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#0D1117', fontFamily: 'monospace' }}>
+                  {value}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Pipeline Start / Stop tugmasi */}
+      {/* Pipeline toggle button */}
       {camera.enabled && (
-        <div style={{ padding: '0 18px 16px' }}>
+        <div style={{ padding: '0 16px 14px' }}>
           <button
             onClick={onPipelineToggle}
             disabled={pipelineLoading}
             style={{
               width: '100%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              padding: '9px 0',
-              background: pipelineLoading
-                ? '#9CA3AF'
-                : pRunning
-                ? '#FEF2F2'
-                : '#1E3EB4',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              padding: '8px 0',
+              background: pipelineLoading ? '#9CA3AF' : pRunning ? '#FEF2F2' : '#1E3EB4',
               color: pRunning ? '#DC2626' : '#fff',
               border: pRunning ? '1px solid #FECACA' : 'none',
-              borderRadius: 8,
-              fontSize: 13, fontWeight: 700,
+              borderRadius: 8, fontSize: 13, fontWeight: 700,
               cursor: pipelineLoading ? 'not-allowed' : 'pointer',
-              fontFamily: 'Outfit, sans-serif',
-              transition: 'background .15s',
+              fontFamily: 'Outfit, sans-serif', transition: 'background .15s',
             }}
           >
             {pipelineLoading ? (
               <>
                 <div style={{
-                  width: 14, height: 14, borderRadius: '50%',
-                  border: '2px solid rgba(255,255,255,0.4)',
-                  borderTopColor: '#fff',
+                  width: 13, height: 13, borderRadius: '50%',
+                  border: '2px solid rgba(255,255,255,.4)', borderTopColor: '#fff',
                   animation: 'spin .7s linear infinite',
-                }} />
+                }}/>
                 Yuklanmoqda...
               </>
             ) : pRunning ? (
-              <><Square size={14} /> To'xtatish</>
+              <><Square size={13}/> To'xtatish</>
             ) : (
-              <><Play size={14} /> Pipeline ishga tushir</>
+              <><Play size={13}/> Pipeline ishga tushir</>
             )}
           </button>
         </div>
@@ -317,9 +230,7 @@ function CameraCard({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Add Camera Modal
-// ---------------------------------------------------------------------------
+// ─── Add Camera Modal ─────────────────────────────────────────────────────────
 
 function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
@@ -328,164 +239,189 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   });
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+  const [webcams, setWebcams] = useState<{device_index:number;label:string}[]>([]);
+  const [scanning, setScanning] = useState(false);
+
+  async function detectWebcams() {
+    setScanning(true);
+    try {
+      const found = await apiFetch<{device_index:number;label:string;suggested_name:string}[]>(
+        '/api/v1/cameras/detect-webcams'
+      );
+      setWebcams(found);
+      if (found.length === 0) {
+        setError('Webcam topilmadi. Docker da /dev/video0 mount bo\'lishi kerak.');
+      } else {
+        const first = found[0];
+        setForm(p => ({ ...p, device_id: first.device_index, name: p.name || first.suggested_name || 'Webcam' }));
+        setError('');
+      }
+    } catch {
+      setError('Webcam aniqlashda xato');
+    } finally {
+      setScanning(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!form.name.trim()) { setError('Kamera nomi kiritilishi shart'); return; }
+    if (form.type === 'rtsp' && !form.source.trim()) { setError('RTSP URL kiritilishi shart'); return; }
     setLoading(true); setError('');
     try {
       const body: Record<string, unknown> = {
-        name: form.name, type: form.type, fps: form.fps, enabled: true,
+        name: form.name.trim(), type: form.type, fps: form.fps, enabled: true,
       };
-      if (form.type === 'rtsp') body.source    = form.source;
+      if (form.type === 'rtsp') body.source    = form.source.trim();
       if (form.type === 'usb')  body.device_id = form.device_id;
 
       await apiFetch('/api/v1/cameras/', { method: 'POST', body: JSON.stringify(body) });
-      onSaved(); onClose();
+      onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Xato');
+      setError(err instanceof Error ? err.message : 'Server xatosi');
     } finally { setLoading(false); }
   }
 
-  const inp = {
-    width: '100%', padding: '10px 14px',
+  const inp: React.CSSProperties = {
+    width: '100%', padding: '9px 12px',
     border: '1px solid #D1D5DB', borderRadius: 8,
     fontSize: 14, color: '#0D1117', outline: 'none',
-    fontFamily: 'Outfit, sans-serif', boxSizing: 'border-box' as const,
+    fontFamily: 'Outfit, sans-serif', boxSizing: 'border-box',
+  };
+  const lbl: React.CSSProperties = {
+    display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5,
   };
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 50, padding: 16,
     }}>
       <div style={{
-        background: '#fff', borderRadius: 16,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-        width: '100%', maxWidth: 460,
+        background: '#fff', borderRadius: 14,
+        boxShadow: '0 20px 60px rgba(0,0,0,.18)',
+        width: '100%', maxWidth: 440,
       }}>
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #F3F4F6' }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0D1117', margin: 0 }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #F3F4F6' }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0D1117', margin: 0 }}>
             Yangi kamera qo'shish
           </h2>
+          <p style={{ fontSize: 12, color: '#9CA3AF', margin: '3px 0 0' }}>
+            Kamera qo'shilgandan so'ng pipeline avtomatik ishga tushadi
+          </p>
         </div>
 
-        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!!error && (
             <div style={{
               display: 'flex', gap: 8,
               background: '#FEF2F2', border: '1px solid #FECACA',
-              borderRadius: 8, padding: '10px 14px',
+              borderRadius: 8, padding: '9px 12px',
             }}>
-              <AlertCircle size={14} color="#DC2626" style={{ flexShrink: 0 }} />
-              <span style={{ fontSize: 13, color: '#DC2626' }}>{error}</span>
+              <AlertCircle size={13} color="#DC2626" style={{ flexShrink: 0, marginTop: 1 }}/>
+              <span style={{ fontSize: 12, color: '#DC2626' }}>{error}</span>
             </div>
           )}
 
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-              Kamera nomi *
-            </label>
+            <label style={lbl}>Kamera nomi *</label>
             <input type="text" value={form.name}
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-              placeholder="Shimoliy molxona kamerasi" style={inp} />
+              placeholder="Shimoliy molxona" style={inp}/>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-              Kamera turi
-            </label>
+            <label style={lbl}>Kamera turi</label>
             <select value={form.type}
               onChange={e => setForm(p => ({ ...p, type: e.target.value as any }))}
               style={inp}>
               <option value="simulated">Simulated (Test)</option>
-              <option value="usb">USB Camera</option>
-              <option value="rtsp">RTSP Stream</option>
+              <option value="usb">USB / Webcam</option>
+              <option value="rtsp">RTSP Stream (IP kamera)</option>
             </select>
           </div>
 
           {form.type === 'rtsp' && (
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-                RTSP URL
-              </label>
+              <label style={lbl}>RTSP URL *</label>
               <input type="text" value={form.source}
                 onChange={e => setForm(p => ({ ...p, source: e.target.value }))}
-                placeholder="rtsp://192.168.1.100:554/stream"
-                style={{ ...inp, fontFamily: 'monospace', fontSize: 12 }} />
+                placeholder="rtsp://admin:pass@192.168.1.100:554/stream"
+                style={{ ...inp, fontFamily: 'monospace', fontSize: 12 }}/>
+              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '3px 0 0' }}>
+                Misol: rtsp://admin:password@192.168.1.64:554/ch01
+              </p>
             </div>
           )}
 
           {form.type === 'usb' && (
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-                Device ID
-              </label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input type="number" value={form.device_id}
-                  onChange={e => setForm(p => ({ ...p, device_id: parseInt(e.target.value) || 0 }))}
-                  min="0" style={{ ...inp, flex: 1 }} />
+              <label style={lbl}>Webcam Device</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  value={form.device_id}
+                  onChange={e => setForm(p => ({ ...p, device_id: parseInt(e.target.value) }))}
+                  style={{ ...inp, flex: 1 }}
+                >
+                  {webcams.length > 0
+                    ? webcams.map(w => (
+                        <option key={w.device_index} value={w.device_index}>{w.label}</option>
+                      ))
+                    : [0,1,2,3].map(i => (
+                        <option key={i} value={i}>Webcam {i} (/dev/video{i})</option>
+                      ))
+                  }
+                </select>
                 <button
                   type="button"
-                  onClick={async () => {
-                    try {
-                      const found = await import('../utils/apiFetch').then(m =>
-                        m.apiFetch<{device_index: number; label: string; suggested_id: string; suggested_name: string}[]>(
-                          '/api/v1/cameras/detect-webcams'
-                        )
-                      );
-                      if (found.length === 0) { alert("Webcam topilmadi"); return; }
-                      const first = found[0];
-                      setForm(p => ({
-                        ...p,
-                        device_id: first.device_index,
-                        name: p.name || first.suggested_name,
-                      }));
-                      if (found.length > 1) alert(`${found.length} ta webcam topildi. Birinchisi tanlandi: ${first.label}`);
-                    } catch { alert("Webcam aniqlashda xato"); }
-                  }}
+                  onClick={detectWebcams}
+                  disabled={scanning}
                   style={{
-                    padding: '10px 12px', background: '#EEF2FF',
+                    padding: '9px 12px', background: '#EEF2FF',
                     border: '1px solid #C7D2FE', borderRadius: 8,
                     color: '#1E3EB4', fontSize: 12, fontWeight: 600,
-                    cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                    cursor: scanning ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap', flexShrink: 0,
                   }}
                 >
-                  🔍 Aniqlash
+                  {scanning ? '...' : '🔍 Aniqlash'}
                 </button>
               </div>
-              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '4px 0 0' }}>Odatda 0 · "Aniqlash" tugmasi avtomatik topadi</p>
+              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '3px 0 0' }}>
+                Docker da: <code>devices: [/dev/video0:/dev/video0]</code>
+              </p>
             </div>
           )}
 
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-              FPS
-            </label>
+            <label style={lbl}>FPS (kadr/s)</label>
             <input type="number" value={form.fps}
               onChange={e => setForm(p => ({ ...p, fps: parseInt(e.target.value) || 10 }))}
-              min="1" max="30" style={inp} />
-            <p style={{ fontSize: 11, color: '#9CA3AF', margin: '4px 0 0' }}>Tavsiya: 10–15 FPS</p>
+              min="1" max="30" style={inp}/>
+            <p style={{ fontSize: 11, color: '#9CA3AF', margin: '3px 0 0' }}>
+              Tavsiya: Simulated/USB uchun 10–15, RTSP uchun 5–10
+            </p>
           </div>
         </div>
 
-        <div style={{ padding: '14px 24px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: 10 }}>
+        <div style={{ padding: '12px 22px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: 10 }}>
           <button onClick={onClose} disabled={loading} style={{
-            flex: 1, padding: '10px 0',
+            flex: 1, padding: '9px 0',
             border: '1px solid #D1D5DB', borderRadius: 8,
-            background: '#fff', color: '#374151', fontSize: 14, fontWeight: 600,
+            background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600,
             cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
           }}>
             Bekor qilish
           </button>
           <button onClick={handleSubmit} disabled={loading} style={{
-            flex: 1, padding: '10px 0',
+            flex: 2, padding: '9px 0',
             background: loading ? '#9CA3AF' : '#1E3EB4',
             border: 'none', borderRadius: 8,
-            color: '#fff', fontSize: 14, fontWeight: 600,
-            cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'Outfit, sans-serif',
+            color: '#fff', fontSize: 13, fontWeight: 600,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontFamily: 'Outfit, sans-serif',
           }}>
-            {loading ? "Qo'shilmoqda..." : "Qo'shish"}
+            {loading ? "Qo'shilmoqda..." : "Qo'shish va ishga tushirish"}
           </button>
         </div>
       </div>
@@ -493,52 +429,43 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function CamerasPage() {
   const qClient = useQueryClient();
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddModal, setShowAddModal]   = useState(false);
   const [pipelineLoading, setPipelineLoading] = useState<Record<string, boolean>>({});
-
-  // ── Queries ───────────────────────────────────────────────────────────────
-  const { data: cameras = [], isFetching: loading, isError, error } = useQuery({
-    queryKey: ['cameras'],
-    queryFn:  () => apiFetch<CameraConfig[]>('/api/v1/cameras/'),
-  });
-
-  const { data: statuses = {} as Record<string, CameraStatus> } = useQuery({
-    queryKey: ['cameras', 'stats'],
-    queryFn:  () => apiFetch<Record<string, CameraStatus>>('/api/v1/cameras/stats/all').catch(() => ({} as Record<string, CameraStatus>)),
-    refetchInterval: 2500,   // WS yo'q — polling orqali yangilanadi
-  });
-
-  const { data: pipelines } = useQuery({
-    queryKey: ['pipeline', 'status'],
-    queryFn:  () => apiFetch<AllPipelinesStatus>('/api/v1/pipeline/status').catch(() => null),
-    refetchInterval: 2500,
-  });
 
   const invalidate = () => {
     qClient.invalidateQueries({ queryKey: ['cameras'] });
     qClient.invalidateQueries({ queryKey: ['pipeline', 'status'] });
   };
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  // Kameralar ro'yxati (DB)
+  const { data: cameras = [], isFetching, isError } = useQuery({
+    queryKey: ['cameras'],
+    queryFn:  () => apiFetch<CameraConfig[]>('/api/v1/cameras/'),
+  });
+
+  // Pipeline holati (poll 3s)
+  const { data: pipelines } = useQuery({
+    queryKey:        ['pipeline', 'status'],
+    queryFn:         () => apiFetch<AllPipelinesStatus>('/api/v1/pipeline/status').catch(() => null),
+    refetchInterval: 3000,
+  });
+
+  // O'chirish
   const deleteMutation = useMutation({
     mutationFn: async (camera: CameraConfig) => {
-      if (pipelines?.running_cameras.includes(camera.id)) {
-        await apiFetch(`/api/v1/pipeline/stop?camera_id=${camera.id}`, { method: 'POST' }).catch(() => {});
-      }
+      // Backend endi o'zi pipeline to'xtatadi (DELETE endpointda)
       return apiFetch(`/api/v1/cameras/${camera.id}`, { method: 'DELETE' });
     },
-    onSuccess: invalidate,
-    onError: (e: Error) => alert("O'chirish xatolik: " + e.message),
+    onSuccess:  invalidate,
+    onError:    (e: Error) => alert("O'chirish xatoligi: " + e.message),
   });
 
   async function handleDelete(camera: CameraConfig) {
-    if (!window.confirm(`${camera.name} kamerasini o'chirishga ishonchingiz komilmi?`)) return;
+    if (!window.confirm(`"${camera.name}" kamerasini o'chirmoqchimisiz?\nPipeline ham to'xtatiladi.`)) return;
     deleteMutation.mutate(camera);
   }
 
@@ -547,16 +474,13 @@ export default function CamerasPage() {
     setPipelineLoading(p => ({ ...p, [camera.id]: true }));
     try {
       if (isRunning) {
-        await apiFetch(`/api/v1/pipeline/stop?camera_id=${camera.id}`, { method: 'POST' });
+        await apiFetch(`/api/v1/cameras/${camera.id}/stop`, { method: 'POST' });
       } else {
-        await apiFetch('/api/v1/pipeline/start', {
-          method: 'POST',
-          body: JSON.stringify({ camera_id: camera.id, skip_frames: 3 }),
-        });
+        await apiFetch(`/api/v1/cameras/${camera.id}/start`, { method: 'POST' });
       }
       invalidate();
     } catch (err) {
-      alert(`Pipeline xatosi: ${err instanceof Error ? err.message : 'Xato'}`);
+      alert(`Pipeline xatosi: ${err instanceof Error ? err.message : 'Noma\'lum xato'}`);
     } finally {
       setPipelineLoading(p => ({ ...p, [camera.id]: false }));
     }
@@ -567,117 +491,114 @@ export default function CamerasPage() {
   return (
     <div style={{
       maxWidth: 1280, margin: '0 auto',
-      padding: '32px 24px',
+      padding: '28px 22px',
       fontFamily: 'Outfit, sans-serif',
     }}>
-
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0D1117', margin: 0 }}>Kameralar</h1>
-          <p style={{ fontSize: 14, color: '#6B7280', margin: '4px 0 0' }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0D1117', margin: 0 }}>Kameralar</h1>
+          <p style={{ fontSize: 13, color: '#6B7280', margin: '3px 0 0' }}>
             {cameras.length} ta kamera
             {totalRunning > 0 && (
               <span style={{
-                marginLeft: 10, padding: '2px 10px',
+                marginLeft: 10, padding: '2px 9px',
                 background: '#ECFDF5', border: '1px solid #A7F3D0',
-                borderRadius: 20, fontSize: 12, fontWeight: 600, color: '#059669',
+                borderRadius: 20, fontSize: 11, fontWeight: 600, color: '#059669',
               }}>
-                {totalRunning} ta pipeline aktiv
+                {totalRunning} ta aktiv
               </span>
             )}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => { qClient.invalidateQueries({ queryKey: ["cameras"] }); }} disabled={loading} style={{
-            padding: '9px 12px',
-            border: '1px solid #D1D5DB', borderRadius: 8, background: '#fff',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center',
-          }}>
-            <RefreshCw size={16} color="#6B7280"
-              style={{ animation: loading ? 'spin .7s linear infinite' : 'none' }} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => qClient.invalidateQueries({ queryKey: ['cameras'] })}
+            disabled={isFetching} style={{
+              padding: '8px 11px', border: '1px solid #D1D5DB', borderRadius: 8,
+              background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center',
+            }}>
+            <RefreshCw size={15} color="#6B7280"
+              style={{ animation: isFetching ? 'spin .7s linear infinite' : 'none' }}/>
           </button>
           <button onClick={() => setShowAddModal(true)} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '9px 18px',
-            background: '#1E3EB4', color: '#fff',
-            border: 'none', borderRadius: 8,
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            fontFamily: 'Outfit, sans-serif',
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '8px 16px', background: '#1E3EB4', color: '#fff',
+            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
           }}>
-            <Plus size={16} />
-            Kamera qo'shish
+            <Plus size={15}/> Kamera qo'shish
           </button>
         </div>
       </div>
 
-      {/* Pipeline umumiy holat */}
+      {/* Aktiv pipeline banner */}
       {totalRunning > 0 && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '14px 20px',
-          background: '#F0FDF4', border: '1px solid #A7F3D0',
-          borderRadius: 12, marginBottom: 24,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '12px 18px', background: '#F0FDF4',
+          border: '1px solid #A7F3D0', borderRadius: 10, marginBottom: 20,
         }}>
           <div style={{ position: 'relative' }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981' }} />
+            <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#10B981' }}/>
             <div style={{
               position: 'absolute', inset: 0, borderRadius: '50%',
               background: '#10B981', animation: 'ping 1s cubic-bezier(0,0,.2,1) infinite',
-            }} />
+            }}/>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#065F46' }}>
-            {totalRunning} ta kamera pipeline ishlayapti:
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#065F46' }}>
+            {totalRunning} ta pipeline ishlayapti:
           </span>
-          <span style={{ fontSize: 13, color: '#059669' }}>
+          <span style={{ fontSize: 12, color: '#059669' }}>
             {pipelines?.running_cameras.join(', ')}
           </span>
+          <a href="/live" style={{
+            marginLeft: 'auto', fontSize: 12, fontWeight: 700,
+            color: '#1E3EB4', textDecoration: 'none',
+          }}>
+            Live ko'rish →
+          </a>
         </div>
       )}
 
-      {/* Error */}
+      {/* Backend xato */}
       {isError && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10,
           background: '#FEF2F2', border: '1px solid #FECACA',
-          borderRadius: 10, padding: '12px 16px', marginBottom: 24,
+          borderRadius: 10, padding: '11px 14px', marginBottom: 20,
         }}>
-          <AlertCircle size={16} color="#DC2626" style={{ flexShrink: 0 }} />
+          <AlertCircle size={15} color="#DC2626" style={{ flexShrink: 0 }}/>
           <span style={{ fontSize: 13, color: '#DC2626' }}>
-            Backend bilan aloqa yo'q. Docker ishlayotganini tekshiring: <code>docker-compose up</code>
+            Backend bilan aloqa yo'q. <code>docker-compose up</code> ni tekshiring.
           </span>
         </div>
       )}
 
-      {/* Camera Grid */}
-      {loading && cameras.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '48px 0', color: '#9CA3AF', fontSize: 14 }}>
-          Yuklanmoqda...
-        </div>
-      ) : cameras.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '64px 0' }}>
-          <Video size={48} color="#D1D5DB" style={{ margin: '0 auto 16px' }} />
-          <p style={{ color: '#6B7280', fontSize: 16, marginBottom: 8 }}>Hali kamera qo'shilmagan</p>
+      {/* Bo'sh holat */}
+      {!isError && cameras.length === 0 && !isFetching && (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <Video size={44} color="#D1D5DB" style={{ margin: '0 auto 14px' }}/>
+          <p style={{ color: '#6B7280', fontSize: 15, marginBottom: 8 }}>
+            Hali kamera qo'shilmagan
+          </p>
           <button onClick={() => setShowAddModal(true)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            padding: '10px 20px',
-            background: '#1E3EB4', color: '#fff',
-            border: 'none', borderRadius: 8,
-            fontSize: 14, fontWeight: 600, cursor: 'pointer',
-            fontFamily: 'Outfit, sans-serif',
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            padding: '9px 18px', background: '#1E3EB4', color: '#fff',
+            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
           }}>
-            <Plus size={16} />
-            Birinchi kamerani qo'shish
+            <Plus size={14}/> Birinchi kamerani qo'shish
           </button>
         </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 20 }}>
+      )}
+
+      {/* Kameralar grid */}
+      {cameras.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 18 }}>
           {cameras.map(camera => (
             <CameraCard
               key={camera.id}
               camera={camera}
-              camStatus={statuses[camera.id]}
               pipelineStatus={pipelines?.pipelines?.[camera.id]}
               onDelete={() => handleDelete(camera)}
               onPipelineToggle={() => handlePipelineToggle(camera)}
@@ -687,22 +608,18 @@ export default function CamerasPage() {
         </div>
       )}
 
+      {/* Add Camera Modal */}
       {showAddModal && (
         <AddCameraModal
           onClose={() => setShowAddModal(false)}
-          onSaved={() => { setShowAddModal(false); qClient.invalidateQueries({ queryKey: ["cameras"] }); }}
+          onSaved={() => { setShowAddModal(false); invalidate(); }}
         />
       )}
 
       <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse-dot {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        @keyframes ping {
-          75%, 100% { transform: scale(2); opacity: 0; }
-        }
+        @keyframes spin    { to { transform: rotate(360deg); } }
+        @keyframes ping    { 75%, 100% { transform: scale(2); opacity: 0; } }
+        @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
       `}</style>
     </div>
   );
