@@ -99,7 +99,10 @@ async def get_farm_summary(
             risk_score      = pred.risk_score,
             confidence      = pred.confidence,
             trend_direction = pred.trend_direction,
-            top_risk_factor = (pred.risk_factors or [None])[0],
+            top_risk_factor = (
+                (pred.risk_factors[0].get("factor") if isinstance(pred.risk_factors[0], dict) else pred.risk_factors[0])
+                if pred.risk_factors else None
+            ),
         ))
 
     return PredictionFarmSummary(
@@ -152,7 +155,10 @@ async def get_at_risk_animals(
             risk_score      = pred.risk_score,
             confidence      = pred.confidence,
             trend_direction = pred.trend_direction,
-            top_risk_factor = (pred.risk_factors or [None])[0],
+            top_risk_factor = (
+                (pred.risk_factors[0].get("factor") if isinstance(pred.risk_factors[0], dict) else pred.risk_factors[0])
+                if pred.risk_factors else None
+            ),
         ))
 
     return result

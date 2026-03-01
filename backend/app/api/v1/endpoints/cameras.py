@@ -449,6 +449,57 @@ async def stop_all_cameras(
     return {"stopped": stopped, "message": f"{stopped} kamera to'xtatildi"}
 
 
+@router.get(
+    "/detect-webcams",
+    response_model=list[dict],
+    status_code=status.HTTP_200_OK,
+    summary="Mavjud webcam qurilmalarni aniqlash",
+    description=(
+        "Serverga ulangan USB/webcam qurilmalarni avtomatik aniqlaydi. "
+        "Indeks 0 dan 4 gacha sinab ko'riladi. "
+        "Faqat ochilishi mumkin bo'lgan qurilmalar qaytariladi. "
+        "Frontend da 'Webcam qo'shish' tugmasi uchun ishlatiladi."
+    ),
+)
+async def detect_webcams(
+    current_user: CurrentUser = ...,
+) -> list[dict]:
+    """
+    Serverga ulangan webcam qurilmalarni aniqlaydi.
+
+    OpenCV VideoCapture orqali 0–4 indekslarni sinab ko'radi.
+    Har bir mavjud qurilma uchun indeks va tavsif qaytaradi.
+
+    Returns:
+        [{"device_index": 0, "label": "Webcam 0 (/dev/video0)"}]
+
+    Note:
+        Bu operatsiya bir necha soniya olishi mumkin (har qurilma uchun timeout).
+        Docker container ichida host qurilmalariga kirish uchun
+        docker-compose.yml da `devices: [/dev/video0:/dev/video0]` bo'lishi kerak.
+    """
+    found: list[dict] = []
+
+    for index in range(5):  # 0–4 indekslarni sinash
+        try:
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                # Qurilma nomi (Linux: /dev/videoN, Windows: index raqami)
+                label = f"Webcam {index} (/dev/video{index})"
+                found.append({
+                    "device_index": index,
+                    "label": label,
+                    "suggested_id": f"CAM-WEB-{index:02d}",
+                    "suggested_name": f"Webcam {index}",
+                })
+                cap.release()
+        except Exception:
+            pass
+
+    logger.info(f"Webcam aniqlash: {len(found)} ta qurilma topildi")
+    return found
+
+
 # =============================================================================
 # ENDPOINTS — DYNAMIC /{camera_id} (ENG PASTDA turishi shart!)
 # =============================================================================

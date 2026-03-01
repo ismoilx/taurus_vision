@@ -421,10 +421,40 @@ function AddCameraModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
                 Device ID
               </label>
-              <input type="number" value={form.device_id}
-                onChange={e => setForm(p => ({ ...p, device_id: parseInt(e.target.value) || 0 }))}
-                min="0" style={inp} />
-              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '4px 0 0' }}>Odatda 0</p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="number" value={form.device_id}
+                  onChange={e => setForm(p => ({ ...p, device_id: parseInt(e.target.value) || 0 }))}
+                  min="0" style={{ ...inp, flex: 1 }} />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const found = await import('../utils/apiFetch').then(m =>
+                        m.apiFetch<{device_index: number; label: string; suggested_id: string; suggested_name: string}[]>(
+                          '/api/v1/cameras/detect-webcams'
+                        )
+                      );
+                      if (found.length === 0) { alert("Webcam topilmadi"); return; }
+                      const first = found[0];
+                      setForm(p => ({
+                        ...p,
+                        device_id: first.device_index,
+                        name: p.name || first.suggested_name,
+                      }));
+                      if (found.length > 1) alert(`${found.length} ta webcam topildi. Birinchisi tanlandi: ${first.label}`);
+                    } catch { alert("Webcam aniqlashda xato"); }
+                  }}
+                  style={{
+                    padding: '10px 12px', background: '#EEF2FF',
+                    border: '1px solid #C7D2FE', borderRadius: 8,
+                    color: '#1E3EB4', fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                  }}
+                >
+                  🔍 Aniqlash
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: '#9CA3AF', margin: '4px 0 0' }}>Odatda 0 · "Aniqlash" tugmasi avtomatik topadi</p>
             </div>
           )}
 
@@ -609,12 +639,14 @@ export default function CamerasPage() {
       {/* Error */}
       {isError && (
         <div style={{
-          display: 'flex', gap: 10,
+          display: 'flex', alignItems: 'center', gap: 10,
           background: '#FEF2F2', border: '1px solid #FECACA',
           borderRadius: 10, padding: '12px 16px', marginBottom: 24,
         }}>
-          <AlertCircle size={16} color="#DC2626" />
-          <span style={{ fontSize: 13, color: '#DC2626' }}>{error instanceof Error ? error.message : "Yuklab bo'lmadi"}</span>
+          <AlertCircle size={16} color="#DC2626" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: '#DC2626' }}>
+            Backend bilan aloqa yo'q. Docker ishlayotganini tekshiring: <code>docker-compose up</code>
+          </span>
         </div>
       )}
 
