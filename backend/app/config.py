@@ -15,6 +15,7 @@ FOYDALANISH:
     print(settings.DATABASE_URL)
 """
 
+from pathlib import Path
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,9 +34,9 @@ class Settings(BaseSettings):
     # APPLICATION
     # =========================================================================
 
-    APP_NAME: str = "Taurus Vision API"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = True
+    APP_NAME:    str  = "Taurus Vision API"
+    APP_VERSION: str  = "0.1.0"
+    DEBUG:       bool = True
 
     # =========================================================================
     # SERVER
@@ -48,7 +49,9 @@ class Settings(BaseSettings):
     # DATABASE
     # =========================================================================
 
-    DATABASE_URL: str = "postgresql+asyncpg://taurus:taurus123@localhost:5432/taurus_vision"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://taurus:taurus123@localhost:5432/taurus_vision"
+    )
 
     # =========================================================================
     # CACHE & QUEUE (Redis)
@@ -60,7 +63,7 @@ class Settings(BaseSettings):
     # CELERY
     # =========================================================================
 
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_BROKER_URL:    str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
     # =========================================================================
@@ -68,130 +71,149 @@ class Settings(BaseSettings):
     # =========================================================================
 
     CORS_ORIGINS: list[str] = [
-        "http://localhost:5173",  # Vite dev server (frontend)
-        "http://localhost:3000",  # Muqobil React dev server
-        "http://localhost:8080",  # Muqobil port
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:8080",
     ]
 
     # =========================================================================
     # FILE STORAGE
     # =========================================================================
 
-    # Yuklangan rasm va fayllar saqlanadigan papka
-    UPLOAD_DIR: str = "./data/images"
-
-    # Maksimal fayl hajmi (bytes): 10 MB
-    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024
+    UPLOAD_DIR:      str = "./data/images"
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024   # 10 MB
 
     # =========================================================================
     # ML MODELS
     # =========================================================================
 
-    # ML model fayllari papkasi (Docker ichida: /app/ml/models)
     ML_MODEL_PATH: str = "./ml/models"
 
-    # YOLO model fayl nomi (ml/models/ papkasida bo'lishi kerak)
+    # Faol YOLO model fayl nomi (ml/models/ papkasida).
+    # Deploy qilinsa bu qiymat yangilanadi.
     YOLO_MODEL: str = "yolo11n.pt"
 
     # =========================================================================
     # AI INFERENCE
     # =========================================================================
 
-    # Minimum detection confidence (0.0 — 1.0)
-    AI_CONFIDENCE_THRESHOLD: float = 0.5
-
-    # COCO dataset klasslar: 19 = cow, 20 = sheep
-    AI_TARGET_CLASSES: list[int] = [19, 20]
-
-    # Har N-nchi kadrni qayta ishlash (performance optimizatsiya)
-    FRAME_SKIP: int = 5
+    AI_CONFIDENCE_THRESHOLD: float      = 0.5
+    AI_TARGET_CLASSES:       list[int]  = [19, 20]  # COCO: cow, sheep
+    FRAME_SKIP:              int        = 5
 
     # =========================================================================
-    # ANIMAL IDENTIFICATION (MobileNetV2 muzzle recognition)
+    # ANIMAL IDENTIFICATION (MobileNetV2)
     # =========================================================================
 
-    # Cosine similarity threshold: bu qiymatdan yuqori = tanildi
-    # 0.80 = MobileNetV2 muzzle recognition uchun optimal qiymat (README ga mos)
-    # ESLATMA: 0.10 xato edi — deyarli har qanday jonivor false match berardi
-    IDENTIFICATION_THRESHOLD: float = 0.80
-
-    # Har bir jonivor uchun maksimal saqlangan embedding soni
-    MAX_EMBEDDINGS_PER_ANIMAL: int = 10
-
-    # MobileNetV2 chiqish vektori o'lchami
-    EMBEDDING_DIM: int = 1280
+    IDENTIFICATION_THRESHOLD:  float = 0.80
+    MAX_EMBEDDINGS_PER_ANIMAL: int   = 10
+    EMBEDDING_DIM:             int   = 1280
 
     # =========================================================================
     # CAMERA
     # =========================================================================
 
-    # Kamera manzili: "rtsp://ip:554/stream" yoki "/dev/video0" yoki None
-    # None bo'lsa — SimulatedCamera ishlatiladi (development uchun)
     CAMERA_URL: Optional[str] = None
+
+    # =========================================================================
+    # TRAINING PIPELINE (Sprint 15-16) ← YANGI BLOK
+    # =========================================================================
+
+    # Yig'ilgan training kadrlar papkasi
+    # Detection pipeline ishlayotganda shu yerga yoziladi
+    TRAINING_FRAMES_DIR: str = "./data/training/frames"
+
+    # Yaratilgan YOLO dataset lari papkasi (har bir run uchun alohida)
+    TRAINING_DATASETS_DIR: str = "./data/training/datasets"
+
+    # O'qitilgan modellar saqlanadigan papka (har bir run uchun)
+    TRAINING_MODELS_DIR: str = "./data/training/models"
+
+    # Fine-tuning uchun base model to'liq yo'li
+    # docker-compose volume: /app/ml/models/yolo11n.pt
+    TRAINING_BASE_MODEL_PATH: str = "./ml/models/yolo11n.pt"
+
+    # Deploy qilingan custom model yo'li
+    # Shu yo'lga nusxalangan model keyingi restart da YOLO_MODEL sifatida yuklanadi
+    TRAINING_DEPLOY_MODEL_PATH: str = "./ml/models/yolo_custom.pt"
+
+    # FrameCollector sozlamalari
+    TRAINING_COLLECT_EVERY_N: int = 50     # Har 50 ta detectiondan bir kadr saqlash
+    TRAINING_MIN_DETECTIONS:  int = 2      # Bir framda min detection soni
+    TRAINING_MAX_PER_CAMERA:  int = 500    # Bir kamera uchun max kadr
+    TRAINING_MAX_TOTAL:       int = 5000   # Jami max kadr soni
+    TRAINING_JPEG_QUALITY:    int = 90     # Saqlash sifati (0-100)
+
+    # Training faol yoki o'chirilganmi
+    # False qilinganda FrameCollector kadrlarni yig'maydi (performance talab qilsa)
+    TRAINING_COLLECTION_ENABLED: bool = True
 
     # =========================================================================
     # LOGGING
     # =========================================================================
 
-    # Log darajasi: DEBUG | INFO | WARNING | ERROR | CRITICAL
-    LOG_LEVEL: str = "INFO"
-
-    # Log fayllari papkasi
-    LOG_DIR: str = "./data/logs"
-
-    # Log formati: "json" (production) | "console" (development)
-    LOG_FORMAT: str = "json"
-
-    # Avtomatik log rotation (kunlik)
-    LOG_ROTATION: bool = True
-
-    # Log fayllarini necha kun saqlash
-    LOG_RETENTION_DAYS: int = 30
+    LOG_LEVEL:          str  = "INFO"
+    LOG_DIR:            str  = "./data/logs"
+    LOG_FORMAT:         str  = "json"
+    LOG_ROTATION:       bool = True
+    LOG_RETENTION_DAYS: int  = 30
 
     # =========================================================================
-    # SECURITY (JWT — Authentication uchun)
+    # SECURITY (JWT)
     # =========================================================================
 
-    # JWT imzolash uchun maxfiy kalit
-    # DIQQAT: Production da shu qiymatni murakkab random string bilan almashtiring!
-    # Generatsiya: python -c "import secrets; print(secrets.token_hex(32))"
-    SECRET_KEY: str = "changeme-use-secrets-token-hex-32-in-production"
-
-    # JWT algoritmi
-    JWT_ALGORITHM: str = "HS256"
-
-    # Access token amal qilish muddati (daqiqa)
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-
-    # Refresh token amal qilish muddati (kun)
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    SECRET_KEY:                    str = "changeme-use-secrets-token-hex-32-in-production"
+    JWT_ALGORITHM:                 str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES:   int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS:     int = 7
 
     # =========================================================================
-    # PYDANTIC SETTINGS CONFIG
+    # INITIAL ADMIN (Seeder)
+    # =========================================================================
+
+    INITIAL_ADMIN_EMAIL:    str = "admin@taurus.uz"
+    INITIAL_ADMIN_USERNAME: str = "admin"
+    INITIAL_ADMIN_PASSWORD: str = "Admin1234"
+    INITIAL_ADMIN_FULLNAME: str = "System Administrator"
+
+    # =========================================================================
+    # PYDANTIC SETTINGS
     # =========================================================================
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore",
+        env_file          = ".env",
+        env_file_encoding = "utf-8",
+        case_sensitive    = True,
+        extra             = "ignore",
     )
+
+    # =========================================================================
+    # COMPUTED PROPERTIES
+    # =========================================================================
+
+    @property
+    def training_frames_path(self) -> Path:
+        """TRAINING_FRAMES_DIR ni Path ob'ektida qaytarish."""
+        return Path(self.TRAINING_FRAMES_DIR)
+
+    @property
+    def training_models_path(self) -> Path:
+        """TRAINING_MODELS_DIR ni Path ob'ektida qaytarish."""
+        return Path(self.TRAINING_MODELS_DIR)
+
+    @property
+    def yolo_model_path(self) -> Path:
+        """Faol YOLO model to'liq yo'li."""
+        return Path(self.ML_MODEL_PATH) / self.YOLO_MODEL
 
 
 # =============================================================================
 # Global settings instance
-# Butun application bo'ylab shu obyekt import qilinadi:
-#     from app.config import settings
 # =============================================================================
 
 settings = Settings()
 
 
 def get_database_url() -> str:
-    """
-    SQLAlchemy uchun database URL ni qaytaradi.
-
-    Returns:
-        str: Async PostgreSQL connection string
-    """
+    """SQLAlchemy uchun database URL ni qaytaradi."""
     return settings.DATABASE_URL

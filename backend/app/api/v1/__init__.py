@@ -2,6 +2,9 @@
 Taurus Vision — API v1 Router
 
 Barcha v1 endpoint router larini birlashtiradi.
+
+SPRINT 15-16 QO'SHIMCHA:
+    training router qo'shildi — Custom YOLO training pipeline boshqaruvi.
 """
 
 from fastapi import APIRouter
@@ -24,6 +27,7 @@ from app.api.v1.endpoints import (
     notifications,
     behavior,
     predictions,
+    training,          # Sprint 15-16
 )
 
 router = APIRouter(prefix="/v1")
@@ -62,3 +66,6 @@ router.include_router(behavior.router)
 
 # --- Health Predictions (Sprint 13-14) ---
 router.include_router(predictions.router)
+
+# --- Custom YOLO Training (Sprint 15-16) ---
+router.include_router(training.router)

@@ -1,5 +1,6 @@
 # ============================================================================
 # Taurus Vision - Full Stack Orchestration
+# Sprint 15-16: celery_training servisi va training_data volume qo'shildi
 # ============================================================================
 
 services:
@@ -55,6 +56,8 @@ services:
       DEBUG: "true"
       DATABASE_URL: "postgresql+asyncpg://taurus:taurus123@postgres:5432/taurus_vision"
       REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/1"
       HOST: "0.0.0.0"
       PORT: "8000"
       CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "https://zxzx.uz", "https://api.zxzx.uz", "https://taurus.zxzx.uz"]'
@@ -63,6 +66,19 @@ services:
       INITIAL_ADMIN_USERNAME: "admin"
       INITIAL_ADMIN_PASSWORD: "Admin1234"
       INITIAL_ADMIN_FULLNAME: "System Administrator"
+      ML_MODEL_PATH: "/app/ml/models"
+      YOLO_MODEL: "yolo11n.pt"
+      TRAINING_FRAMES_DIR: "/app/data/training/frames"
+      TRAINING_DATASETS_DIR: "/app/data/training/datasets"
+      TRAINING_MODELS_DIR: "/app/data/training/models"
+      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo11n.pt"
+      TRAINING_DEPLOY_MODEL_PATH: "/app/ml/models/yolo_custom.pt"
+      TRAINING_COLLECT_EVERY_N: "50"
+      TRAINING_MIN_DETECTIONS: "2"
+      TRAINING_MAX_PER_CAMERA: "500"
+      TRAINING_MAX_TOTAL: "5000"
+      TRAINING_JPEG_QUALITY: "90"
+      TRAINING_COLLECTION_ENABLED: "true"
     ports:
       - "8000:8000"
     volumes:
@@ -71,8 +87,8 @@ services:
       - ./backend/ml:/app/ml
       - ./backend/tests:/app/tests
       - backend_data:/app/data
-      # Sprint 6: Test video fayllari uchun mount
       - ./data/videos:/app/data/videos
+      - training_data:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,12 +118,16 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/0"
       CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+      TRAINING_FRAMES_DIR: "/app/data/training/frames"
+      TRAINING_DATASETS_DIR: "/app/data/training/datasets"
+      TRAINING_MODELS_DIR: "/app/data/training/models"
     volumes:
       - ./backend/app:/app/app
       - ./backend/ml:/app/ml
       - ./workers:/app/workers
       - backend_data:/app/data
       - ./data/videos:/app/data/videos
+      - training_data:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +137,7 @@ services:
         condition: service_healthy
     networks:
       - taurus-network
-    command: /opt/venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=2 -Q default,adi,alerts,maintenance
+    command: /opt/venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=2 -Q default,adi,detection,notification,prediction,maintenance
     healthcheck:
       test: ["CMD-SHELL", "/opt/venv/bin/celery -A workers.celery_app inspect ping --timeout 5 || exit 1"]
       interval: 30s
@@ -126,6 +146,52 @@ services:
       start_period: 30s
     mem_limit: 1g
     memswap_limit: 1g
+
+  # Sprint 15-16: YOLO fine-tuning uchun alohida worker (concurrency=1)
+  celery_training:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taurus-celery-training
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://taurus:taurus123@postgres:5432/taurus_vision"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+      ML_MODEL_PATH: "/app/ml/models"
+      YOLO_MODEL: "yolo11n.pt"
+      TRAINING_FRAMES_DIR: "/app/data/training/frames"
+      TRAINING_DATASETS_DIR: "/app/data/training/datasets"
+      TRAINING_MODELS_DIR: "/app/data/training/models"
+      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo11n.pt"
+      TRAINING_DEPLOY_MODEL_PATH: "/app/ml/models/yolo_custom.pt"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/ml:/app/ml
+      - ./workers:/app/workers
+      - backend_data:/app/data
+      - training_data:/app/data/training
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - taurus-network
+    command: /opt/venv/bin/celery -A workers.celery_app worker --loglevel=info --concurrency=1 -Q training -n training@%h
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/venv/bin/celery -A workers.celery_app inspect ping --timeout 10 || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    mem_limit: 3g
+    memswap_limit: 3g
 
   celery_beat:
     build:
@@ -169,21 +235,11 @@ services:
     container_name: taurus-frontend
     restart: unless-stopped
     environment:
-      # VITE_API_URL va VITE_WS_URL BO'SH — Vite proksi ishlaydi.
-      # Brauzer /api/... ga nisbiy so'rov yuboradi → Vite → backend.
       VITE_API_URL: ""
       VITE_WS_URL: ""
       VITE_APP_NAME: "Taurus Vision"
       VITE_APP_VERSION: "0.1.0"
-
-      # Proksi maqsad — Docker tarmog'ida backend xizmati
       BACKEND_URL: "http://backend:8000"
-
-      # HMR: Agar bu server HTTPS proksi orqali ishlasa (masalan, Nginx 443 port)
-      # bu qatorni faollashtirib qo'ying:
-      # VITE_HMR_CLIENT_PORT: "443"
-      #
-      # Lokal localhost:5173 da ishlatganda bu kerak emas — o'chirib qo'ying.
     ports:
       - "5173:5173"
     volumes:
@@ -212,3 +268,5 @@ volumes:
     name: taurus_backend_data
   frontend_node_modules:
     name: taurus_frontend_node_modules
+  training_data:
+    name: taurus_training_data

@@ -1,18 +1,37 @@
 """
-Celery Application Configuration — Sprint 9-10
+Taurus Vision — Celery Application
 
-Beat schedule:
-  00:30 UTC        — Kunlik ADI hisoblash (barcha aktiv jonivorlar)
-  Har soat         — Ko'rinmayotgan jonivorlarni tekshirish
-  Dushanba 02:00   — O'sish to'xtagan jonivorlar
-  Yakshanba 03:00  — Eski alertlarni tozalash
+Barcha background task lari uchun markaziy Celery konfiguratsiyasi.
 
-  Sprint 9-10 (yangi):
-  Har 5 daqiqa     — Kamera sog'lig'ini tekshirish (health_check_cameras)
-  Har 1 daqiqa     — Kamera statistikasini cache qilish (aggregate_camera_stats)
-  Har 6 soat       — Anomaliya aniqlash (detect_anomalies)
-  Har kuni 23:00   — Kunlik ferma xulosasi (generate_daily_summary)
-  Hafta da bir     — Eski detection larni tozalash (cleanup_stale_detections)
+BEAT SCHEDULE (UTC vaqtida):
+  00:30  — Kunlik ADI hisoblash (barcha aktiv jonivorlar)
+  01:00  — Kunlik sog'liq bashorati (ADI dan keyin)
+  02:00  — O'sish to'xtagan jonivorlar (Dushanba)
+  03:00  — Eski alertlarni tozalash (Yakshanba)
+  03:00  — Eski bashoratlarni tozalash (Yakshanba)
+  05:00  — ML modellarini qayta o'rgatish
+  07:00  — Kunlik digest email
+  23:00  — Kunlik ferma xulosasi
+  Har soat       — Ko'rinmayotgan jonivorlarni tekshirish
+  Har 5 daqiqa   — Kamera sog'lig'ini tekshirish
+  Har 6 soat     — Anomaliya aniqlash
+  Har daqiqa     — Kamera statistikasini Redis ga cache qilish
+  Hafta da bir   — Eski detection larni tozalash (Yakshanba)
+
+QUEUE ARXITEKTURASI:
+  default      — Umumiy vazifalar (behavior, stats, anomaly)
+  adi          — ADI hisoblash (og'ir, DB intensive)
+  detection    — Kamera va pipeline tasklari
+  notification — Email xabarnomalar
+  prediction   — ML bashorat va o'rgatish
+  training     — YOLO fine-tuning (CPU intensive, concurrency=1)
+  maintenance  — Tozalash va xizmat vazifalari
+
+TRAINING WORKER BUYRUG'I (alohida worker, concurrency=1):
+  celery -A workers.celery_app worker -Q training --concurrency=1 -n training@%h
+
+ASOSIY WORKER BUYRUG'I:
+  celery -A workers.celery_app worker -Q default,adi,detection,notification,prediction,maintenance
 """
 
 from celery import Celery
@@ -21,9 +40,43 @@ from celery.schedules import crontab
 celery_app = Celery("taurus_vision")
 celery_app.config_from_object("workers.celery_config")
 
-# ── Beat Schedule ─────────────────────────────────────────────────────────────
+
+# =============================================================================
+# TASK ROUTING
+# =============================================================================
+
+celery_app.conf.task_routes = {
+    # ADI hisoblash — DB intensive, alohida queue
+    "adi.*":          {"queue": "adi"},
+
+    # Kamera va detection pipeline
+    "detection.*":    {"queue": "detection"},
+
+    # Email va xabarnomalar
+    "notification.*": {"queue": "notification"},
+
+    # ML bashorat va o'rgatish — CPU intensive
+    "predictions.*":  {"queue": "prediction"},
+
+    # Xulosa va anomaliya tahlili
+    "analysis.*":     {"queue": "default"},
+
+    # Sprint 15-16: YOLO fine-tuning — alohida worker, concurrency=1
+    "training.*":     {"queue": "training"},
+
+    # Tozalash vazifalari
+    "*.cleanup*":     {"queue": "maintenance"},
+    "*.cleanup_*":    {"queue": "maintenance"},
+}
+
+
+# =============================================================================
+# BEAT SCHEDULE
+# =============================================================================
 
 celery_app.conf.beat_schedule = {
+
+    # ── ADI (Sprint 1-5) ──────────────────────────────────────────────────
 
     "daily-adi-calculation": {
         "task":     "adi.calculate_daily",
@@ -31,63 +84,52 @@ celery_app.conf.beat_schedule = {
         "kwargs":   {"target_date": None, "force_recalculate": False},
         "options":  {"queue": "adi"},
     },
-
     "check-missing-animals": {
         "task":     "adi.check_missing_animals",
-        "schedule": crontab(minute=0),        # Har soat
+        "schedule": crontab(minute=0),
         "options":  {"queue": "adi"},
     },
-
     "check-growth-stagnation": {
         "task":     "adi.check_growth_stagnation",
-        "schedule": crontab(hour=2, minute=0, day_of_week=1),  # Dushanba
+        "schedule": crontab(hour=2, minute=0, day_of_week=1),
         "options":  {"queue": "adi"},
     },
-
     "cleanup-old-alerts": {
         "task":     "adi.cleanup_old_alerts",
-        "schedule": crontab(hour=3, minute=0, day_of_week=0),  # Yakshanba
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),
         "kwargs":   {"keep_days": 90},
         "options":  {"queue": "maintenance"},
     },
 
+    # ── Notification (Sprint 11) ──────────────────────────────────────────
+
     "daily-digest-email": {
         "task":     "notification.send_daily_digest",
-        "schedule": crontab(hour=7, minute=0),   # Har kuni 07:00 UTC
+        "schedule": crontab(hour=7, minute=0),
         "options":  {"queue": "notification"},
     },
-}
 
-celery_app.conf.task_routes = {
-    "adi.*":          {"queue": "adi"},
-    "detection.*":    {"queue": "detection"},
-    "notification.*": {"queue": "notification"},
-    "*.cleanup*":     {"queue": "maintenance"},
-}
+    # ── Detection / Camera (Sprint 9-10) ─────────────────────────────────
 
-# ── Task Registration ─────────────────────────────────────────────────────────
-# autodiscover_tasks() paketlar uchun mo'ljallangan.
-# Biz modul yo'llarini to'g'ridan-to'g'ri import qilamiz.
-
-from workers.tasks import (  # noqa: E402, F401
-    adi_tasks,
-    analysis_tasks,
-    detection_tasks,
-    notification_tasks,
-    prediction_tasks,
-)
-# ── Sprint 9-10 tasklar qo'shildi ─────────────────────────────────────────────
-_sprint910_tasks = {
     "camera-health-check": {
         "task":     "detection.health_check_cameras",
         "schedule": crontab(minute="*/5"),
-        "options":  {"queue": "default"},
+        "options":  {"queue": "detection"},
     },
     "camera-stats-cache": {
         "task":     "detection.aggregate_camera_stats",
         "schedule": crontab(minute="*"),
-        "options":  {"queue": "default"},
+        "options":  {"queue": "detection"},
     },
+    "cleanup-stale-detections": {
+        "task":     "detection.cleanup_stale_detections",
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
+        "kwargs":   {"days_to_keep": 90},
+        "options":  {"queue": "maintenance"},
+    },
+
+    # ── Analysis / Behavior (Sprint 9-12) ────────────────────────────────
+
     "anomaly-detection": {
         "task":     "analysis.detect_anomalies",
         "schedule": crontab(minute=0, hour="*/6"),
@@ -98,31 +140,47 @@ _sprint910_tasks = {
         "schedule": crontab(hour=23, minute=0),
         "options":  {"queue": "default"},
     },
-    "cleanup-stale-detections": {
-        "task":     "detection.cleanup_stale_detections",
-        "schedule": crontab(hour=4, minute=0, day_of_week=0),
-        "kwargs":   {"days_to_keep": 90},
-        "options":  {"queue": "maintenance"},
-    },
-}
-celery_app.conf.beat_schedule.update(_sprint910_tasks)
 
-# ── Sprint 13-14: Health Prediction tasks ─────────────────────────────────────
-_prediction_tasks = {
+    # ── Health Predictions (Sprint 13-14) ─────────────────────────────────
+
     "daily-predictions": {
         "task":     "predictions.run_daily",
-        "schedule": crontab(hour=1, minute=0),   # 01:00 UTC — ADI dan keyin
-        "options":  {"queue": "default"},
+        "schedule": crontab(hour=1, minute=0),
+        "options":  {"queue": "prediction"},
     },
     "train-prediction-models": {
         "task":     "predictions.train_models",
-        "schedule": crontab(hour=5, minute=0),   # 05:00 UTC — kechasi
-        "options":  {"queue": "default"},
+        "schedule": crontab(hour=5, minute=0),
+        "options":  {"queue": "prediction"},
     },
     "cleanup-old-predictions": {
         "task":     "predictions.cleanup_old",
-        "schedule": crontab(hour=3, minute=0, day_of_week=0),  # Yakshanba 03:00
+        "schedule": crontab(hour=3, minute=30, day_of_week=0),
+        "options":  {"queue": "maintenance"},
+    },
+
+    # ── Training (Sprint 15-16) ───────────────────────────────────────────
+    # Training task beat schedule da yo'q — faqat API orqali qo'lda ishga tushiriladi.
+    # Bu yerda faqat eski training run larni tozalash mavjud.
+
+    "cleanup-old-training-runs": {
+        "task":     "training.cleanup_old_runs",
+        "schedule": crontab(hour=4, minute=30, day_of_week=0),   # Yakshanba 04:30
+        "kwargs":   {"keep_days": 30},
         "options":  {"queue": "maintenance"},
     },
 }
-celery_app.conf.beat_schedule.update(_prediction_tasks)
+
+
+# =============================================================================
+# TASK REGISTRATION
+# =============================================================================
+
+from workers.tasks import (  # noqa: E402, F401
+    adi_tasks,
+    analysis_tasks,
+    detection_tasks,
+    notification_tasks,
+    prediction_tasks,
+    training_tasks,        # Sprint 15-16
+)

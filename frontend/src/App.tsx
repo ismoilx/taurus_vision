@@ -9,7 +9,7 @@
  *   1. Dashboard
  *   2. Jonivorlar · Xatti-harakat · ADI Monitor · Bashorat
  *   3. Analitika · Live · Hisobotlar · Veterinariya
- *   4. Bildirishnomalar · Kameralar · Foydalanuvchilar
+ *   4. Bildirishnomalar · Kameralar · Foydalanuvchilar · Training (Sprint 15-16)
  */
 
 import {
@@ -19,7 +19,7 @@ import {
 import {
   LayoutDashboard, Activity, TrendingUp, Brain,
   BarChart2, Video, FileText, Stethoscope,
-  Bell, Camera, Users,
+  Bell, Camera, Users, Cpu,
   LogOut, ChevronDown, MoreHorizontal, X,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect } from 'react';
@@ -99,6 +99,7 @@ const AnalyticsPage     = lazy(() => import('./pages/AnalyticsPage'));
 const BehaviorPage      = lazy(() => import('./pages/BehaviorPage'));
 const ADIMonitoringPage = lazy(() => import('./pages/ADIMonitoringPage'));
 const PredictionsPage   = lazy(() => import('./pages/PredictionsPage'));
+const TrainingPage      = lazy(() => import('./pages/TrainingPage'));
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 
@@ -176,6 +177,7 @@ const GROUP4: NavItem[] = [
   },
   { to: '/cameras',   icon: Camera,          label: 'Kameralar'     },
   { to: '/users',     icon: Users,           label: 'Foydalanuvchilar' },
+  { to: '/training',  icon: Cpu,             label: 'Training'      },
 ];
 
 const ALL_GROUPS = [GROUP1, GROUP2, GROUP3, GROUP4];
@@ -794,6 +796,7 @@ export default function App() {
                     <Route path="/notifications" element={<NotificationsPage />} />
                     <Route path="/cameras"      element={<CamerasPage />} />
                     <Route path="/users"        element={<UsersPage />} />
+                    <Route path="/training"     element={<TrainingPage />} />
                     <Route path="*"             element={<Navigate to="/" replace />} />
                   </Routes>
                 </Layout>

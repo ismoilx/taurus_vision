@@ -3,6 +3,10 @@ Taurus Vision — Main FastAPI Application
 
 Backend API server uchun kirish nuqtasi.
 Middleware, router va lifecycle event larini sozlaydi.
+
+SPRINT 15-16 QO'SHIMCHA:
+    startup_event() da FrameCollector inicializatsiya qilinadi.
+    Collection TRAINING_COLLECTION_ENABLED=True bo'lsa avtomatik yoqiladi.
 """
 
 from fastapi import FastAPI, Depends, Response
@@ -53,15 +57,15 @@ logger = get_logger(__name__)
 # =============================================================================
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description=(
+    title       = settings.APP_NAME,
+    version     = settings.APP_VERSION,
+    description = (
         "AI-powered livestock farm monitoring system. "
         "Real-time animal detection, identification, ADI scoring and alerts."
     ),
-    debug=settings.DEBUG,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    debug    = settings.DEBUG,
+    docs_url = "/docs",
+    redoc_url = "/redoc",
 )
 
 
@@ -71,10 +75,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins      = settings.CORS_ORIGINS,
+    allow_credentials  = True,
+    allow_methods      = ["*"],
+    allow_headers      = ["*"],
 )
 
 app.add_middleware(SecurityHeadersMiddleware)
@@ -168,16 +172,16 @@ async def metrics_endpoint(db: AsyncSession = Depends(get_db)):
         measurements_count = await db.scalar(select(func.count(WeightMeasurement.id)))
 
         metrics_collector.update_business_metrics(
-            animals=animals_count      or 0,
-            detections=detections_count   or 0,
-            measurements=measurements_count or 0,
+            animals      = animals_count      or 0,
+            detections   = detections_count   or 0,
+            measurements = measurements_count or 0,
         )
     except Exception as exc:
         logger.warning(f"Could not update business metrics: {exc}")
 
     return Response(
-        content=metrics_collector.get_prometheus_metrics(),
-        media_type="text/plain; version=0.0.4",
+        content    = metrics_collector.get_prometheus_metrics(),
+        media_type = "text/plain; version=0.0.4",
     )
 
 
@@ -216,17 +220,17 @@ async def startup_event():
     else:
         logger.error("✗ Database connection failed!")
 
-    # 3.5. Database Seeder (birinchi admin yaratish)
+    # 3.5. Database Seeder
     from app.core.seeder import run_seeder
     await run_seeder()
 
-    # 3.6. Redis Cache (ixtiyoriy — yo'q bo'lsa keshsiz ishlaydi)
+    # 3.6. Redis Cache
     from app.core.cache import get_redis
     redis_client = await get_redis()
     if redis_client is not None:
         logger.info("✓ Redis cache connected")
     else:
-        logger.warning("⚠️ Redis unavailable — caching disabled (performance reduced)")
+        logger.warning("⚠️ Redis unavailable — caching disabled")
 
     # 4. WebSocket Manager
     from app.api.v1.websocket import initialize_ws_manager
@@ -251,6 +255,31 @@ async def startup_event():
         logger.error(f"✗ Feature extractor loading failed: {exc}")
         logger.warning("⚠️ Identification endpoints will not work")
 
+    # 6. Sprint 15-16: Frame Collector — training dataset uchun kadrlarni yig'ish
+    if settings.TRAINING_COLLECTION_ENABLED:
+        try:
+            from app.services.ai.frame_collector import initialize_frame_collector
+            import os
+            os.makedirs(settings.TRAINING_FRAMES_DIR, exist_ok=True)
+            initialize_frame_collector(
+                save_dir        = settings.TRAINING_FRAMES_DIR,
+                collect_every_n = settings.TRAINING_COLLECT_EVERY_N,
+                min_detections  = settings.TRAINING_MIN_DETECTIONS,
+                max_per_camera  = settings.TRAINING_MAX_PER_CAMERA,
+                max_total       = settings.TRAINING_MAX_TOTAL,
+                jpeg_quality    = settings.TRAINING_JPEG_QUALITY,
+            )
+            logger.info(
+                f"✓ Frame collector initialized | "
+                f"dir={settings.TRAINING_FRAMES_DIR} | "
+                f"every_n={settings.TRAINING_COLLECT_EVERY_N}"
+            )
+        except Exception as exc:
+            logger.error(f"✗ Frame collector initialization failed: {exc}")
+            logger.warning("⚠️ Training data collection disabled")
+    else:
+        logger.info("ℹ️ Training frame collection disabled (TRAINING_COLLECTION_ENABLED=False)")
+
     logger.info("=" * 70)
     logger.info("✅ Application startup complete")
     logger.info(f"📡 API: http://{settings.HOST}:{settings.PORT}")
@@ -271,11 +300,11 @@ async def shutdown_event():
     from app.core.cache import close_redis
 
     for name, coro in [
-        ("YOLO model",          shutdown_yolo_service()),
-        ("Feature extractor",   shutdown_feature_extractor()),
-        ("WebSocket manager",   shutdown_ws_manager()),
-        ("Redis cache",         close_redis()),
-        ("Database",            close_db()),
+        ("YOLO model",        shutdown_yolo_service()),
+        ("Feature extractor", shutdown_feature_extractor()),
+        ("WebSocket manager", shutdown_ws_manager()),
+        ("Redis cache",       close_redis()),
+        ("Database",          close_db()),
     ]:
         try:
             await coro
@@ -288,7 +317,7 @@ async def shutdown_event():
 
 
 # =============================================================================
-# GLOBAL EXCEPTION HANDLER (kutilmagan xatolar uchun)
+# GLOBAL EXCEPTION HANDLER
 # =============================================================================
 
 @app.exception_handler(Exception)
@@ -296,24 +325,9 @@ async def global_exception_handler(request, exc):
     """Boshqa handler lar tutib qolmagan barcha xatolar uchun."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
-        status_code=500,
-        content={
+        status_code = 500,
+        content     = {
             "error":   "Internal Server Error",
             "message": str(exc) if settings.DEBUG else "Kutilmagan xato yuz berdi.",
         },
-    )
-
-
-# =============================================================================
-# ENTRY POINT
-# =============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower(),
     )

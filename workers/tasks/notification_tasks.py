@@ -3,28 +3,21 @@ Taurus Vision — Notification Celery Tasks (Sprint 11)
 
 Alert yaratilganda email yuborish uchun Celery tasklari.
 
-TASK NOMI:
+TASKLAR:
     notification.send_alert_email  — Alert emailini yuborish
     notification.send_test_email   — SMTP test emaili
     notification.send_daily_digest — Kunlik xulosa email
 
 QUEUE:
-    notification — barcha notification tasklari
+    notification — barcha notification tasklari (worker -Q ... da bo'lishi shart)
 
 XATO HANDLING:
     max_retries=3: Muvaffaqiyatsiz bo'lsa 3 marta qayta urinadi
     retry backoff: 60s, 120s, 240s (eksponensial)
-    autoretry_for: SMTPException, ConnectionError
 
 FOYDALANISH:
     # Asinxron (preferred)
     send_alert_email.delay(alert_id=42, animal_tag="JNV-001")
-
-    # Celery chain bilan
-    chain(
-        save_alert.s(alert_data),
-        send_alert_email.s(),
-    ).apply_async()
 """
 
 import logging
@@ -36,16 +29,16 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# MAIN TASK: Alert Email
+# TASK 1: ALERT EMAIL
 # =============================================================================
 
 @celery_app.task(
     name="notification.send_alert_email",
     queue="notification",
-    max_retries=3,
-    default_retry_delay=60,   # 1 daqiqa
-    acks_late=True,
     bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    acks_late=True,
 )
 def send_alert_email(
     self,
@@ -57,7 +50,7 @@ def send_alert_email(
     Alert uchun email xabarnomasi yuboradi.
 
     Celery worker tomonidan ishga tushiriladi.
-    SMTP xatosida avtomatik qayta urinadi.
+    SMTP xatosida avtomatik qayta urinadi (60s, 120s, 240s).
 
     Args:
         alert_id:   Alert ORM ID (DB dan yuklanadi)
@@ -66,16 +59,16 @@ def send_alert_email(
 
     Returns:
         {
-            "sent": bool,
+            "sent":       bool,
             "recipients": [...],
-            "mode": "smtp" | "log",
-            "alert_id": int,
+            "mode":       "smtp" | "log",
+            "alert_id":   int,
         }
     """
     import asyncio
 
     logger.info(
-        f"[notification] Alert email task boshlandi",
+        "[notification] Alert email task boshlandi",
         extra={"extra_data": {
             "alert_id":   alert_id,
             "animal_tag": animal_tag,
@@ -84,14 +77,16 @@ def send_alert_email(
     )
 
     try:
-        result = asyncio.run(_send_alert_email_async(
-            alert_id   = alert_id,
-            animal_tag = animal_tag,
-            recipients = recipients,
-        ))
-
+        result = asyncio.run(
+            _send_alert_email_async(
+                alert_id   = alert_id,
+                animal_tag = animal_tag,
+                recipients = recipients,
+            )
+        )
         logger.info(
-            f"[notification] Email task yakunlandi: alert #{alert_id} | sent={result.get('sent')}",
+            f"[notification] Email task yakunlandi: "
+            f"alert #{alert_id} | sent={result.get('sent')}"
         )
         return {**result, "alert_id": alert_id}
 
@@ -100,9 +95,11 @@ def send_alert_email(
             f"[notification] Email task xatosi: alert #{alert_id}: {exc}",
             exc_info=True,
         )
-        # SMTP yoki tarmoq xatosida qayta urinish
         try:
-            raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(
+                exc=exc,
+                countdown=60 * (2 ** self.request.retries),  # Exponential backoff
+            )
         except self.MaxRetriesExceededError:
             logger.error(
                 f"[notification] Max retries exceeded: alert #{alert_id}"
@@ -137,18 +134,13 @@ async def _send_alert_email_async(
     from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
-        # Alert DB dan yuklash
         result = await db.execute(select(Alert).where(Alert.id == alert_id))
         alert  = result.scalar_one_or_none()
 
         if alert is None:
             logger.warning(f"Alert #{alert_id} topilmadi — email yuborilmadi")
-            return {
-                "sent":   False,
-                "reason": f"Alert #{alert_id} topilmadi",
-            }
+            return {"sent": False, "reason": f"Alert #{alert_id} topilmadi"}
 
-        # Email yuborish
         service = get_notification_service()
         return await service.send_alert_email(
             alert      = alert,
@@ -158,7 +150,7 @@ async def _send_alert_email_async(
 
 
 # =============================================================================
-# SMTP TEST TASK
+# TASK 2: SMTP TEST
 # =============================================================================
 
 @celery_app.task(
@@ -194,13 +186,12 @@ async def _send_test_email_async(recipient: str) -> dict:
     """Async SMTP test helper."""
     from app.services.notification_service import get_notification_service
 
-    service = get_notification_service()
-    connection_test = await service.test_smtp_connection()
+    service          = get_notification_service()
+    connection_test  = await service.test_smtp_connection()
 
     if not connection_test["ok"]:
         return {"sent": False, "message": connection_test["message"]}
 
-    # Fake alert bilan test email
     class FakeAlert:
         id          = 0
         alert_type  = "test"
@@ -209,29 +200,30 @@ async def _send_test_email_async(recipient: str) -> dict:
         description = "Bu test email. SMTP ulanish muvaffaqiyatli sozlangan."
         camera_id   = None
 
-    service2 = get_notification_service()
-    result = await service2.send_alert_email(
+    return await service.send_alert_email(
         alert      = FakeAlert(),
         animal_tag = None,
         recipients = [recipient],
     )
-    return result
 
 
 # =============================================================================
-# DAILY DIGEST TASK
+# TASK 3: KUNLIK DIGEST
 # =============================================================================
 
 @celery_app.task(
     name="notification.send_daily_digest",
     queue="notification",
+    bind=True,
     max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
 )
-def send_daily_digest() -> dict:
+def send_daily_digest(self) -> dict:
     """
     Kunlik alert xulosasini yuboradi.
 
-    Celery beat tomonidan har kuni ertalab chaqiriladi.
+    Celery beat tomonidan har kuni 07:00 UTC da chaqiriladi.
     Kechagi kun uchun: ochiq alertlar soni, yangi alertlar, hal etilganlar.
 
     Returns:
@@ -243,16 +235,23 @@ def send_daily_digest() -> dict:
 
     try:
         result = asyncio.run(_send_daily_digest_async())
-        logger.info(f"[notification] Kunlik digest yuborildi: {result}")
+        logger.info(f"[notification] Kunlik digest yakunlandi: {result}")
         return result
     except Exception as exc:
         logger.error(f"[notification] Digest xatosi: {exc}", exc_info=True)
-        return {"sent": False, "error": str(exc)}
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            return {"sent": False, "error": str(exc)}
 
 
 async def _send_daily_digest_async() -> dict:
     """Kunlik digest — DB dan statistika olib email yuboradi."""
+    import asyncio
+    import smtplib
     from datetime import datetime, timezone, timedelta
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
     from app.core.database import AsyncSessionLocal
     from app.models.alert import Alert, AlertStatus
@@ -263,7 +262,7 @@ async def _send_daily_digest_async() -> dict:
         now       = datetime.now(timezone.utc)
         yesterday = now - timedelta(days=1)
 
-        # Ochiq alertlar soni
+        # Ochiq alertlar
         open_count = await db.scalar(
             select(func.count(Alert.id)).where(
                 Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN])
@@ -293,50 +292,49 @@ async def _send_daily_digest_async() -> dict:
     if not recipients:
         return {"sent": False, "reason": "Recipient sozlanmagan"}
 
-    # Oddiy text digest
-    subject = f"📊 Taurus Vision — Kunlik Xulosa {now.strftime('%Y-%m-%d')}"
-    body    = f"""TAURUS VISION — KUNLIK XULOSA
-{now.strftime('%Y-%m-%d')}
-{'='*40}
-
-📊 ALERT STATISTIKASI:
-  Hozir ochiq alertlar: {open_count}
-  Kecha yangi alertlar: {new_count}
-  Kecha hal etildi:     {resolved_count}
-
-Tizimni kuzatish: http://localhost:5173/alerts
-
----
-Taurus Vision Monitoring System
-"""
+    now_str = now.strftime("%Y-%m-%d")
+    subject = f"📊 Taurus Vision — Kunlik Xulosa {now_str}"
+    body    = (
+        f"TAURUS VISION — KUNLIK XULOSA\n"
+        f"{now_str}\n"
+        f"{'=' * 40}\n\n"
+        f"📊 ALERT STATISTIKASI:\n"
+        f"  Hozir ochiq alertlar: {open_count}\n"
+        f"  Kecha yangi alertlar: {new_count}\n"
+        f"  Kecha hal etildi:     {resolved_count}\n\n"
+        f"Tizimni kuzatish: http://localhost:5173/alerts\n\n"
+        f"---\n"
+        f"Taurus Vision Monitoring System\n"
+    )
 
     if service.is_configured:
         try:
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-            import smtplib
-
             msg = MIMEMultipart()
             msg["Subject"] = subject
             msg["From"]    = service._settings["from_addr"]
             msg["To"]      = ", ".join(recipients)
             msg.attach(MIMEText(body, "plain", "utf-8"))
 
-            import asyncio
             s = service._settings
 
-            def _send():
+            def _send_smtp() -> None:
                 with smtplib.SMTP(s["host"], s["port"]) as server:
                     server.ehlo()
                     server.starttls()
                     server.login(s["user"], s["password"])
                     server.sendmail(s["from_addr"], recipients, msg.as_string())
 
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _send)
-            return {"sent": True, "recipients": recipients}
+            # BUG FIX #5: asyncio.get_event_loop() deprecated →
+            # asyncio.get_running_loop() ishlatilmoqda (Python 3.10+)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, _send_smtp)
+
+            return {"sent": True, "recipients": recipients, "mode": "smtp"}
+
         except Exception as exc:
+            logger.error(f"[notification] SMTP xatosi: {exc}")
             return {"sent": False, "error": str(exc)}
     else:
+        # Development rejimi — faqat log ga yozish
         logger.info(f"[DEV] Daily digest log:\n{body}")
         return {"sent": True, "recipients": recipients, "mode": "log"}

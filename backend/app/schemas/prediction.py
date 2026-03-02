@@ -53,7 +53,10 @@ class HealthPredictionResponse(BaseModel):
     endpointlari tomonidan qaytariladi.
     """
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        protected_namespaces=(),   # model_version field uchun Pydantic warning ni o'chirish
+    )
 
     id:              int     = Field(..., description="Bashorat yozuvi ID")
     animal_id:       int     = Field(..., description="Jonivor ID")
@@ -261,6 +264,8 @@ class ModelStatusResponse(BaseModel):
 
     ML model holati va konfiguratsiyasini qaytaradi.
     """
+
+    model_config = ConfigDict(protected_namespaces=())  # model_version uchun
 
     rf_trained:         bool   = Field(..., description="RF o'rgatilganmi")
     iso_trained:        bool   = Field(..., description="IsolationForest o'rgatilganmi")
