@@ -79,6 +79,15 @@ services:
       TRAINING_MAX_TOTAL: "5000"
       TRAINING_JPEG_QUALITY: "90"
       TRAINING_COLLECTION_ENABLED: "true"
+    # ── Webcam / USB kamera uchun device mount ────────────────────────────────
+    # Host mashinadagi /dev/video* qurilmalar container ichiga ko'rinadi.
+    # Faqat mavjud qurilmalar ko'rsatiladi — bo'lmasa compose ishlamaydi.
+    # Agar boshqa index kerak bo'lsa (masalan /dev/video2) qo'shing.
+    devices:
+      - /dev/video0:/dev/video0
+    # "video" guruhi OpenCV uchun /dev/video* ga kirish huquqini beradi
+    group_add:
+      - video
     ports:
       - "8000:8000"
     volumes:

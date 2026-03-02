@@ -1,0 +1,10 @@
+# ============================================================================
+# Taurus Vision — Webcam Override
+# Faqat devices — group_add asosiy docker-compose.yml da allaqachon bor
+# ============================================================================
+
+services:
+  backend:
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1

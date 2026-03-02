@@ -65,8 +65,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create non-root user for security
 # UID 1000 is standard for non-root users
+#
+# 'video' guruhiga qo'shish MUHIM:
+#   Linux da /dev/video* qurilmalari video guruhiga tegishli (GID 44).
+#   Container ichida taurus user shu guruhga a'zo bo'lmasa — USB kamera
+#   ochilmaydi: "Permission denied" xatosi beradi.
+#   docker-compose.yml dagi `group_add: [video]` bilan birgalikda ishlaydi.
 RUN groupadd -r taurus --gid=1000 && \
-    useradd -r -g taurus --uid=1000 --home-dir=/app --shell=/bin/bash taurus
+    useradd -r -g taurus --uid=1000 --home-dir=/app --shell=/bin/bash taurus && \
+    usermod -aG video taurus
 
 # Create application directory
 WORKDIR /app

@@ -27,6 +27,31 @@ up-prod: ## Production rejimda ishga tushirish
 up-prod-build: ## Build va production rejimda ishga tushirish
 	docker compose -f docker-compose.prod.yml up -d --build
 
+# ── WEBCAM BUYRUQLARI ────────────────────────────────────────────────────────
+
+setup-webcam: ## USB webcam qurilmalarini aniqlash va konfiguratsiya qilish
+	@chmod +x scripts/webcam-setup.sh
+	@./scripts/webcam-setup.sh
+
+up-webcam: ## Webcam bilan ishga tushirish (setup-webcam ni avval ishlatish kerak)
+	docker compose -f docker-compose.yml -f docker-compose.webcam.yml up -d
+
+up-webcam-build: ## Build va webcam bilan ishga tushirish
+	docker compose -f docker-compose.yml -f docker-compose.webcam.yml up -d --build
+
+webcam-check: ## Container ichida webcam qurilmalarini tekshirish
+	@echo "=== Host /dev/video* qurilmalari ==="
+	@ls -la /dev/video* 2>/dev/null || echo "  Hech qanday video qurilma topilmadi"
+	@echo ""
+	@echo "=== Container ichida ==="
+	@docker compose exec backend ls -la /dev/video* 2>/dev/null || echo "  Container ichida qurilma yo'q"
+	@echo ""
+	@echo "=== API orqali aniqlash ==="
+	@curl -s http://localhost:8000/api/v1/cameras/detect-webcams 2>/dev/null || echo "  Backend hali tayyor emas"
+
+webcam-logs: ## Backend logida webcam xatolarini filtrlash
+	@docker compose logs backend 2>&1 | grep -i -E "video|camera|webcam|usb|device" | tail -50
+
 # ── ASOSIY BUYRUQLAR ────────────────────────────────────────────────────────
 
 down: ## Barcha xizmatlarni to'xtatish
