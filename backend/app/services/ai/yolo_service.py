@@ -1,13 +1,20 @@
 """
-YOLOv11 Detection Service.
+YOLO26 Animal Detection Service.
 
-Production-grade implementation of YOLO-based object detection
+Production-grade implementation of YOLO26-based object detection
 with singleton pattern and non-blocking inference.
+
+YOLO26 ADVANTAGES (vs YOLO11):
+- End-to-end NMS-free inference (no post-processing step)
+- Up to 43% faster CPU inference
+- MuSGD optimizer for better convergence
+- ProgLoss + STAL for improved small-object detection
+- DFL removed — simpler export and broader hardware support
 
 FEATURES:
 - Singleton pattern (load model once)
 - Non-blocking inference (ThreadPoolExecutor)
-- Model-agnostic (swap v8/v11 via config)
+- Model-agnostic (swap yolo26n/s/m via config)
 - Robust error handling
 - Performance monitoring
 """
@@ -33,20 +40,30 @@ logger = logging.getLogger(__name__)
 
 class YoloService(AIServiceInterface):
     """
-    YOLOv11 (or v8) object detection service.
-    
-    Singleton service that loads YOLO model once and provides
-    non-blocking inference for real-time detection.
-    
+    YOLO26 object detection service (animal detector).
+
+    Singleton service that loads YOLO26 model once and provides
+    non-blocking inference for real-time animal detection.
+
+    PIPELINE ROLE:
+        This service handles STEP 1 only — finding animals in frame.
+        STEP 2 (muzzle detection) is handled by MuzzleDetector (muzzle_detector.py).
+        STEP 3 (identification) is handled by IdentificationService.
+
     THREAD SAFETY:
     - Model loading: Main thread (startup)
     - Inference: ThreadPool (non-blocking)
-    
+
     COCO CLASSES:
     - 0: person
-    - 19: cow (OUR TARGET)
+    - 19: cow (PRIMARY TARGET)
     - 20: sheep
     - etc.
+
+    YOLO26 NOTE:
+        Uses one-to-one head by default (NMS-free, end-to-end).
+        For slightly higher accuracy at cost of speed, pass end2end=False
+        to _run_inference to use the one-to-many head with NMS.
     """
     
     _instance: "YoloService | None" = None
@@ -73,15 +90,19 @@ class YoloService(AIServiceInterface):
     
     async def load_model(self) -> None:
         """
-        Load YOLO model from disk.
-        
+        Load YOLO26 model from disk.
+
         MODEL SELECTION:
         Controlled via config.py (reads from .env):
-        - YOLO_MODEL=yolo11n.pt → YOLOv11
-        - YOLO_MODEL=yolov8n.pt → YOLOv8
-        
-        ZERO code changes to swap!
-        
+        - YOLO_MODEL=yolo26n.pt → YOLO26 nano (default, fastest CPU)
+        - YOLO_MODEL=yolo26s.pt → YOLO26 small (better accuracy)
+        - YOLO_MODEL=yolo26m.pt → YOLO26 medium (balanced)
+
+        Auto-download: If model file not found locally, Ultralytics
+        downloads it automatically from their CDN.
+
+        ZERO code changes to swap model size!
+
         Raises:
             RuntimeError: If model fails to load
         """
@@ -315,9 +336,19 @@ class YoloService(AIServiceInterface):
     
     def get_model_info(self) -> dict[str, Any]:
         """Get model metadata."""
+        model_path_str = str(self._model_path).lower() if self._model_path else ""
+        if "yolo26" in model_path_str:
+            version = "v26"
+        elif "yolo11" in model_path_str:
+            version = "v11"
+        elif "yolov8" in model_path_str or "yolo8" in model_path_str:
+            version = "v8"
+        else:
+            version = "unknown"
+
         return {
             'name': self.model_name,
-            'version': 'v11' if 'yolo11' in str(self._model_path).lower() else 'v8',
+            'version': version,
             'type': 'object_detection',
             'loaded': self._initialized,
             'device': self._device,

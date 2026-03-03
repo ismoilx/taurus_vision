@@ -1,35 +1,43 @@
 """
-Taurus Vision — Automated Detection Pipeline (Sprint 1-5 + Sprint 15-16 yangilama)
+Taurus Vision — Automated Detection Pipeline
 
-PIPELINE FLOW:
+PIPELINE FLOW (YANGILANGAN — Ikki bosqichli identifikatsiya):
     Camera Frame
         ↓
-    YOLO Detection      (YOLODetection dataclass — .bounding_box)
+    YOLO26 Detection     → sigir/qo'y bbox lar (class 19/20)
         ↓
-    FrameCollector      (Sprint 15-16) ← YANGI: training kadrlarni yig'ish
+    FrameCollector       (Sprint 15-16) — training uchun kadrlar
         ↓
-    Animal Identification (muzzle embedding)
+    Sigir cropini kesish  frame[y1:y2, x1:x2]
         ↓
-    Detection Log (DB)  (Detection ORM model — .bbox JSON dict)
+    MuzzleDetector       (best.pt) — sigir crop ichida muzzle topadi
         ↓
-    ADI Trigger Check
+    Muzzle cropini kesish crop_muzzle_from_animal()
         ↓
-    Alert Check
+    MobileNetV2 embedding → cosine similarity → animal_id
+        ↓
+    Detection Log (DB)
+        ↓
+    ADI Trigger + Alert Check
         ↓
     WebSocket Broadcast
 
-SPRINT 15-16 O'ZGARISHI:
-    _process_frame() da YOLO detectionlardan keyin FrameCollector.maybe_save()
-    chaqiriladi. Bu blocking I/O bo'lgani uchun ThreadPoolExecutor orqali
-    event loop bloklanmaydi.
+MUHIM FARQ (eski vs yangi):
+    ESKI: extract_muzzle_region() heuristik — bbox pastki 45% ni oladi
+    YANGI: MuzzleDetector (best.pt) — sigir cropida haqiqiy muzzleni topadi
 
-    FrameCollector None bo'lsa (collection disabled) — hech narsa qilinmaydi.
+    Bu o'zgarish identifikatsiya aniqligini sezilarli oshiradi chunki:
+    1. Haqiqiy muzzle joylashuvi aniqlanadi (heuristik emas)
+    2. Yonlamasiga turgan sigirlarda ham ishlaydi
+    3. Qisman ko'rinadigan muzzle lar ham aniqlanadi
 
-MUHIM FARQ:
-    - YOLODetection (ai/base.py dataclass): .bounding_box (BoundingBox obj)
-      → .bounding_box.x, .bounding_box.y, .bounding_box.width, .bounding_box.height
-    - Detection (models/detection.py ORM): .bbox (JSON dict)
-      → {"x": 0.5, "y": 0.6, "w": 0.3, "h": 0.4}
+MUZZLE STRICT MODE:
+    settings.MUZZLE_STRICT_MODE = True (default):
+        Muzzle topilmasa → identifikatsiya o'tkazib yuboriladi.
+        Natija: identification_service.identify_from_crop() chaqirilmaydi.
+    settings.MUZZLE_STRICT_MODE = False:
+        Muzzle topilmasa → eski heuristik (bbox pastki 45%) ishlatiladi.
+        Bu legacy/fallback rejim.
 """
 
 import asyncio
@@ -39,6 +47,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +55,10 @@ from app.services.camera.base import CameraServiceInterface
 from app.services.ai.yolo_service import YoloService
 from app.services.ai.base import Detection as YOLODetection
 from app.services.ai.frame_collector import get_frame_collector   # Sprint 15-16
+from app.services.ai.muzzle_detector import (                     # YANGI
+    get_muzzle_detector,
+    crop_muzzle_from_animal,
+)
 from app.services.identification_service import IdentificationService
 from app.services.alert_service import AlertService
 from app.services.adi_service import ADIService
@@ -422,24 +435,94 @@ class DetectionPipeline:
         frame,
     ) -> Optional[int]:
         """
-        YOLO detection dan muzzle kesib olib, DB embeddinglar bilan taqqoslash.
+        Ikki bosqichli identifikatsiya:
+            1. Sigir cropini kesish (YOLO26 bbox dan)
+            2. MuzzleDetector (best.pt) → muzzle bbox topish
+            3. Muzzle cropini kesish
+            4. MobileNetV2 → embedding → cosine similarity → animal_id
+
+        STRICT MODE (settings.MUZZLE_STRICT_MODE = True):
+            Muzzle topilmasa → None qaytaradi (identifikatsiya o'tkazib yuboriladi).
+        LEGACY MODE (settings.MUZZLE_STRICT_MODE = False):
+            Muzzle topilmasa → eski heuristik (bbox pastki 45%) ishlatiladi.
 
         Args:
-            detection: YOLODetection — .bounding_box.x/y/width/height
+            detection: YOLODetection — .bounding_box.x/y/width/height (normalized)
+                       .extra_data['absolute_box'] — pixel koordinatalar
+            frame:     CameraFrame — .frame (BGR numpy array)
+
+        Returns:
+            animal_id (int) yoki None.
         """
-        bb          = detection.bounding_box
-        muzzle_crop = extract_muzzle_region(
-            frame.frame,
-            bbox_x  = bb.x,
-            bbox_y  = bb.y,
-            bbox_w  = bb.width,
-            bbox_h  = bb.height,
-            normalized = True,
-        )
-        if muzzle_crop is None:
-            logger.debug("Muzzle crop failed — skipping identification")
+        bb     = detection.bounding_box
+        img    = frame.frame
+        img_h, img_w = img.shape[:2]
+
+        # --- STEP 1: Sigir cropini kesish ---
+        # YOLODetection.bounding_box: center_x, center_y, width, height (normalized)
+        abs_cx = bb.x * img_w
+        abs_cy = bb.y * img_h
+        abs_w  = bb.width  * img_w
+        abs_h  = bb.height * img_h
+
+        animal_x1 = max(0, int(abs_cx - abs_w / 2))
+        animal_y1 = max(0, int(abs_cy - abs_h / 2))
+        animal_x2 = min(img_w, int(abs_cx + abs_w / 2))
+        animal_y2 = min(img_h, int(abs_cy + abs_h / 2))
+
+        if (animal_x2 - animal_x1) < 32 or (animal_y2 - animal_y1) < 32:
+            logger.debug("Sigir crop juda kichik — identifikatsiya o'tkazib yuborildi")
             return None
 
+        animal_crop = img[animal_y1:animal_y2, animal_x1:animal_x2]
+
+        if animal_crop.size == 0:
+            logger.debug("Bo'sh sigir crop — identifikatsiya o'tkazib yuborildi")
+            return None
+
+        # --- STEP 2: MuzzleDetector bilan muzzleni aniqlash ---
+        muzzle_crop: Optional[np.ndarray] = None
+
+        try:
+            muzzle_detector = get_muzzle_detector()
+            muzzle_det = await muzzle_detector.detect_muzzle(animal_crop)
+
+            if muzzle_det is not None:
+                # --- STEP 3: Muzzle cropini kesish ---
+                muzzle_crop = crop_muzzle_from_animal(animal_crop, muzzle_det)
+                if muzzle_crop is None:
+                    logger.debug("crop_muzzle_from_animal None qaytardi")
+
+        except RuntimeError as exc:
+            # MuzzleDetector yuklanmagan (startup xatosi)
+            logger.warning(f"MuzzleDetector unavailable: {exc}")
+        except Exception as exc:
+            logger.warning(f"MuzzleDetector xatosi: {exc}")
+
+        # --- STRICT MODE: muzzle topilmasa ---
+        if muzzle_crop is None:
+            if settings.MUZZLE_STRICT_MODE:
+                logger.debug(
+                    "Muzzle topilmadi — strict mode, identifikatsiya o'tkazib yuborildi"
+                )
+                return None
+            else:
+                # Legacy fallback: eski heuristik extract_muzzle_region()
+                logger.debug(
+                    "Muzzle topilmadi — legacy fallback (heuristik) ishlatilmoqda"
+                )
+                muzzle_crop = extract_muzzle_region(
+                    img,
+                    bbox_x     = bb.x,
+                    bbox_y     = bb.y,
+                    bbox_w     = bb.width,
+                    bbox_h     = bb.height,
+                    normalized = True,
+                )
+                if muzzle_crop is None:
+                    return None
+
+        # --- STEP 4: MobileNetV2 → embedding → identifikatsiya ---
         id_service = IdentificationService(db)
         result     = await id_service.identify_from_crop(muzzle_crop)
         return result.animal_id if result.is_identified else None

@@ -67,11 +67,16 @@ services:
       INITIAL_ADMIN_PASSWORD: "Admin1234"
       INITIAL_ADMIN_FULLNAME: "System Administrator"
       ML_MODEL_PATH: "/app/ml/models"
-      YOLO_MODEL: "yolo11n.pt"
+      # YOLO26 — Ultralytics 2025-yil sentabr (NMS-free, 43% tezroq CPU)
+      YOLO_MODEL: "yolo26n.pt"
+      # Muzzle detection: custom trained best.pt
+      MUZZLE_MODEL: "best.pt"
+      MUZZLE_STRICT_MODE: "true"
+      MUZZLE_CONFIDENCE_THRESHOLD: "0.40"
       TRAINING_FRAMES_DIR: "/app/data/training/frames"
       TRAINING_DATASETS_DIR: "/app/data/training/datasets"
       TRAINING_MODELS_DIR: "/app/data/training/models"
-      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo11n.pt"
+      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo26n.pt"
       TRAINING_DEPLOY_MODEL_PATH: "/app/ml/models/yolo_custom.pt"
       TRAINING_COLLECT_EVERY_N: "50"
       TRAINING_MIN_DETECTIONS: "2"
@@ -97,7 +102,7 @@ services:
       - ./backend/tests:/app/tests
       - backend_data:/app/data
       - ./data/videos:/app/data/videos
-      - training_data:/app/data/training
+      - ./data/training:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,7 +141,7 @@ services:
       - ./workers:/app/workers
       - backend_data:/app/data
       - ./data/videos:/app/data/videos
-      - training_data:/app/data/training
+      - ./data/training:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,11 +174,16 @@ services:
       CELERY_BROKER_URL: "redis://redis:6379/0"
       CELERY_RESULT_BACKEND: "redis://redis:6379/1"
       ML_MODEL_PATH: "/app/ml/models"
-      YOLO_MODEL: "yolo11n.pt"
+      # YOLO26 — Ultralytics 2025-yil sentabr (NMS-free, 43% tezroq CPU)
+      YOLO_MODEL: "yolo26n.pt"
+      # Muzzle detection: custom trained best.pt
+      MUZZLE_MODEL: "best.pt"
+      MUZZLE_STRICT_MODE: "true"
+      MUZZLE_CONFIDENCE_THRESHOLD: "0.40"
       TRAINING_FRAMES_DIR: "/app/data/training/frames"
       TRAINING_DATASETS_DIR: "/app/data/training/datasets"
       TRAINING_MODELS_DIR: "/app/data/training/models"
-      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo11n.pt"
+      TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo26n.pt"
       TRAINING_DEPLOY_MODEL_PATH: "/app/ml/models/yolo_custom.pt"
       OMP_NUM_THREADS: "4"
       MKL_NUM_THREADS: "4"
@@ -182,7 +192,7 @@ services:
       - ./backend/ml:/app/ml
       - ./workers:/app/workers
       - backend_data:/app/data
-      - training_data:/app/data/training
+      - ./data/training:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -277,5 +287,3 @@ volumes:
     name: taurus_backend_data
   frontend_node_modules:
     name: taurus_frontend_node_modules
-  training_data:
-    name: taurus_training_data

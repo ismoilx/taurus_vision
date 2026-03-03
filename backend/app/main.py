@@ -240,12 +240,13 @@ async def startup_event():
     # 5. AI Models
     from app.services.ai.yolo_service import initialize_yolo_service
     from app.services.ai.feature_extractor import initialize_feature_extractor
+    from app.services.ai.muzzle_detector import initialize_muzzle_detector
 
     try:
         await initialize_yolo_service()
-        logger.info("✓ YOLO model loaded")
+        logger.info("✓ YOLO26 model loaded")
     except Exception as exc:
-        logger.error(f"✗ YOLO model loading failed: {exc}")
+        logger.error(f"✗ YOLO26 model loading failed: {exc}")
         logger.warning("⚠️ Detection endpoints will not work")
 
     try:
@@ -254,6 +255,17 @@ async def startup_event():
     except Exception as exc:
         logger.error(f"✗ Feature extractor loading failed: {exc}")
         logger.warning("⚠️ Identification endpoints will not work")
+
+    try:
+        await initialize_muzzle_detector()
+        logger.info("✓ Muzzle detector (best.pt) loaded")
+    except Exception as exc:
+        logger.error(f"✗ Muzzle detector loading failed: {exc}")
+        logger.warning(
+            "⚠️ Muzzle detection unavailable. "
+            "best.pt faylini backend/ml/models/ ga joylashtiring. "
+            "MUZZLE_STRICT_MODE=False qilinsa legacy heuristik ishlatiladi."
+        )
 
     # 6. Sprint 15-16: Frame Collector — training dataset uchun kadrlarni yig'ish
     if settings.TRAINING_COLLECTION_ENABLED:
@@ -295,13 +307,15 @@ async def shutdown_event():
 
     from app.services.ai.yolo_service import shutdown_yolo_service
     from app.services.ai.feature_extractor import shutdown_feature_extractor
+    from app.services.ai.muzzle_detector import shutdown_muzzle_detector
     from app.api.v1.websocket import shutdown_ws_manager
     from app.core.database import close_db
     from app.core.cache import close_redis
 
     for name, coro in [
-        ("YOLO model",        shutdown_yolo_service()),
+        ("YOLO26 model",      shutdown_yolo_service()),
         ("Feature extractor", shutdown_feature_extractor()),
+        ("Muzzle detector",   shutdown_muzzle_detector()),
         ("WebSocket manager", shutdown_ws_manager()),
         ("Redis cache",       close_redis()),
         ("Database",          close_db()),

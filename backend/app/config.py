@@ -90,8 +90,27 @@ class Settings(BaseSettings):
     ML_MODEL_PATH: str = "./ml/models"
 
     # Faol YOLO model fayl nomi (ml/models/ papkasida).
+    # YOLO26 — Ultralytics 2025-yil sentabr, CPU uchun 43% tezroq.
     # Deploy qilinsa bu qiymat yangilanadi.
-    YOLO_MODEL: str = "yolo11n.pt"
+    YOLO_MODEL: str = "yolo26n.pt"
+
+    # =========================================================================
+    # MUZZLE DETECTION (Ikkinchi bosqich identifikatsiya)
+    # =========================================================================
+
+    # Sigir bbox ichida muzzleni aniqlash uchun custom trained YOLO modeli.
+    # Bu model YOLO26 detection dan keyingi ikkinchi bosqichda ishlatiladi:
+    #   YOLO26 -> sigir bbox -> MUZZLE_MODEL -> muzzle bbox -> MobileNetV2 -> ID
+    # Fayl: backend/ml/models/best.pt (local only, git excluded)
+    MUZZLE_MODEL: str = "best.pt"
+
+    # Muzzle detection uchun minimal confidence darajasi.
+    # YOLO26 animal detection threshold dan alohida sozlanadi.
+    MUZZLE_CONFIDENCE_THRESHOLD: float = 0.40
+
+    # Muzzle topilmasa identifikatsiyani o'tkazib yuborish (True = strict mode).
+    # False qilinsa eski heuristik (bbox pastki 45%) ga qaytadi.
+    MUZZLE_STRICT_MODE: bool = True
 
     # =========================================================================
     # AI INFERENCE
@@ -130,8 +149,8 @@ class Settings(BaseSettings):
     TRAINING_MODELS_DIR: str = "./data/training/models"
 
     # Fine-tuning uchun base model to'liq yo'li
-    # docker-compose volume: /app/ml/models/yolo11n.pt
-    TRAINING_BASE_MODEL_PATH: str = "./ml/models/yolo11n.pt"
+    # docker-compose volume: /app/ml/models/yolo26n.pt
+    TRAINING_BASE_MODEL_PATH: str = "./ml/models/yolo26n.pt"
 
     # Deploy qilingan custom model yo'li
     # Shu yo'lga nusxalangan model keyingi restart da YOLO_MODEL sifatida yuklanadi
@@ -203,8 +222,13 @@ class Settings(BaseSettings):
 
     @property
     def yolo_model_path(self) -> Path:
-        """Faol YOLO model to'liq yo'li."""
+        """Faol YOLO26 model to'liq yo'li."""
         return Path(self.ML_MODEL_PATH) / self.YOLO_MODEL
+
+    @property
+    def muzzle_model_path(self) -> Path:
+        """Muzzle detection modeli to'liq yo'li."""
+        return Path(self.ML_MODEL_PATH) / self.MUZZLE_MODEL
 
 
 # =============================================================================

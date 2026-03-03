@@ -23,7 +23,7 @@ python-dotenv==1.0.0
 python-dateutil==2.8.2
 
 # AI / ML
-ultralytics>=8.3.0        # YOLOv8 / v11
+ultralytics>=8.3.0        # YOLO26 supported (included in 8.4.x+, auto-downloads yolo26n.pt)
 opencv-python-headless==4.9.0.80
 numpy==1.26.3
 torch==2.2.0
