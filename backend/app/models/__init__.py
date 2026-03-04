@@ -20,9 +20,20 @@ from app.models.alert            import Alert, AlertType, AlertSeverity, AlertSt
 from app.models.health_prediction import HealthPrediction, RiskLevel
 from app.models.audit_log        import AuditLog, AuditEventType, AuditSeverity
 from app.models.sensor_reading   import SensorReading
+from app.models.farm_task        import FarmTask, TaskType, TaskPriority, TaskStatus
+from app.models.feed             import FeedStock, FeedRecord, FeedType, FeedUnit
 
 __all__ = [
     "SensorReading",
+    "FarmTask",
+    "TaskType",
+    "TaskPriority",
+    "TaskStatus",
+    # Feed Management
+    "FeedStock",
+    "FeedRecord",
+    "FeedType",
+    "FeedUnit",
     # Base
     "BaseModel",
     # Auth

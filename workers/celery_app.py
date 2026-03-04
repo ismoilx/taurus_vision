@@ -173,25 +173,61 @@ celery_app.conf.beat_schedule = {
 
     "sensor-anomaly-check": {
         "task":     "sensor.check_anomalies",
-        "schedule": crontab(minute="*/5"),          # Har 5 daqiqada
+        "schedule": crontab(minute="*/5"),
         "options":  {"queue": "default"},
     },
     "sensor-offline-check": {
         "task":     "sensor.check_offline_devices",
-        "schedule": crontab(minute="*/15"),         # Har 15 daqiqada
+        "schedule": crontab(minute="*/15"),
         "options":  {"queue": "default"},
     },
     "sensor-daily-report": {
         "task":     "sensor.daily_report",
-        "schedule": crontab(hour=1, minute=30),     # Har kecha 01:30 UTC
+        "schedule": crontab(hour=1, minute=30),
         "kwargs":   {"target_date": None},
         "options":  {"queue": "default"},
     },
     "sensor-cleanup": {
         "task":     "sensor.cleanup_old_readings",
-        "schedule": crontab(hour=4, minute=0, day_of_week=0),  # Yakshanba 04:00
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
         "kwargs":   {"keep_days": 90},
         "options":  {"queue": "maintenance"},
+    },
+
+    # ── Feed Management (Sprint 20) ──────────────────────────────────────
+
+    "feed-low-stock-check": {
+        "task":     "feed.check_low_stock",
+        "schedule": crontab(hour=8, minute=0),
+        "options":  {"queue": "default"},
+    },
+    "feed-expiry-check": {
+        "task":     "feed.check_expiry",
+        "schedule": crontab(hour=9, minute=0),
+        "options":  {"queue": "default"},
+    },
+    "feed-daily-report": {
+        "task":     "feed.daily_report",
+        "schedule": crontab(hour=7, minute=30),
+        "kwargs":   {"target_date": None},
+        "options":  {"queue": "default"},
+    },
+
+    "tasks-mark-overdue": {
+        "task":     "tasks.mark_overdue",
+        "schedule": crontab(minute="*/30"),      # Har 30 daqiqada
+        "options":  {"queue": "default"},
+    },
+    "tasks-remind-due-soon": {
+        "task":     "tasks.remind_due_soon",
+        "schedule": crontab(minute=0),           # Har soatda
+        "options":  {"queue": "default"},
+    },
+    "tasks-daily-report": {
+        "task":     "tasks.daily_report",
+        "schedule": crontab(hour=6, minute=0),   # Har kecha 06:00 UTC
+        "kwargs":   {"target_date": None},
+        "options":  {"queue": "default"},
     },
 }
 
@@ -206,6 +242,8 @@ from workers.tasks import (  # noqa: E402, F401
     detection_tasks,
     notification_tasks,
     prediction_tasks,
-    training_tasks,        # Sprint 15-16
-    sensor_tasks,          # Sprint 17-18
+    training_tasks,           # Sprint 15-16
+    sensor_tasks,             # Sprint 17-18
+    task_management_tasks,    # Sprint 19-20
+    feed_tasks,               # Sprint 20
 )

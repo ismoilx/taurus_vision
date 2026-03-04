@@ -29,6 +29,8 @@ from app.api.v1.endpoints import (
     behavior,
     predictions,
     training,          # Sprint 15-16
+    tasks,             # Sprint 19-20
+    feed,              # Sprint 20
 )
 
 router = APIRouter(prefix="/v1")
@@ -73,3 +75,9 @@ router.include_router(training.router)
 
 # --- IoT Sensors (Sprint 17-18) ---
 router.include_router(sensors.router)
+
+# --- Farm Task Management (Sprint 19-20) ---
+router.include_router(tasks.router)
+
+# --- Feed Management (Sprint 20) ---
+router.include_router(feed.router)
