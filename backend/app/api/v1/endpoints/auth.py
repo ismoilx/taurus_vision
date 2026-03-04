@@ -21,7 +21,7 @@ ENDPOINTS:
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -64,6 +64,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 )
 async def login(
     login_data: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
     """
@@ -71,16 +72,19 @@ async def login(
 
     Args:
         login_data: Email/username va parol
+        request:    HTTP request (IP va User-Agent olish uchun)
         db:         DB session
 
     Returns:
         JWT token juftligi va foydalanuvchi ma'lumotlari
 
     Raises:
-        401: Noto'g'ri hisob ma'lumotlari yoki bloklangan hisob
+        401: Noto'g'ri hisob ma'lumotlari, bloklangan yoki faol bo'lmagan hisob
     """
-    service = AuthService(db)
-    return await service.login(login_data)
+    ip         = request.client.host if request.client else "0.0.0.0"
+    user_agent = request.headers.get("user-agent")
+    service    = AuthService(db)
+    return await service.login(login_data, ip=ip, user_agent=user_agent)
 
 
 @router.post(

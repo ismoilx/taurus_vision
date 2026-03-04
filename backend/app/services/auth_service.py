@@ -47,6 +47,7 @@ from app.core.exceptions import (
     EntityAlreadyExistsError,
     BusinessRuleViolationError,
 )
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -71,76 +72,118 @@ class AuthService:
     # AUTHENTICATION
     # =========================================================================
 
-    async def login(self, login_data: LoginRequest) -> TokenResponse:
+    async def login(
+        self,
+        login_data: LoginRequest,
+        ip: str = "0.0.0.0",
+        user_agent: Optional[str] = None,
+    ) -> TokenResponse:
         """
         Foydalanuvchini tizimga kiritish.
 
         Jarayon:
-            1. Email yoki username bo'yicha foydalanuvchini topish
-            2. Parolni tekshirish (bcrypt verify)
-            3. Aktiv holatini tekshirish
-            4. Access va refresh token yaratish
-            5. Refresh token hashini DB ga saqlash
-            6. last_login_at ni yangilash
+            1. Brute force bloklashni tekshirish (Redis)
+            2. Email yoki username bo'yicha foydalanuvchini topish
+            3. Parolni tekshirish (bcrypt verify)
+            4. Aktiv holatini tekshirish
+            5. Access va refresh token yaratish
+            6. Refresh token hashini DB ga saqlash
+            7. last_login_at ni yangilash
+            8. Audit log yozish, counterlarni tozalash
 
         Args:
             login_data: Email/username + parol
+            ip:         So'rov IP manzili (brute force uchun)
+            user_agent: Klient User-Agent (audit uchun)
 
         Returns:
             TokenResponse (access_token, refresh_token, user ma'lumotlari)
 
         Raises:
-            AuthenticationError: Noto'g'ri hisob ma'lumotlari yoki bloklangan hisob
+            AuthenticationError: Bloklangan, noto'g'ri hisob yoki faol emas
         """
-        # 1. Foydalanuvchini topish
-        user: Optional[User] = None
+        audit   = AuditService(self.db)
+        identifier = login_data.email or login_data.username or ""
 
+        # 1. Brute force bloklashni tekshirish
+        lock_info = await audit.check_lockout(identifier=identifier, ip=ip)
+        if lock_info["locked"]:
+            await audit.log_login_locked(
+                identifier=identifier,
+                ip=ip,
+                lock_duration=lock_info.get("retry_after", 0),
+                user_agent=user_agent,
+            )
+            raise AuthenticationError(message=lock_info["message"])
+
+        # 2. Foydalanuvchini topish
+        user: Optional[User] = None
         if login_data.email:
             user = await self._repo.get_by_email(login_data.email)
         elif login_data.username:
             user = await self._repo.get_by_username(login_data.username)
 
-        # 2. Tekshirish — xato tafsilotlarini ochmaymiz (xavfsizlik uchun)
-        if not user or not verify_password(login_data.password, user.hashed_password):
+        # 3. Parol tekshiruvi — xato tafsilotlarini ochmaymiz (timing-safe)
+        password_valid = (
+            user is not None
+            and verify_password(login_data.password, user.hashed_password)
+        )
+
+        if not password_valid:
+            # Muvaffaqiyatsiz urinishni qayd qilish
+            bf_result = await audit.record_failed_attempt(identifier=identifier, ip=ip)
+            await audit.log_login_failed(
+                identifier=identifier,
+                ip=ip,
+                reason="invalid_credentials",
+                user_agent=user_agent,
+            )
             logger.warning(
-                "Failed login attempt",
-                extra={
-                    "identifier": login_data.email or login_data.username,
-                    "reason": "invalid_credentials",
-                },
+                f"[auth] Muvaffaqiyatsiz login: identifier={identifier!r}, ip={ip}, "
+                f"email_attempts={bf_result['email_attempts']}, "
+                f"ip_attempts={bf_result['ip_attempts']}"
             )
             raise AuthenticationError(
                 message="Email/username yoki parol noto'g'ri."
             )
 
-        # 3. Aktiv holat tekshiruvi
+        # 4. Aktiv holat tekshiruvi
         if not user.is_active:
-            logger.warning(
-                f"Login attempt by inactive user id={user.id}"
+            await audit.log_login_failed(
+                identifier=identifier,
+                ip=ip,
+                reason="account_inactive",
+                user_agent=user_agent,
             )
+            logger.warning(f"[auth] Faol bo'lmagan hisob: user_id={user.id}")
             raise AuthenticationError(
                 message="Hisobingiz bloklangan. Administrator bilan bog'laning."
             )
 
-        # 4. Tokenlar yaratish
+        # 5. Tokenlar yaratish
         access_token  = create_access_token(user_id=user.id, role=user.role.value)
         refresh_token = create_refresh_token(user_id=user.id, role=user.role.value)
 
-        # 5. Refresh token hashini saqlash
+        # 6. Refresh token hashini saqlash
         await self._repo.save_refresh_token_hash(user.id, hash_token(refresh_token))
 
-        # 6. Login vaqtini yangilash
+        # 7. Login vaqtini yangilash
         await self._repo.update_last_login(user.id)
+
+        # 8. Audit + brute force counterlarni tozalash
+        await audit.log_login_success(
+            user_id=user.id,
+            username=user.username,
+            ip=ip,
+            user_agent=user_agent,
+        )
+        await audit.clear_failed_attempts(identifier=identifier, ip=ip)
 
         await self.db.commit()
 
         logger.info(
-            "User logged in",
-            extra={
-                "user_id":  user.id,
-                "username": user.username,
-                "role":     user.role.value,
-            },
+            f"[auth] Muvaffaqiyatli login: user_id={user.id}, username={user.username!r}, "
+            f"role={user.role.value}, ip={ip}"
         )
 
         return TokenResponse(

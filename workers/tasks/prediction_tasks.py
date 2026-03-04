@@ -129,10 +129,11 @@ def train_prediction_models(self, days_back: int = 90) -> dict:
 
     async def _train():
         from app.core.database import AsyncSessionLocal
-        from app.services.prediction_service import PredictionService
+        from app.services.prediction_service import PredictionService, get_prediction_service
 
         async with AsyncSessionLocal() as db:
-            service = PredictionService(db)
+            # Global singleton orqali train qilish — modellar shu ob'ektda saqlanadi
+            service = get_prediction_service(db)
             return await service.train_models(days_back=days_back)
 
     try:

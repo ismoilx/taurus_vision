@@ -58,6 +58,7 @@ class EnvironmentValidator:
         logger.info("Starting environment validation...")
         
         # Run all checks
+        self._validate_secret_key()       # ← BIRINCHI — xavfsizlik
         self._validate_required_settings()
         self._validate_database_url()
         self._validate_directories()
@@ -80,6 +81,62 @@ class EnvironmentValidator:
         
         logger.info("Environment validation passed ✓")
         return True
+
+    def _validate_secret_key(self) -> None:
+        """
+        JWT SECRET_KEY xavfsizligini tekshirish.
+
+        Agar default yoki zaif kalit ishlatilsa — production da CRITICAL xato.
+        Development rejimda faqat ogohlantirish.
+        """
+        INSECURE_DEFAULTS = {
+            "changeme-use-secrets-token-hex-32-in-production",
+            "changeme",
+            "secret",
+            "your-secret-key",
+            "development-secret",
+            "test-secret",
+        }
+        key = settings.SECRET_KEY
+
+        if key in INSECURE_DEFAULTS:
+            if not settings.DEBUG:
+                self.results.append(ValidationResult(
+                    passed=False,
+                    message=(
+                        "SECRET_KEY default qiymatda! Production da bu KRITIK xavfsizlik zaifligidir. "
+                        "Yangi kalit yaratish: python -c \"import secrets; print(secrets.token_hex(32))\""
+                    ),
+                    severity="error",
+                ))
+            else:
+                self.results.append(ValidationResult(
+                    passed=False,
+                    message=(
+                        "SECRET_KEY default qiymatda (debug rejim uchun qabul qilinadi). "
+                        "Production ga o'tishdan oldin albatta o'zgartiring!"
+                    ),
+                    severity="warning",
+                ))
+            return
+
+        if len(key) < 32:
+            self.results.append(ValidationResult(
+                passed=False,
+                message=(
+                    f"SECRET_KEY juda qisqa ({len(key)} belgi). "
+                    "Kamida 32 belgi bo'lishi kerak. "
+                    "Yangi kalit: python -c \"import secrets; print(secrets.token_hex(32))\""
+                ),
+                severity="error" if not settings.DEBUG else "warning",
+            ))
+            return
+
+        self.results.append(ValidationResult(
+            passed=True,
+            message=f"SECRET_KEY xavfsiz konfiguratsiya qilingan ({len(key)} belgi)",
+            severity="info",
+        ))
     
     def _validate_required_settings(self) -> None:
         """Check that required settings are set."""

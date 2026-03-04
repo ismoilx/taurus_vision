@@ -5,5 +5,9 @@
 *.tflite
 *.pb
 
+# Health prediction ML models (joblib format)
+*.joblib
+prediction/metadata.json
+
 # Keep .gitkeep
 !.gitkeep

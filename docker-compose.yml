@@ -84,6 +84,8 @@ services:
       TRAINING_MAX_TOTAL: "5000"
       TRAINING_JPEG_QUALITY: "90"
       TRAINING_COLLECTION_ENABLED: "true"
+      # Health prediction ML modellari — RF + IsolationForest diskka saqlanadi
+      PREDICTION_MODELS_DIR: "/app/ml/models/prediction"
     # ── Webcam / USB kamera uchun device mount ────────────────────────────────
     # Host mashinadagi /dev/video* qurilmalar container ichiga ko'rinadi.
     # Faqat mavjud qurilmalar ko'rsatiladi — bo'lmasa compose ishlamaydi.
@@ -185,6 +187,7 @@ services:
       TRAINING_MODELS_DIR: "/app/data/training/models"
       TRAINING_BASE_MODEL_PATH: "/app/ml/models/yolo26n.pt"
       TRAINING_DEPLOY_MODEL_PATH: "/app/ml/models/yolo_custom.pt"
+      PREDICTION_MODELS_DIR: "/app/ml/models/prediction"
       OMP_NUM_THREADS: "4"
       MKL_NUM_THREADS: "4"
     volumes:

@@ -18,6 +18,7 @@ from app.models.health_record    import HealthRecord
 from app.models.adi_log          import ADILog, ADICategory
 from app.models.alert            import Alert, AlertType, AlertSeverity, AlertStatus
 from app.models.health_prediction import HealthPrediction, RiskLevel
+from app.models.audit_log        import AuditLog, AuditEventType, AuditSeverity
 
 __all__ = [
     # Base
@@ -49,4 +50,8 @@ __all__ = [
     # Health Predictions
     "HealthPrediction",
     "RiskLevel",
+    # Security Audit
+    "AuditLog",
+    "AuditEventType",
+    "AuditSeverity",
 ]

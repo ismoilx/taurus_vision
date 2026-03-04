@@ -40,15 +40,19 @@ XAVF DARAJALARI:
 
 import logging
 import math
+import json
 import pickle
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
+import joblib
 import numpy as np
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.animal import Animal, AnimalStatus
 from app.models.adi_log import ADILog
 from app.models.health_prediction import HealthPrediction, RiskLevel, risk_level_from_score
@@ -309,10 +313,14 @@ class PredictionService:
         self._iso_model      = None   # IsolationForest | None
         self._is_trained     = False
         self._train_date     = None   # Oxirgi train sanasi
+        self._last_n_samples = 0      # Oxirgi training namunalar soni
         self._lock           = threading.Lock()
 
         # Modellar import: lazy (Docker start da yuklanmasligi uchun)
         self._sklearn_available = self._check_sklearn()
+
+        # Diskdan oldingi modellarni yuklash (agar mavjud bo'lsa)
+        self._try_load_from_disk()
 
     # =========================================================================
     # TRAINING
@@ -435,6 +443,14 @@ class PredictionService:
                 f"{len(animal_ids)} animals"
             )
 
+            # Modellarni diskka saqlash — restart dan keyin qayta train shart bo'lmasin
+            self._last_n_samples = len(X_list)
+            save_result = self.save_models()
+            if save_result["saved"]:
+                logger.info(f"[prediction] Modellar diskka saqlandi: {save_result['path']}")
+            else:
+                logger.warning(f"[prediction] Diskka saqlash muvaffaqiyatsiz: {save_result.get('error')}")
+
             return {
                 "trained":    True,
                 "samples":    len(X_list),
@@ -442,6 +458,7 @@ class PredictionService:
                 "animals":    len(animal_ids),
                 "features":   len(FEATURE_NAMES),
                 "train_date": today,
+                "saved_to_disk": save_result["saved"],
             }
 
         except ImportError:
@@ -710,6 +727,122 @@ class PredictionService:
         if self._iso_model is not None: versions["iso"] = ISO_VERSION
         return versions
 
+    # =========================================================================
+    # DISK PERSISTENCE — save / load
+    # =========================================================================
+
+    def save_models(self) -> dict:
+        """
+        Trained RF va IsolationForest modellarni diskka saqlash.
+
+        Fayl strukturasi:
+            ml/models/prediction/
+                rf_model.joblib      — RandomForestClassifier
+                iso_model.joblib     — IsolationForest
+                metadata.json        — train_date, n_samples, versions
+
+        Returns:
+            {"saved": bool, "path": str | None, "error": str | None}
+        """
+        if not self._is_trained or self._rf_model is None or self._iso_model is None:
+            return {"saved": False, "error": "Model henuz train qilinmagan"}
+
+        try:
+            model_dir = settings.prediction_models_path
+            model_dir.mkdir(parents=True, exist_ok=True)
+
+            with self._lock:
+                joblib.dump(self._rf_model,  model_dir / "rf_model.joblib",  compress=3)
+                joblib.dump(self._iso_model, model_dir / "iso_model.joblib", compress=3)
+
+            metadata = {
+                "train_date":    self._train_date,
+                "n_samples":     self._last_n_samples,
+                "model_version": "v1.0-ensemble",
+                "rf_version":    RF_VERSION,
+                "iso_version":   ISO_VERSION,
+                "feature_names": FEATURE_NAMES,
+                "saved_at":      datetime.now(timezone.utc).isoformat(),
+            }
+            (model_dir / "metadata.json").write_text(
+                json.dumps(metadata, indent=2), encoding="utf-8"
+            )
+
+            logger.info(f"[prediction:persist] Modellar saqlandi → {model_dir}")
+            return {"saved": True, "path": str(model_dir), "error": None}
+
+        except Exception as exc:
+            logger.error(f"[prediction:persist] Saqlash xatosi: {exc}", exc_info=True)
+            return {"saved": False, "path": None, "error": str(exc)}
+
+    def load_models(self) -> dict:
+        """
+        Diskdan oldin saqlangan RF va IsolationForest modellarni yuklash.
+
+        Returns:
+            {"loaded": bool, "train_date": str | None, "n_samples": int, "error": str | None}
+        """
+        if not self._sklearn_available:
+            return {"loaded": False, "error": "scikit-learn mavjud emas"}
+
+        model_dir  = settings.prediction_models_path
+        rf_path    = model_dir / "rf_model.joblib"
+        iso_path   = model_dir / "iso_model.joblib"
+        meta_path  = model_dir / "metadata.json"
+
+        if not (rf_path.exists() and iso_path.exists()):
+            return {"loaded": False, "error": "Model fayllari topilmadi", "n_samples": 0}
+
+        try:
+            rf_model  = joblib.load(rf_path)
+            iso_model = joblib.load(iso_path)
+
+            metadata: dict = {}
+            if meta_path.exists():
+                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+
+            with self._lock:
+                self._rf_model       = rf_model
+                self._iso_model      = iso_model
+                self._is_trained     = True
+                self._train_date     = metadata.get("train_date")
+                self._last_n_samples = metadata.get("n_samples", 0)
+
+            logger.info(
+                f"[prediction:persist] Modellar yuklandi ← {model_dir} "
+                f"(train_date={self._train_date}, n={self._last_n_samples})"
+            )
+            return {
+                "loaded":     True,
+                "train_date": self._train_date,
+                "n_samples":  self._last_n_samples,
+                "error":      None,
+            }
+
+        except Exception as exc:
+            logger.error(f"[prediction:persist] Yuklash xatosi: {exc}", exc_info=True)
+            return {"loaded": False, "error": str(exc), "n_samples": 0}
+
+    def _try_load_from_disk(self) -> None:
+        """
+        Startup da diskdan modellarni yuklashga harakat qilish.
+
+        Xato bo'lsa, jim o'tadi — cold start bilan davom etadi.
+        Log'da natija ko'rsatiladi.
+        """
+        result = self.load_models()
+        if result["loaded"]:
+            logger.info(
+                "[prediction:persist] ✅ Startup da modellar diskdan yuklandi — "
+                f"train_date={result['train_date']}, n_samples={result['n_samples']}"
+            )
+        else:
+            reason = result.get("error", "noma'lum")
+            logger.info(
+                f"[prediction:persist] Cold start — diskda model yo'q ({reason}). "
+                "Celery task 05:00 UTC da train qiladi."
+            )
+
     @staticmethod
     def _check_sklearn() -> bool:
         try:
@@ -724,13 +857,33 @@ class PredictionService:
 
     @property
     def model_status(self) -> dict:
+        model_dir  = settings.prediction_models_path
+        disk_saved = (model_dir / "rf_model.joblib").exists() and \
+                     (model_dir / "iso_model.joblib").exists()
+
+        disk_meta: dict = {}
+        meta_path = model_dir / "metadata.json"
+        if meta_path.exists():
+            try:
+                disk_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
         return {
             "rule_engine":       True,
             "random_forest":     self._rf_model  is not None,
             "isolation_forest":  self._iso_model is not None,
             "is_trained":        self._is_trained,
             "train_date":        self._train_date,
+            "n_training_samples": self._last_n_samples,
             "sklearn_available": self._sklearn_available,
+            "disk_persistence": {
+                "saved":      disk_saved,
+                "path":       str(model_dir) if disk_saved else None,
+                "saved_at":   disk_meta.get("saved_at"),
+                "train_date": disk_meta.get("train_date"),
+                "n_samples":  disk_meta.get("n_samples", 0),
+            },
         }
 
     # =========================================================================
@@ -955,7 +1108,7 @@ class PredictionService:
             "rf_trained":           self._is_trained and self._rf_model  is not None,
             "iso_trained":          self._is_trained and self._iso_model is not None,
             "trained_at":           self._train_date,
-            "n_training_samples":   getattr(self, "_last_n_samples", 0),
+            "n_training_samples":   self._last_n_samples,
             "model_version":        "v1.0-ensemble",
             "ensemble_weights": {
                 "rule_based":    RULE_WEIGHT,
@@ -981,16 +1134,21 @@ def get_prediction_service(db: AsyncSession) -> PredictionService:
     """
     PredictionService singleton olish.
 
-    MUHIM: db session har request uchun yangi — faqat builder uchun ishlatiladi.
-    Model (_rf_model, _iso_model) global _prediction_service da saqlanadi.
+    MUHIM:
+        - db session har request uchun yangi — faqat builder uchun ishlatiladi.
+        - Model (_rf_model, _iso_model) global _prediction_service da saqlanadi.
+        - Birinchi chaqiruvda diskdan model yuklashga harakat qiladi.
+        - Keyingi chaqiruvlarda faqat db va builder yangilanadi (model saqlanadi).
     """
     global _prediction_service
 
     with _service_lock:
         if _prediction_service is None:
+            # Yangi singleton yaratish — __init__ ichida diskdan yuklash bo'ladi
             _prediction_service = PredictionService(db)
         else:
-            # DB ni yangilash (har request uchun yangi session)
+            # Mavjud singleton: faqat DB sessionni yangilash.
+            # _rf_model / _iso_model SAQLANADI — qayta yuklanmaydi.
             _prediction_service.db       = db
             _prediction_service._builder = TrainingDataBuilder(db)
 

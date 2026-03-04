@@ -148,6 +148,10 @@ class Settings(BaseSettings):
     # O'qitilgan modellar saqlanadigan papka (har bir run uchun)
     TRAINING_MODELS_DIR: str = "./data/training/models"
 
+    # Health prediction ML modellari saqlanadigan papka (RF + IsolationForest)
+    # Bu papkadagi fayllar restart dan keyin yuklanadi — retrain shart emas.
+    PREDICTION_MODELS_DIR: str = "./ml/models/prediction"
+
     # Fine-tuning uchun base model to'liq yo'li
     # docker-compose volume: /app/ml/models/yolo26n.pt
     TRAINING_BASE_MODEL_PATH: str = "./ml/models/yolo26n.pt"
@@ -219,6 +223,11 @@ class Settings(BaseSettings):
     def training_models_path(self) -> Path:
         """TRAINING_MODELS_DIR ni Path ob'ektida qaytarish."""
         return Path(self.TRAINING_MODELS_DIR)
+
+    @property
+    def prediction_models_path(self) -> Path:
+        """Health prediction ML modellari yo'li (RF + IsolationForest)."""
+        return Path(self.PREDICTION_MODELS_DIR)
 
     @property
     def yolo_model_path(self) -> Path:

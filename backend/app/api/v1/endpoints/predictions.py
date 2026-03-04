@@ -392,3 +392,54 @@ async def get_model_status(
         ],
         status_message      = status_msg,
     )
+
+
+# ─── Model Reload (diskdan qayta yuklash) ──────────────────────────────────────
+
+@router.post(
+    "/reload-models",
+    summary="Diskdan modellarni qayta yuklash",
+    description=(
+        "Celery worker model ni diskga saqlagandan keyin, FastAPI jarayoni "
+        "eski (yoki yo'q) modelni ishlatishda qoladi. "
+        "Bu endpoint shu muammoni hal qiladi: diskdan yangi modellarni yuklaydi. "
+        "Faqat admin va manager roli uchun."
+    ),
+)
+async def reload_models_from_disk(
+    db:           AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+) -> dict:
+    """
+    Diskda saqlangan RF + IsolationForest modellarni xotiraga yuklash.
+
+    Qachon ishlatiladi:
+        - Celery training task tugagandan keyin (avtomatik yoki qo'lda)
+        - Backend restart dan keyin modellar yuklanmagan bo'lsa
+        - Disk modelni yangi train qilgandan keyin frontenddan trigger qilish uchun
+
+    Returns:
+        {"loaded": bool, "train_date": str, "n_samples": int, "message": str}
+    """
+    from app.core.exceptions import PermissionDeniedError
+
+    if current_user.role not in ("admin", "manager"):
+        raise PermissionDeniedError("Faqat admin va manager roli uchun")
+
+    service = get_prediction_service(db)
+    result  = service.load_models()
+
+    if result["loaded"]:
+        msg = (
+            f"✅ Modellar muvaffaqiyatli yuklandi "
+            f"(train_date={result['train_date']}, n_samples={result['n_samples']})"
+        )
+    else:
+        msg = f"⚠️ Yuklash muvaffaqiyatsiz: {result.get('error', "noma'lum")}"
+
+    return {
+        "loaded":     result["loaded"],
+        "train_date": result.get("train_date"),
+        "n_samples":  result.get("n_samples", 0),
+        "message":    msg,
+    }
