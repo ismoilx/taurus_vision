@@ -10,6 +10,7 @@ SPRINT 15-16 QO'SHIMCHA:
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    sensors,
     auth,
     animals,
     weights,
@@ -69,3 +70,6 @@ router.include_router(predictions.router)
 
 # --- Custom YOLO Training (Sprint 15-16) ---
 router.include_router(training.router)
+
+# --- IoT Sensors (Sprint 17-18) ---
+router.include_router(sensors.router)

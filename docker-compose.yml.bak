@@ -61,7 +61,7 @@ services:
       HOST: "0.0.0.0"
       PORT: "8000"
       CORS_ORIGINS: '["http://localhost:5173", "http://localhost:3000", "https://zxzx.uz", "https://api.zxzx.uz", "https://taurus.zxzx.uz"]'
-      SECRET_KEY: "${SECRET_KEY}"
+      SECRET_KEY: "taurus-vision-dev-secret-change-in-production-2024"
       INITIAL_ADMIN_EMAIL: "admin@taurus.uz"
       INITIAL_ADMIN_USERNAME: "admin"
       INITIAL_ADMIN_PASSWORD: "Admin1234"

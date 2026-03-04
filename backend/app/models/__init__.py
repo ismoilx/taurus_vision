@@ -19,8 +19,10 @@ from app.models.adi_log          import ADILog, ADICategory
 from app.models.alert            import Alert, AlertType, AlertSeverity, AlertStatus
 from app.models.health_prediction import HealthPrediction, RiskLevel
 from app.models.audit_log        import AuditLog, AuditEventType, AuditSeverity
+from app.models.sensor_reading   import SensorReading
 
 __all__ = [
+    "SensorReading",
     # Base
     "BaseModel",
     # Auth

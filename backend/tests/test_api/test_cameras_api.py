@@ -12,6 +12,7 @@ Tests all camera API endpoints:
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from app.services.camera.camera_manager import camera_manager
 

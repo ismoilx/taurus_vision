@@ -42,6 +42,13 @@ class Animal(BaseModel):
 
     Represents a single animal in the farm with all its attributes,
     tracking information, and relationships to all monitoring subsystems.
+
+    LAZY LOADING STRATEGY:
+        - detections, weight_measurements, health_records, embeddings:
+          lazy='noload' — API endpointlarda explicit selectinload() ishlatiladi.
+          Bu 1000+ jonivor bo'lganda N+1 query muammosini oldini oladi.
+        - adi_logs, alerts, health_predictions:
+          lazy='dynamic' — time-series, faqat kerak bo'lganda chaqiriladi.
     """
 
     __tablename__ = "animals"
@@ -127,11 +134,12 @@ class Animal(BaseModel):
     # Relationships                                                        #
     # ------------------------------------------------------------------ #
 
+    # noload: API endpointda kerak bo'lganda selectinload() ishlatiladi
     detections: Mapped[list["Detection"]] = relationship(  # type: ignore[name-defined]
         "Detection",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
         order_by="Detection.timestamp.desc()",
     )
 
@@ -139,7 +147,7 @@ class Animal(BaseModel):
         "WeightMeasurement",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
         order_by="WeightMeasurement.timestamp.desc()",
     )
 
@@ -147,7 +155,7 @@ class Animal(BaseModel):
         "AnimalEmbedding",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
         order_by="AnimalEmbedding.created_at.desc()",
     )
 
@@ -155,17 +163,16 @@ class Animal(BaseModel):
         "HealthRecord",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        lazy="noload",
         order_by="HealthRecord.recorded_at.desc()",
     )
 
-    # ---- YANGI -------------------------------------------------------- #
-
+    # dynamic: katta time-series, lazy load optimal
     adi_logs: Mapped[list["ADILog"]] = relationship(  # type: ignore[name-defined]
         "ADILog",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="dynamic",          # dynamic: katta time-series, lazy load
+        lazy="dynamic",
         order_by="ADILog.calculation_date.desc()",
     )
 
@@ -173,7 +180,7 @@ class Animal(BaseModel):
         "Alert",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="dynamic",          # dynamic: ko'p alert bo'lishi mumkin
+        lazy="dynamic",
         order_by="Alert.triggered_at.desc()",
     )
 
@@ -181,7 +188,7 @@ class Animal(BaseModel):
         "HealthPrediction",
         back_populates="animal",
         cascade="all, delete-orphan",
-        lazy="dynamic",          # dynamic: kunlik yozuvlar, lazy load optimal
+        lazy="dynamic",
         order_by="HealthPrediction.prediction_date.desc()",
     )
 

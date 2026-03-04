@@ -1027,21 +1027,29 @@ class ADIService:
         period_end: datetime,
     ) -> Optional[dict[str, float]]:
         """
-        IoT sensor ma'lumotlarini olish.
+        IoT sensor ma'lumotlarini olish — real DB dan.
 
-        Hozir simulyatsiya — real sensor integratsiyasi
-        kelajakda shu yerga qo'shiladi.
+        SensorReading jadvalidan kunlik o'rtacha qiymatlar.
+        Sensor bo'lmasa None qaytaradi (ADI 70.0 simulyatsiya ishlatadi).
 
         Args:
             animal_id:    Jonivor ID
-            period_start: Period boshi
-            period_end:   Period oxiri
+            period_start: Period boshi (UTC)
+            period_end:   Period oxiri (UTC)
 
         Returns:
-            Sensor data dict yoki None
+            {"temperature": float, "heart_rate": float, ...} yoki None
         """
-        # TODO: Real IoT sensor jadvalidan olish (Sprint 17-20)
-        return None
+        try:
+            from app.repositories.sensor_repository import SensorRepository
+            sensor_repo = SensorRepository(self.db)
+            date_str    = period_start.strftime("%Y-%m-%d")
+            return await sensor_repo.get_daily_summary(animal_id, date_str)
+        except Exception as e:
+            logger.warning(
+                f"Sensor data fetch failed for animal {animal_id}: {e}"
+            )
+            return None
 
     async def _get_animal(self, animal_id: int) -> Animal:
         """
