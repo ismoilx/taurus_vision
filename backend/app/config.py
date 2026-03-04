@@ -15,8 +15,10 @@ FOYDALANISH:
     print(settings.DATABASE_URL)
 """
 
+import secrets
 from pathlib import Path
 from typing import Optional
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -202,6 +204,82 @@ class Settings(BaseSettings):
     # =========================================================================
     # PYDANTIC SETTINGS
     # =========================================================================
+
+    @model_validator(mode="after")
+    def _enforce_secret_key_security(self) -> "Settings":
+        """
+        SECRET_KEY xavfsizligini Pydantic darajasida tekshirish.
+
+        Bu validator Settings ob'ekti yaratilayotganda (import vaqtida) ishga
+        tushadi — ya'ni application start bo'lishidan AVVAL.
+
+        QOIDALAR:
+            Production (DEBUG=False):
+                - Default yoki zaif kalit → ValueError → tizim ISHGA TUSHMAYDI.
+                - Kalit uzunligi < 32 belgi → ValueError → tizim ISHGA TUSHMAYDI.
+            Development (DEBUG=True):
+                - Default yoki zaif kalit → faqat stderr ga ogohlantirish.
+                - Kalit uzunligi < 32 → faqat ogohlantirish.
+
+        YANGI KALIT YARATISH:
+            python -c "import secrets; print(secrets.token_hex(32))"
+            # yoki
+            openssl rand -hex 32
+            # yoki Makefile orqali:
+            make gen-secret
+        """
+        import sys
+
+        _INSECURE_DEFAULTS: frozenset[str] = frozenset({
+            "changeme-use-secrets-token-hex-32-in-production",
+            "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32",
+            "changeme",
+            "secret",
+            "your-secret-key",
+            "development-secret",
+            "test-secret",
+            "your-secret-key-here-change-in-production",
+            "",
+        })
+
+        key        = self.SECRET_KEY
+        is_debug   = self.DEBUG
+        hint       = (
+            "\n  Yangi xavfsiz kalit yaratish uchun:\n"
+            "    python -c \"import secrets; print(secrets.token_hex(32))\"\n"
+            "  yoki:\n"
+            "    make gen-secret\n"
+            "  Yaratilgan kalitni backend/.env fayliga yozing:\n"
+            "    SECRET_KEY=<yaratilgan_kalit>\n"
+        )
+
+        if key in _INSECURE_DEFAULTS:
+            msg = (
+                f"[TAURUS VISION] SECRET_KEY xavfli default qiymatda!{hint}"
+            )
+            if not is_debug:
+                # Production: to'xtatish — bu KRITIK xavfsizlik xatosi
+                raise ValueError(
+                    f"[PRODUCTION BLOCKER] {msg}"
+                )
+            # Development: faqat ogohlantirish, ishga tushishga ruxsat
+            print(f"\n{'='*70}\n⚠️  SECURITY WARNING: {msg}{'='*70}\n",
+                  file=sys.stderr)
+            return self
+
+        if len(key) < 32:
+            msg = (
+                f"[TAURUS VISION] SECRET_KEY juda qisqa "
+                f"({len(key)} belgi, minimum 32 kerak)!{hint}"
+            )
+            if not is_debug:
+                raise ValueError(
+                    f"[PRODUCTION BLOCKER] {msg}"
+                )
+            print(f"\n{'='*70}\n⚠️  SECURITY WARNING: {msg}{'='*70}\n",
+                  file=sys.stderr)
+
+        return self
 
     model_config = SettingsConfigDict(
         env_file          = ".env",

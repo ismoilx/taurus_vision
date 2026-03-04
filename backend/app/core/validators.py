@@ -91,11 +91,14 @@ class EnvironmentValidator:
         """
         INSECURE_DEFAULTS = {
             "changeme-use-secrets-token-hex-32-in-production",
+            "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32",
+            "your-secret-key-here-change-in-production",
             "changeme",
             "secret",
             "your-secret-key",
             "development-secret",
             "test-secret",
+            "",
         }
         key = settings.SECRET_KEY
 

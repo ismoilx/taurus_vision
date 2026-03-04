@@ -174,10 +174,20 @@ def _json_serializer(obj: Any) -> str:
 # ─── Cache key helpers ────────────────────────────────────────────────────────
 
 class CacheKeys:
-    """Kesh kalit konstantalari — typo xatolarini oldini oladi."""
+    """
+    Kesh kalit konstantalari — typo xatolarini oldini oladi.
+
+    SPRINT 21-24 QO'SHIMCHALAR:
+        HERD_STATISTICS      — poda statistikasi (3 daqiqa)
+        adi_trend()          — ADI trend (5 daqiqa)
+        growth_trend()       — O'sish trendi (5 daqiqa)
+        behavior_trend()     — Xatti-harakat trendi (5 daqiqa)
+        insights()           — Avtomatik tushunchalar (10 daqiqa)
+    """
 
     OVERVIEW          = "analytics:overview"
     HEALTH_METRICS    = "analytics:health"
+    HERD_STATISTICS   = "analytics:herd_statistics"   # Sprint 23
 
     @staticmethod
     def weight_trend(days: int) -> str:
@@ -190,3 +200,30 @@ class CacheKeys:
     @staticmethod
     def animals_overview() -> str:
         return "analytics:animals_overview"
+
+    # ------------------------------------------------------------------
+    # Sprint 21-24 yangi kalit metodlari
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def adi_trend(animal_id: Optional[int], days: int) -> str:
+        """ADI trend kesh kaliti — animal_id=None bo'lsa herd-wide."""
+        aid = animal_id if animal_id is not None else "herd"
+        return f"analytics:adi_trend:{aid}:{days}"
+
+    @staticmethod
+    def growth_trend(animal_id: Optional[int], days: int) -> str:
+        """O'sish trendi kesh kaliti."""
+        aid = animal_id if animal_id is not None else "herd"
+        return f"analytics:growth_trend:{aid}:{days}"
+
+    @staticmethod
+    def behavior_trend(animal_id: Optional[int], days: int) -> str:
+        """Xatti-harakat trendi kesh kaliti."""
+        aid = animal_id if animal_id is not None else "herd"
+        return f"analytics:behavior_trend:{aid}:{days}"
+
+    @staticmethod
+    def insights(days: int) -> str:
+        """Avtomatik tushunchalar kesh kaliti."""
+        return f"analytics:insights:{days}"

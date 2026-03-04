@@ -105,3 +105,15 @@ migration: ## Yangi migratsiya yaratish (nom so'raladi)
 
 status: ## Xizmatlar holatini ko'rsatish
 	docker compose ps
+
+gen-secret: ## Yangi xavfsiz SECRET_KEY yaratish (backend/.env ga yozing)
+	@echo ""
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  Yangi SECRET_KEY:"
+	@echo ""
+	@python3 -c "import secrets; key = secrets.token_hex(32); print('  SECRET_KEY=' + key)"
+	@echo ""
+	@echo "  Bu qiymatni backend/.env fayliga ko'chiring."
+	@echo "  Eski kalitni HECH QACHON qayta ishlatmang!"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""

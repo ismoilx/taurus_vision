@@ -1,22 +1,34 @@
 """
-Analytics API Endpoints - Taurus Vision
+Taurus Vision — Analytics API Endpoints (Sprint 21-24)
 
-REST API endpoints for analytics and statistics.
-Provides comprehensive data for dashboards, charts, and reports.
+MAVJUD ENDPOINT'LAR (Sprint 1-20):
+    GET /analytics/overview              — Dashboard ko'rsatkichlari
+    GET /analytics/trends/weight         — Vazn o'zgarish grafigi
+    GET /analytics/patterns/detection    — Deteksiya naqshlari
+    GET /analytics/health/metrics        — Sog'liq ko'rsatkichlari
+    GET /analytics/cameras/performance   — Kamera samaradorligi
 
-PERFORMANCE:
-  Redis cache qo'shildi — og'ir DB so'rovlar keshlanadi:
-    - /overview        → 60s cache
-    - /trends/weight   → 5 daqiqa cache
-    - /patterns/*      → 5 daqiqa cache
-    - /health/metrics  → 2 daqiqa cache
+SPRINT 21-24 YANGI ENDPOINT'LAR:
+    GET /analytics/trends/adi            — ADI ball trendi (individual yoki poda)
+    GET /analytics/trends/growth         — O'sish egri chizig'i + regressiya
+    GET /analytics/trends/behavior       — Xatti-harakat komponentlari trenди
+    GET /analytics/compare/animals       — Ko'p jonivorni yonma-yon taqqoslash
+    GET /analytics/compare/periods       — Davr-davr taqqoslash
+    GET /analytics/herd/statistics       — Poda to'liq statistikasi
+    GET /analytics/insights              — Avtomatik tushunchalar
 
-Author: Taurus Vision Team
-Date: 2026-02-16
+KESH STRATEGIYASI:
+    /overview            → 60s  (real-time muhim)
+    /trends/*            → 5 daqiqa (tarixiy ma'lumot)
+    /patterns/*          → 5 daqiqa
+    /health/metrics      → 2 daqiqa
+    /herd/statistics     → 3 daqiqa
+    /insights            → 10 daqiqa (qoidalar nisbatan barqaror)
+    /compare/*           → keshlanmaydi (dinamik parametrlar)
 """
 
-from datetime import date, datetime, timedelta
-from typing import Optional
+from datetime import date, timedelta, datetime
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,679 +38,551 @@ from app.core.logging_config import get_logger
 from app.core.cache import cache_get, cache_set, CacheKeys
 from app.services.analytics_service import AnalyticsService
 from app.schemas.analytics import (
+    # Sprint 1-20
     DashboardOverview,
     WeightTrendsResponse,
     WeightTrendPoint,
     DetectionPatternsResponse,
     HealthMetricsResponse,
     CameraPerformanceResponse,
+    # Sprint 21-24
+    ADITrendsResponse,
+    ADITrendPoint,
+    ADITrendStats,
+    GrowthTrendsResponse,
+    GrowthPoint,
+    LinearRegressionStats,
+    BehaviorTrendsResponse,
+    BehaviorTrendPoint,
+    AnimalComparisonResponse,
+    AnimalMetricSummary,
+    PeriodComparisonResponse,
+    PeriodMetrics,
+    PeriodDelta,
+    HerdStatisticsResponse,
+    InsightsResponse,
+    InsightItem,
+    InsightsSummary,
 )
 
 logger = get_logger(__name__)
 
-# Create router
-router = APIRouter(prefix="/analytics", tags=["analytics"], dependencies=[Depends(get_current_active_user)])
+router = APIRouter(
+    prefix="/analytics",
+    tags=["Analytics"],
+    dependencies=[Depends(get_current_active_user)],
+)
 
-# Initialize service (singleton pattern would be better in production)
-analytics_service = AnalyticsService()
+# ---------------------------------------------------------------------------
+# Singleton servis — modul yuklanishida bir marta yaratiladi
+# ---------------------------------------------------------------------------
+_analytics_service = AnalyticsService()
 
 
 # =============================================================================
-# DASHBOARD OVERVIEW
+# DASHBOARD OVERVIEW  (Sprint 1-8)
 # =============================================================================
 
 @router.get(
     "/overview",
     response_model=DashboardOverview,
-    summary="Get dashboard overview",
-    description="""
-    Get comprehensive dashboard overview statistics.
-    
-    Returns:
-    - Animal counts (total, active, by status)
-    - Detection counts (today, week, month, total)
-    - Weight statistics (average, change percentage)
-    - Camera system status
-    - Recent activity
-    - Active alerts
-    
-    This endpoint is optimized for dashboard rendering and provides
-    all key metrics in a single request.
-    """,
-    responses={
-        200: {
-            "description": "Dashboard overview retrieved successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "timestamp": "2026-02-16T10:30:45.123456",
-                        "animals": {
-                            "total": 45,
-                            "active": 42,
-                            "by_status": {
-                                "active": 42,
-                                "sold": 2,
-                                "deceased": 1
-                            }
-                        },
-                        "detections": {
-                            "today": 156,
-                            "week": 1087,
-                            "month": 4523,
-                            "total": 15647
-                        },
-                        "weight": {
-                            "average_kg": 245.7,
-                            "change_percentage_7d": 2.3
-                        },
-                        "system": {
-                            "cameras": {
-                                "total": 3,
-                                "running": 3,
-                                "healthy": 3,
-                                "status": "healthy"
-                            }
-                        },
-                        "recent_activity": [],
-                        "alerts": []
-                    }
-                }
-            }
-        },
-        500: {"description": "Internal server error"}
-    },
-    tags=["Analytics"]
+    summary="Dashboard uchun asosiy ko'rsatkichlar",
+    description=(
+        "Barcha asosiy metrikalar bitta so'rovda: jonivorlar, deteksiyalar, "
+        "vazn, kamera holati, so'nggi faollik, alertlar.\n\n"
+        "**Kesh**: 60 soniya (Redis)."
+    ),
 )
 async def get_dashboard_overview(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> DashboardOverview:
-    """
-    Get comprehensive dashboard overview.
-    Redis cache: 60 soniya — og'ir DB so'rovdan qaytadigan vaqt 100-300ms edi,
-    endi keshdan <5ms da qaytadi.
-    """
-    logger.info("API call: GET /analytics/overview")
-
-    # ── Cache check ──────────────────────────────────────────────────────────
+    """Dashboard overview — Redis cache 60s."""
     cached = await cache_get(CacheKeys.OVERVIEW)
     if cached is not None:
         logger.debug("Cache HIT: analytics:overview")
         return DashboardOverview(**cached)
 
-    # ── DB dan hisoblash ─────────────────────────────────────────────────────
     try:
-        overview = await analytics_service.get_dashboard_overview(db)
-
-        logger.info(
-            "Dashboard overview generated",
-            extra={
-                "extra_data": {
-                    "total_animals": overview["animals"]["total"],
-                    "detections_today": overview["detections"]["today"],
-                    "active_alerts": len(overview["alerts"])
-                }
-            }
-        )
-
-        # 60 soniya kesh
+        overview = await _analytics_service.get_dashboard_overview(db)
         await cache_set(CacheKeys.OVERVIEW, overview, ttl=60)
-
         return DashboardOverview(**overview)
-
-    except Exception as e:
-        logger.error(f"Error generating dashboard overview: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate dashboard overview"
-        )
+    except Exception as exc:
+        logger.error(f"Dashboard overview error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate dashboard overview")
 
 
 # =============================================================================
-# WEIGHT TRENDS
+# WEIGHT TRENDS  (Sprint 7-8)
 # =============================================================================
 
 @router.get(
     "/trends/weight",
     response_model=WeightTrendsResponse,
-    summary="Get weight trends",
-    description="""
-    Get weight trend data for charting and analysis.
-    
-    Parameters:
-    - animal_id: Specific animal (optional, omit for farm-wide average)
-    - days: Number of days to look back (default: 30, max: 365)
-    - aggregation: Data granularity (daily/weekly/monthly)
-    
-    Returns time-series data suitable for line charts, showing:
-    - Average weight over time
-    - Min/max weight (useful for error bars)
-    - Measurement counts
-    - Animal counts (for farm-wide trends)
-    
-    Use cases:
-    - Individual animal weight tracking
-    - Farm-wide weight trends
-    - Growth rate analysis
-    - Health monitoring
-    """,
-    responses={
-        200: {
-            "description": "Weight trends retrieved successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "data": [
-                            {
-                                "date": "2026-02-16",
-                                "average_weight": 245.7,
-                                "min_weight": 220.3,
-                                "max_weight": 278.9,
-                                "measurement_count": 15,
-                                "animal_count": 12
-                            }
-                        ],
-                        "animal_id": None,
-                        "period_days": 30
-                    }
-                }
-            }
-        },
-        400: {"description": "Invalid parameters"},
-        404: {"description": "Animal not found"},
-        500: {"description": "Internal server error"}
-    },
-    tags=["Analytics"]
+    summary="Vazn o'zgarish grafigi",
+    description=(
+        "Belgilangan davr uchun vazn time-series ma'lumotlari.\n\n"
+        "- `animal_id` ko'rsatilsa: o'sha jonivorning individual grafikasi.\n"
+        "- Ko'rsatilmasa: butun ferma bo'yicha o'rtacha.\n\n"
+        "**Kesh**: 5 daqiqa (farm-wide)."
+    ),
 )
 async def get_weight_trends(
-    animal_id: Optional[int] = Query(
-        None,
-        description="Specific animal ID (omit for farm-wide average)",
-        gt=0
-    ),
-    days: int = Query(
-        30,
-        description="Number of days to look back",
-        ge=1,
-        le=365
-    ),
-    aggregation: str = Query(
-        "daily",
-        description="Data aggregation level",
-        pattern="^(daily|weekly|monthly)$"
-    ),
-    db: AsyncSession = Depends(get_db)
+    animal_id: Optional[int] = Query(None, gt=0, description="Jonivor ID (ixtiyoriy)"),
+    days:      int            = Query(30, ge=1, le=365, description="Necha kunlik tarix"),
+    aggregation: str          = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    db: AsyncSession = Depends(get_db),
 ) -> WeightTrendsResponse:
-    """
-    Get weight trend data for charting.
-    
-    This endpoint is optimized for frontend chart libraries.
-    The data format is compatible with Chart.js, Recharts, and similar.
-    
-    Frontend usage example:
-    ```javascript
-    const response = await fetch('/api/v1/analytics/trends/weight?days=30');
-    const { data } = await response.json();
-    
-    // Use in Chart.js
-    const chartData = {
-      labels: data.map(point => point.date),
-      datasets: [{
-        label: 'Average Weight (kg)',
-        data: data.map(point => point.average_weight)
-      }]
-    };
-    ```
-    """
-    logger.info(
-        f"API call: GET /analytics/trends/weight",
-        extra={
-            "extra_data": {
-                "animal_id": animal_id,
-                "days": days,
-                "aggregation": aggregation
-            }
-        }
-    )
-
-    # ── Cache check (faqat farm-wide, animal_id yo'q bo'lsa) ─────────────────
+    """Vazn trenди — Redis 5 daqiqa (farm-wide so'rovlar uchun)."""
     cache_key = CacheKeys.weight_trend(days) if animal_id is None else None
     if cache_key:
         cached = await cache_get(cache_key)
         if cached is not None:
-            logger.debug(f"Cache HIT: {cache_key}")
             return WeightTrendsResponse(**cached)
 
     try:
-        # Validate animal exists if specified
         if animal_id is not None:
             from app.repositories.animal import AnimalRepository
-            animal_repo = AnimalRepository()
-            animal = await animal_repo.get_by_id(db, animal_id)
-            if not animal:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Animal with id {animal_id} not found"
-                )
+            if not await AnimalRepository().get_by_id(db, animal_id):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"Animal {animal_id} not found")
 
-        # Get trends
-        trends = await analytics_service.get_weight_trends(
-            db,
-            animal_id=animal_id,
-            days=days,
-            aggregation=aggregation
-        )
-
-        logger.info(
-            f"Weight trends generated: {len(trends)} data points",
-            extra={
-                "extra_data": {
-                    "animal_id": animal_id,
-                    "data_points": len(trends)
-                }
-            }
-        )
-
+        trends = await _analytics_service.get_weight_trends(db, animal_id=animal_id, days=days, aggregation=aggregation)
         response = WeightTrendsResponse(
-            data=[WeightTrendPoint(**point) for point in trends],
+            data=[WeightTrendPoint(**p) for p in trends],
             animal_id=animal_id,
-            period_days=days
+            period_days=days,
         )
-
-        # 5 daqiqa kesh (tarixiy ma'lumot, tez o'zgarmaydi)
         if cache_key:
             await cache_set(cache_key, response.model_dump(), ttl=300)
-
         return response
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error generating weight trends: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate weight trends"
-        )
+    except Exception as exc:
+        logger.error(f"Weight trends error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate weight trends")
 
 
 # =============================================================================
-# DETECTION PATTERNS
+# DETECTION PATTERNS  (Sprint 7-8)
 # =============================================================================
 
 @router.get(
     "/patterns/detection",
     response_model=DetectionPatternsResponse,
-    summary="Analyze detection patterns",
-    description="""
-    Analyze detection patterns over a date range.
-    
-    Returns comprehensive detection analytics:
-    - 24-hour heatmap (detections per hour)
-    - Daily detection counts
-    - Per-camera statistics
-    - Top detected animals
-    - Peak detection times
-    - Detection rate metrics
-    
-    Use cases:
-    - Identify peak activity times
-    - Compare camera performance
-    - Detect behavioral patterns
-    - Optimize camera placement
-    - Schedule maintenance windows
-    """,
-    responses={
-        200: {
-            "description": "Detection patterns analyzed successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "date_range": {
-                            "from": "2026-02-01",
-                            "to": "2026-02-16",
-                            "days": 16
-                        },
-                        "detections_by_hour": [12, 8, 5, 3, 2, 4, 15, 45, 78, 92, 105, 98, 87, 76, 65, 58, 62, 71, 83, 67, 52, 38, 25, 18],
-                        "detections_by_day": [],
-                        "detections_by_camera": [],
-                        "top_detected_animals": [],
-                        "statistics": {
-                            "total_detections": 1234,
-                            "detection_rate_per_hour": 3.2,
-                            "peak_hour": 10
-                        }
-                    }
-                }
-            }
-        },
-        400: {"description": "Invalid date range"},
-        500: {"description": "Internal server error"}
-    },
-    tags=["Analytics"]
+    summary="Deteksiya naqshlari tahlili",
+    description=(
+        "Sana oralig'i uchun soat/kun/kamera bo'yicha deteksiya statistikasi.\n\n"
+        "24 soatlik heatmap, kundagi jadval, top-10 jonivorlar."
+    ),
 )
 async def get_detection_patterns(
-    date_from: date = Query(
-        ...,
-        description="Start date (YYYY-MM-DD)"
-    ),
-    date_to: date = Query(
-        ...,
-        description="End date (YYYY-MM-DD)"
-    ),
-    db: AsyncSession = Depends(get_db)
+    date_from: date = Query(..., description="Boshlanish sanasi YYYY-MM-DD"),
+    date_to:   date = Query(..., description="Tugash sanasi YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db),
 ) -> DetectionPatternsResponse:
-    """
-    Analyze detection patterns over a date range.
-    
-    The 24-hour heatmap is particularly useful for understanding
-    animal activity patterns throughout the day. This can help:
-    - Optimize feeding schedules
-    - Identify unusual behavior
-    - Schedule farm activities
-    - Detect health issues (reduced activity)
-    
-    Performance note: Large date ranges (>90 days) may take longer.
-    Consider using smaller ranges for real-time dashboards.
-    """
-    logger.info(
-        f"API call: GET /analytics/patterns/detection",
-        extra={
-            "extra_data": {
-                "date_from": date_from.isoformat(),
-                "date_to": date_to.isoformat()
-            }
-        }
-    )
-    
-    # Validate date range
     if date_to < date_from:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="date_to must be >= date_from"
-        )
-    
-    # Limit range to 1 year
-    days_diff = (date_to - date_from).days
-    if days_diff > 365:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Date range cannot exceed 365 days"
-        )
-    
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "date_to must be >= date_from")
+    if (date_to - date_from).days > 365:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Date range cannot exceed 365 days")
+
     try:
-        patterns = await analytics_service.get_detection_patterns(
-            db,
-            date_from=date_from,
-            date_to=date_to
-        )
-        
-        logger.info(
-            "Detection patterns analyzed",
-            extra={
-                "extra_data": {
-                    "total_detections": patterns["statistics"]["total_detections"],
-                    "days_analyzed": days_diff + 1
-                }
-            }
-        )
-        
+        patterns = await _analytics_service.get_detection_patterns(db, date_from, date_to)
         return DetectionPatternsResponse(**patterns)
-        
-    except Exception as e:
-        logger.error(f"Error analyzing detection patterns: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to analyze detection patterns"
-        )
+    except Exception as exc:
+        logger.error(f"Detection patterns error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to analyze detection patterns")
 
 
 # =============================================================================
-# HEALTH METRICS
+# HEALTH METRICS  (Sprint 11-12)
 # =============================================================================
 
 @router.get(
     "/health/metrics",
     response_model=HealthMetricsResponse,
-    summary="Get health metrics",
-    description="""
-    Calculate comprehensive health metrics and indicators.
-    
-    Returns:
-    - Animal distribution by status
-    - Weight distribution across ranges
-    - Active health alerts (weight loss, no detection)
-    - Overall risk score (0-100)
-    
-    The risk score is calculated based on:
-    - Inactive/deceased animal ratios
-    - Number of critical alerts
-    - Number of warning alerts
-    - Detection frequency issues
-    
-    Risk score interpretation:
-    - 0-20: Low risk (healthy farm)
-    - 21-50: Medium risk (monitor closely)
-    - 51-80: High risk (action recommended)
-    - 81-100: Critical risk (immediate action required)
-    """,
-    responses={
-        200: {
-            "description": "Health metrics calculated successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "animals_by_status": {
-                            "active": 42,
-                            "sold": 2,
-                            "deceased": 1
-                        },
-                        "weight_distribution": {
-                            "0-100kg": 5,
-                            "100-200kg": 12,
-                            "200-300kg": 18,
-                            "300-400kg": 8,
-                            "400kg+": 2
-                        },
-                        "alerts": [],
-                        "alert_summary": {
-                            "total": 5,
-                            "critical": 1,
-                            "warning": 4
-                        },
-                        "risk_score": 23,
-                        "timestamp": "2026-02-16T10:30:45.123456"
-                    }
-                }
-            }
-        },
-        500: {"description": "Internal server error"}
-    },
-    tags=["Analytics"]
+    summary="Sog'liq ko'rsatkichlari",
+    description=(
+        "Jonivorlar holati taqsimoti, vazn tarqalishi, alertlar va "
+        "umumiy xavf balli (0-100).\n\n"
+        "**Kesh**: 2 daqiqa."
+    ),
 )
-async def get_health_metrics(
-    db: AsyncSession = Depends(get_db)
-) -> HealthMetricsResponse:
-    """
-    Calculate comprehensive health metrics.
-    Redis cache: 2 daqiqa — sog'liq ko'rsatkichlari real-time emas.
-    """
-    logger.info("API call: GET /analytics/health/metrics")
-
-    # ── Cache check ──────────────────────────────────────────────────────────
+async def get_health_metrics(db: AsyncSession = Depends(get_db)) -> HealthMetricsResponse:
     cached = await cache_get(CacheKeys.HEALTH_METRICS)
     if cached is not None:
-        logger.debug("Cache HIT: analytics:health")
         return HealthMetricsResponse(**cached)
 
     try:
-        metrics = await analytics_service.get_health_metrics(db)
-
-        logger.info(
-            "Health metrics calculated",
-            extra={
-                "extra_data": {
-                    "risk_score": metrics["risk_score"],
-                    "total_alerts": metrics["alert_summary"]["total"],
-                    "critical_alerts": metrics["alert_summary"]["critical"]
-                }
-            }
-        )
-
-        response = HealthMetricsResponse(**metrics)
-        # 2 daqiqa kesh
+        metrics = await _analytics_service.get_health_metrics(db)
         await cache_set(CacheKeys.HEALTH_METRICS, metrics, ttl=120)
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Error calculating health metrics: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to calculate health metrics"
-        )
+        return HealthMetricsResponse(**metrics)
+    except Exception as exc:
+        logger.error(f"Health metrics error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to calculate health metrics")
 
 
 # =============================================================================
-# CAMERA PERFORMANCE
+# CAMERA PERFORMANCE  (Sprint 9-10)
 # =============================================================================
 
 @router.get(
     "/cameras/performance",
     response_model=CameraPerformanceResponse,
-    summary="Analyze camera performance",
-    description="""
-    Analyze camera performance metrics over a period.
-    
-    Parameters:
-    - camera_id: Specific camera (optional, omit for all cameras)
-    - days: Number of days to analyze (default: 7, max: 90)
-    
-    Returns per-camera:
-    - Current status (running/stopped/error)
-    - Uptime percentage
-    - Detection statistics
-    - Detection rate (per hour)
-    - Average confidence score
-    - Current FPS
-    - Error counts
-    
-    Use cases:
-    - Monitor camera health
-    - Identify failing cameras
-    - Optimize camera placement
-    - Compare camera performance
-    - Schedule maintenance
-    """,
-    responses={
-        200: {
-            "description": "Camera performance analyzed successfully",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "period": {
-                            "days": 7,
-                            "from": "2026-02-09T10:30:45.123456",
-                            "to": "2026-02-16T10:30:45.123456"
-                        },
-                        "cameras": [
-                            {
-                                "camera_id": "camera_01",
-                                "status": "running",
-                                "uptime_percentage": 99.8,
-                                "total_detections": 523,
-                                "detections_per_hour": 3.1,
-                                "average_confidence": 0.892,
-                                "fps": 10.5,
-                                "errors": 2,
-                                "total_frames": 176400
-                            }
-                        ],
-                        "summary": {
-                            "total_cameras": 3,
-                            "running_cameras": 3,
-                            "total_detections": 1523,
-                            "average_fps": 10.2
-                        }
-                    }
-                }
-            }
-        },
-        400: {"description": "Invalid parameters"},
-        500: {"description": "Internal server error"}
-    },
-    tags=["Analytics"]
+    summary="Kamera ishlash samaradorligi",
+    description=(
+        "Har bir kamera uchun: uptime, deteksiya soni, o'rtacha confidence, FPS, xatoliklar.\n\n"
+        "Real-time pipeline_manager holati bilan boyitiladi."
+    ),
 )
 async def get_camera_performance(
-    camera_id: Optional[str] = Query(
-        None,
-        description="Specific camera ID (omit for all cameras)",
-        min_length=1,
-        max_length=100
-    ),
-    days: int = Query(
-        7,
-        description="Number of days to analyze",
-        ge=1,
-        le=90
-    ),
-    db: AsyncSession = Depends(get_db)
+    camera_id: Optional[str] = Query(None, min_length=1, max_length=100),
+    days:      int            = Query(7, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
 ) -> CameraPerformanceResponse:
-    """
-    Analyze camera performance metrics.
-    
-    This endpoint helps identify camera issues before they impact
-    the system. Key metrics to monitor:
-    
-    - Uptime: Should be >95% for healthy cameras
-    - Detection rate: Compare across cameras (similar positions should have similar rates)
-    - Confidence: Low average confidence may indicate dirty lens or poor positioning
-    - FPS: Should match configured FPS (default: 10)
-    - Errors: High error count requires investigation
-    
-    Troubleshooting:
-    - Low uptime: Check network connectivity, power supply
-    - Low detection rate: Check camera angle, lighting
-    - Low confidence: Clean lens, adjust position
-    - High errors: Check logs for specific error messages
-    """
-    logger.info(
-        f"API call: GET /analytics/cameras/performance",
-        extra={
-            "extra_data": {
-                "camera_id": camera_id,
-                "days": days
-            }
-        }
-    )
-    
-    # Validate days range
-    if days < 1 or days > 90:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="days must be between 1 and 90"
-        )
-    
     try:
-        performance = await analytics_service.get_camera_performance(
-            db,
-            camera_id=camera_id,
-            days=days
-        )
-        
-        logger.info(
-            "Camera performance analyzed",
-            extra={
-                "extra_data": {
-                    "cameras_analyzed": performance["summary"]["total_cameras"],
-                    "running_cameras": performance["summary"]["running_cameras"]
-                }
-            }
-        )
-        
+        performance = await _analytics_service.get_camera_performance(db, camera_id=camera_id, days=days)
         return CameraPerformanceResponse(**performance)
-        
-    except Exception as e:
-        logger.error(f"Error analyzing camera performance: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to analyze camera performance"
+    except Exception as exc:
+        logger.error(f"Camera performance error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to analyze camera performance")
+
+
+# =============================================================================
+# SPRINT 21 — ADI TRENDS
+# =============================================================================
+
+@router.get(
+    "/trends/adi",
+    response_model=ADITrendsResponse,
+    summary="ADI ball trenди (Sprint 21)",
+    description=(
+        "Animal Development Index (ADI) ball o'zgarishi grafigi.\n\n"
+        "- `animal_id` ko'rsatilsa: individual jonivorning 8 komponentli ADI tarixи.\n"
+        "- Ko'rsatilmasa: poda darajasidagi o'rtacha ADI.\n\n"
+        "Trend yo'nalishi (improving/declining/stable) ham qaytariladi.\n\n"
+        "**Kesh**: 5 daqiqa."
+    ),
+    responses={
+        200: {"description": "ADI trend muvaffaqiyatli qaytarildi"},
+        404: {"description": "Jonivor topilmadi"},
+    },
+)
+async def get_adi_trends(
+    animal_id: Optional[int] = Query(None, gt=0, description="Jonivor ID (ixtiyoriy — bo'sh = butun poda)"),
+    days:      int            = Query(30, ge=7, le=365, description="Qancha kunlik tarix (7-365)"),
+    db: AsyncSession = Depends(get_db),
+) -> ADITrendsResponse:
+    """ADI trend — individual yoki herd-wide."""
+    cache_key = CacheKeys.adi_trend(animal_id, days)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache HIT: {cache_key}")
+        return ADITrendsResponse(**cached)
+
+    try:
+        result = await _analytics_service.get_adi_trends(db, animal_id=animal_id, days=days)
+
+        response = ADITrendsResponse(
+            animal_id=result["animal_id"],
+            animal_tag=result["animal_tag"],
+            period_days=result["period_days"],
+            data=[ADITrendPoint(**p) for p in result["data"]],
+            stats=ADITrendStats(**result["stats"]),
         )
+        await cache_set(cache_key, response.model_dump(), ttl=300)
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    except Exception as exc:
+        logger.error(f"ADI trends error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate ADI trends")
+
+
+# =============================================================================
+# SPRINT 21 — GROWTH TRENDS
+# =============================================================================
+
+@router.get(
+    "/trends/growth",
+    response_model=GrowthTrendsResponse,
+    summary="O'sish egri chizig'i + regressiya (Sprint 21)",
+    description=(
+        "Vazn o'zgarishi time-series va chiziqli regressiya tahlili.\n\n"
+        "**Regressiya** (faqat >= 3 o'lchov bo'lganda):\n"
+        "- `slope_kg_per_day`: kunlik o'rtacha o'sish\n"
+        "- `r_squared`: regressiya sifati\n"
+        "- `projected_weight_30d`: 30 kunlik prognoz\n\n"
+        "**Kesh**: 5 daqiqa."
+    ),
+)
+async def get_growth_trends(
+    animal_id: Optional[int] = Query(None, gt=0, description="Jonivor ID (bo'sh = butun poda)"),
+    days:      int            = Query(90, ge=14, le=365, description="Tahlil davri kunlarda (14-365)"),
+    db: AsyncSession = Depends(get_db),
+) -> GrowthTrendsResponse:
+    """O'sish egri chizig'i va linear regressiya."""
+    cache_key = CacheKeys.growth_trend(animal_id, days)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return GrowthTrendsResponse(**cached)
+
+    try:
+        result = await _analytics_service.get_growth_trends(db, animal_id=animal_id, days=days)
+
+        regression = LinearRegressionStats(**result["regression"]) if result.get("regression") else None
+
+        response = GrowthTrendsResponse(
+            animal_id=result["animal_id"],
+            animal_tag=result["animal_tag"],
+            period_days=result["period_days"],
+            data=[GrowthPoint(**p) for p in result["data"]],
+            regression=regression,
+            summary=result["summary"],
+        )
+        await cache_set(cache_key, response.model_dump(), ttl=300)
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    except Exception as exc:
+        logger.error(f"Growth trends error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate growth trends")
+
+
+# =============================================================================
+# SPRINT 21 — BEHAVIOR TRENDS
+# =============================================================================
+
+@router.get(
+    "/trends/behavior",
+    response_model=BehaviorTrendsResponse,
+    summary="Xatti-harakat komponentlari trenди (Sprint 21)",
+    description=(
+        "ADILog dan 8 komponent ball (faollik, oziqlanish, ichish, harakat, "
+        "o'sish, ijtimoiylik, sensor, veterinar) kunlik grafigi.\n\n"
+        "Har komponent uchun trend yo'nalishi va "
+        "eng kuchsiz/kuchli komponentlar aniqlanadi.\n\n"
+        "**Kesh**: 5 daqiqa."
+    ),
+)
+async def get_behavior_trends(
+    animal_id: Optional[int] = Query(None, gt=0),
+    days:      int            = Query(30, ge=7, le=180),
+    db: AsyncSession = Depends(get_db),
+) -> BehaviorTrendsResponse:
+    """Xatti-harakat komponentlari trenди."""
+    cache_key = CacheKeys.behavior_trend(animal_id, days)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return BehaviorTrendsResponse(**cached)
+
+    try:
+        result = await _analytics_service.get_behavior_trends(db, animal_id=animal_id, days=days)
+        response = BehaviorTrendsResponse(**result)
+        await cache_set(cache_key, response.model_dump(), ttl=300)
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    except Exception as exc:
+        logger.error(f"Behavior trends error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate behavior trends")
+
+
+# =============================================================================
+# SPRINT 22 — ANIMAL COMPARISON
+# =============================================================================
+
+@router.get(
+    "/compare/animals",
+    response_model=AnimalComparisonResponse,
+    summary="Ko'p jonivorni yonma-yon taqqoslash (Sprint 22)",
+    description=(
+        "Bir nechta jonivorning ADI, vazn, faollik va xavf ko'rsatkichlarini "
+        "bir jadvalda taqdim etadi.\n\n"
+        "- Maksimal **10 ta** jonivor bir vaqtda.\n"
+        "- `animal_ids` vergul bilan ajratilgan ID'lar ro'yxati.\n\n"
+        "**Kesh**: yo'q (dinamik parametrlar)."
+    ),
+    responses={
+        400: {"description": "Noto'g'ri parametrlar (bo'sh ro'yxat yoki > 10 ta)"},
+        404: {"description": "Bir yoki bir nechta jonivor topilmadi"},
+    },
+)
+async def compare_animals(
+    animal_ids: str = Query(
+        ...,
+        description="Vergul bilan ajratilgan jonivor ID'lari. Masalan: 1,2,3,4",
+        example="1,2,5,8",
+    ),
+    days: int = Query(30, ge=7, le=180, description="Taqqoslash davri"),
+    db: AsyncSession = Depends(get_db),
+) -> AnimalComparisonResponse:
+    """Ko'p jonivorni taqqoslash — keshsiz (parametrlar o'zgaruvchan)."""
+    try:
+        id_list = [int(x.strip()) for x in animal_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "animal_ids faqat raqamlardan iborat bo'lishi kerak")
+
+    if not id_list:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "animal_ids bo'sh bo'lishi mumkin emas")
+    if len(id_list) > 10:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Maksimal 10 ta jonivor taqqoslanadi")
+
+    try:
+        result = await _analytics_service.compare_animals(db, animal_ids=id_list, days=days)
+        return AnimalComparisonResponse(
+            period_days=result["period_days"],
+            animals=[AnimalMetricSummary(**a) for a in result["animals"]],
+            best_adi_animal=result.get("best_adi_animal"),
+            worst_adi_animal=result.get("worst_adi_animal"),
+            highest_weight_animal=result.get("highest_weight_animal"),
+            most_active_animal=result.get("most_active_animal"),
+        )
+
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Animal comparison error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to compare animals")
+
+
+# =============================================================================
+# SPRINT 22 — PERIOD COMPARISON
+# =============================================================================
+
+@router.get(
+    "/compare/periods",
+    response_model=PeriodComparisonResponse,
+    summary="Davr-davr taqqoslash (Sprint 22)",
+    description=(
+        "Joriy davr vs oldingi davr taqqoslash.\n\n"
+        "`days=30` bo'lganda:\n"
+        "- **Joriy**: so'nggi 30 kun\n"
+        "- **Oldingi**: 30-60 kun avval\n\n"
+        "Asosiy metrikalar bo'yicha delta va umumiy holat bahosi qaytariladi.\n\n"
+        "**Kesh**: yo'q (har doim yangi ma'lumot)."
+    ),
+)
+async def compare_periods(
+    days: int = Query(30, ge=7, le=90, description="Har bir davr uzunligi (7-90 kun)"),
+    db: AsyncSession = Depends(get_db),
+) -> PeriodComparisonResponse:
+    """Joriy davr vs oldingi davr."""
+    try:
+        result = await _analytics_service.compare_periods(db, days=days)
+        return PeriodComparisonResponse(
+            current_period=PeriodMetrics(**result["current_period"]),
+            previous_period=PeriodMetrics(**result["previous_period"]),
+            deltas=[PeriodDelta(**d) for d in result["deltas"]],
+            overall_assessment=result["overall_assessment"],
+            key_changes=result["key_changes"],
+        )
+    except Exception as exc:
+        logger.error(f"Period comparison error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to compare periods")
+
+
+# =============================================================================
+# SPRINT 23 — HERD STATISTICS
+# =============================================================================
+
+@router.get(
+    "/herd/statistics",
+    response_model=HerdStatisticsResponse,
+    summary="Poda to'liq statistikasi (Sprint 23)",
+    description=(
+        "Ferma darajasida to'liq statistik panorama:\n\n"
+        "- **Taqsimotlar**: tur, ADI kategoriya, vazn, yosh\n"
+        "- **KPI'lar**: umumiy sog'liq balli, deteksiya qamrovi, "
+        "diqqat kerakli jonivorlar soni, ko'rinmayotganlar\n\n"
+        "**Kesh**: 3 daqiqa."
+    ),
+)
+async def get_herd_statistics(
+    db: AsyncSession = Depends(get_db),
+) -> HerdStatisticsResponse:
+    """Poda to'liq statistikasi — Redis 3 daqiqa."""
+    cache_key = CacheKeys.HERD_STATISTICS
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        logger.debug("Cache HIT: analytics:herd_statistics")
+        return HerdStatisticsResponse(**cached)
+
+    try:
+        result = await _analytics_service.get_herd_statistics(db)
+        response = HerdStatisticsResponse(**result)
+        await cache_set(cache_key, response.model_dump(), ttl=180)
+        return response
+
+    except Exception as exc:
+        logger.error(f"Herd statistics error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate herd statistics")
+
+
+# =============================================================================
+# SPRINT 24 — AUTOMATED INSIGHTS
+# =============================================================================
+
+@router.get(
+    "/insights",
+    response_model=InsightsResponse,
+    summary="Avtomatik tushunchalar — AI Insights (Sprint 24)",
+    description=(
+        "Qoidaga asoslangan deterministik tahlil asosida "
+        "amaliy tavsiyalar generatsiya qiladi.\n\n"
+        "**Tushuncha turlari**:\n"
+        "- `health` — ADI pasayish, kritik jonivorlar\n"
+        "- `growth` — O'sish dinamikasi\n"
+        "- `behavior` — Faollik anomaliyalari\n"
+        "- `detection` — Ko'rinmaslik\n"
+        "- `alert_pattern` — Takroriy alertlar\n"
+        "- `herd_trend` — Poda darajasidagi trendlar\n"
+        "- `individual_spotlight` — Alohida e'tibor\n\n"
+        "`action_required=true` bo'lgan insights darhol chora talab qiladi.\n\n"
+        "**Kesh**: 10 daqiqa."
+    ),
+    responses={
+        200: {"description": "Insights muvaffaqiyatli generatsiya qilindi"},
+    },
+)
+async def get_automated_insights(
+    days: int = Query(
+        14,
+        ge=7,
+        le=90,
+        description="Tahlil davri (7-90 kun). Ko'proq kun = ko'proq kontekst.",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> InsightsResponse:
+    """Avtomatik tushunchalar — Redis 10 daqiqa."""
+    cache_key = CacheKeys.insights(days)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache HIT: {cache_key}")
+        return InsightsResponse(**cached)
+
+    try:
+        result = await _analytics_service.get_automated_insights(db, days=days)
+
+        response = InsightsResponse(
+            generated_at=result["generated_at"],
+            insights=[InsightItem(**i) for i in result["insights"]],
+            summary=InsightsSummary(**result["summary"]),
+            analysis_period_days=result["analysis_period_days"],
+            animals_analyzed=result["animals_analyzed"],
+        )
+
+        await cache_set(cache_key, response.model_dump(), ttl=600)
+
+        logger.info(
+            f"Insights generated and cached",
+            extra={"extra_data": {"insights_count": len(result["insights"]), "days": days}},
+        )
+
+        return response
+
+    except Exception as exc:
+        logger.error(f"Automated insights error: {exc}", exc_info=True)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to generate automated insights")
