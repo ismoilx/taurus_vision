@@ -291,7 +291,6 @@ function NavDropdown({ group }: { group: NavGroup }) {
                   width:'100%', display:'flex', alignItems:'center', gap:9,
                   padding:'9px 14px',
                   background: active ? 'rgba(30,62,180,0.06)' : 'transparent',
-                  borderLeft: active ? '2px solid #1E3EB4' : '2px solid transparent',
                   border:'none', borderLeft: active ? '2px solid #1E3EB4' : '2px solid transparent',
                   cursor:'pointer',
                   color: active ? '#1E3EB4' : 'var(--text-secondary)',

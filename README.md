@@ -1,529 +1,594 @@
-```Backend:
-  Language: Python 3.11
-  Framework: FastAPI
-  ORM: SQLAlchemy 2.0
-  Database: PostgreSQL 15
-  Cache: Redis 7
-  Queue: Celery + Redis
-  
-AI/ML:
-  Framework: PyTorch 2.0
-  Detection: Ultralytics YOLOv8
-  Recognition: DeepFace / FaceNet
-  Image Processing: OpenCV 4.8
-  Training: PyTorch Lightning
-  
-Frontend:
-  Phase 1: Vanilla JS + HTML/CSS
-  Phase 2: React 18 + TypeScript
-  Styling: TailwindCSS
-  Charts: Chart.js / Recharts
-  
-Infrastructure:
-  Containerization: Docker + Docker Compose
-  Reverse Proxy: Nginx
-  Process Manager: Supervisor
-  Monitoring: Prometheus + Grafana
-  Logging: ELK Stack (optional)
-  
-Storage:
-  Database: PostgreSQL
-  Object Storage: MinIO (rasmlar/video)
-  Backup: pg_dump + cron
+# 🐂 TAURUS VISION — AI-Powered Farm Monitoring System
+
+> **Bu fayl loyihani davom ettiruvchi har qanday AI uchun asosiy yo'riqnoma.**
+> **Ushbu README ni to'liq o'qigan har qanday AI loyihani bittada tushunishi va mukammal davom ettirishi shart.**
+
+---
+
+## ══════════════════════════════════════════════════════════
+## 🤖 AI MASTER PROMPT — har yangi chat boshida ishlatiladi
+## ══════════════════════════════════════════════════════════
+
+> Quyidagi matnni to'liq nusxalab, loyihaning ZIP fayli bilan birga yangi chatga yuboring.
+
+---
+
+```
+Sen Taurus Vision loyihasining Senior Full-Stack + AI/ML muhandisisisan.
+Mening dasturchilikdan hech qanday bilimim yo'q, shuning uchun har narsani
+oddiy tilda tushuntir va har o'zgartirishni aniq ko'rsat.
+Xato qilishga haqing yo'q. Ishonchli, aniq, professional ishlaysan.
+
+Senga loyihaning GitHub ZIP faylini beraman.
+Avval uni tahlil qil, keyin xatolarni tuzat, keyin davom ettir.
+
+━━━ QADAM 1: LOYIHANI O'QIGIN (hech narsa yozma) ━━━
+
+Quyidagi fayllarni birin-ketin ko'rib chiq:
+• backend/app/main.py — qaysi servislar init bo'ladi, nima tayyor
+• backend/app/models/ — barcha DB modellari
+• backend/app/services/ — qaysi servislar bor va nima qiladi
+• backend/app/api/v1/endpoints/ — barcha API endpointlar
+• frontend/src/pages/ — barcha sahifalar va ularning holati
+• frontend/src/App.tsx — routing, layout
+• workers/tasks/ — background tasklar
+• docker-compose.yml — servislar konfiguratsiyasi
+
+Fayl kommentlari va docstringlardagi "Sprint X" yozuvlari orqali
+loyiha qayerda to'xtaganini aniqla (lekin sprint raqamlarini
+muhim deb hisoblama — asl holat fayllar mazmunidan aniqlanadi).
+
+━━━ QADAM 2: HOLAT HISOBOTI YOZ ━━━
+
+Tahlil tugagach FAQAT quyidagi formatda yoz:
+
+┌─────────────────────────────────────────────────┐
+│ TAURUS VISION — HOZIRGI HOLAT                   │
+├─────────────────────────────────────────────────┤
+│ ✅ TO'LIQ ISHLAYDI:                             │
+│   • [aniq nimalar tayyor]                        │
+│                                                  │
+│ 🔧 ANIQ XATOLAR:                                │
+│   • fayl.py:qator — xato tavsifi                │
+│                                                  │
+│ 🚧 YARIM TAYYOR:                                │
+│   • [boshlanган lekin tugallanmagan narsalar]    │
+│                                                  │
+│ 📋 KEYINGI MANTIQIY QADAM:                      │
+│   • [nima qilinishi kerak]                       │
+└─────────────────────────────────────────────────┘
+
+━━━ QADAM 3: XATOLARNI TUZAT ━━━
+
+Har xato uchun:
+1. "X fayldagi Y qatorda Z xato bor, chunki ..."
+2. To'g'ri kodni ko'rsat
+3. Foydalanuvchiga nima o'zgartirishni ayt
+
+━━━ QADAM 4: LOYIHANI DAVOM ETTIR ━━━
+
+Mantiqiy navbatdagi featureni yoz. Har doim bu tartibda:
+  backend model (agar kerak) →
+  schema (Pydantic) →
+  repository (DB queries) →
+  service (biznes logika) →
+  endpoint (API) →
+  frontend (sahifa/komponent)
+
+══════════════════════════════════
+ARXITEKTURA — O'ZGARMAYDIGAN QOIDALAR
+══════════════════════════════════
+
+BACKEND STACK:
+• FastAPI (async) — web framework
+• SQLAlchemy 2.0 (async) — ORM, FAQAT async operatsiyalar
+• PostgreSQL 15 — asosiy ma'lumotlar bazasi
+• Redis 7 — cache + Celery broker
+• Celery + Beat — background va scheduled tasklar
+• PyJWT + bcrypt — JWT auth
+• Pydantic v2 — validatsiya va schemalar
+• Ultralytics YOLO26 — real-time jonivor aniqlash
+• MobileNetV2 — animal embedding (128-dim)
+• scikit-learn — cosine similarity, health ML
+
+FRONTEND STACK:
+• React 18 + TypeScript (strict)
+• Vite — build tool
+• TailwindCSS — styling (FAQAT class, inline style ishlatma)
+• React Query (@tanstack/react-query) — server state
+• React Router v6 — routing
+• Recharts — grafiklar
+• Lucide React — ikonlar
+• apiFetch() — barcha API chaqiruvlar shu orqali (JWT auto-inject)
+
+3 QATLAMLI ARXITEKTURA (majburiy):
+  Repository (faqat DB) → Service (faqat biznes logika) → Endpoint (faqat HTTP)
+  Bu qatlamlarni HECH QACHON aralashtiirma.
+
+FAYL JOYLASHUVI (qat'iy):
+  backend/app/models/         — SQLAlchemy ORM modellari
+  backend/app/schemas/        — Pydantic request/response
+  backend/app/repositories/   — Faqat SELECT/INSERT/UPDATE/DELETE
+  backend/app/services/       — Biznes qoidalar, hisob-kitoblar
+  backend/app/services/ai/    — YOLO, embedding, muzzle detector
+  backend/app/api/v1/endpoints/ — HTTP handler lar
+  workers/tasks/              — Celery async tasklar
+  frontend/src/pages/         — To'liq sahifalar
+  frontend/src/features/      — Feature modullar
+  frontend/src/shared/        — Qayta ishlatiladigan komponentlar
+
+══════════════════════════════════
+LOYIHA MAQSADI VA DOMENNI TUSHUNISH
+══════════════════════════════════
+
+Taurus Vision ferma egasiga quyidagilarni beradi:
+
+1. IDENTIFIKATSIYA: Har bir jonivor burun belgisi orqali taniladi.
+   Pipeline: kamera kadr → YOLO (animal bbox) → MuzzleDetector (burun ROI)
+   → MobileNetV2 (128-dim embedding) → cosine similarity > 0.85 → ID tasdiqlandi
+
+2. ADI (Animal Daily Index): Kunlik 0-100 ball.
+   Komponentlar: deteksiya soni × harakat × yem × og'irlik stabilligi
+   < 30 → CRITICAL alert | 30-50 → WARNING | 50+ → SALOM
+
+3. OG'IRLIK KUZATUVI: Kamera orqali vazn taxmini (YOLO bbox area-based).
+   Haqiqiy tarozi bilan kalibrlash imkoni bor.
+
+4. SENSORLAR: IoT qurilmalar (harorat, namlik, CO2) real-time yozuv.
+
+5. ALERTLAR: Ko'rinmaslik (>24h), og'irlik tushishi (>5%), past ADI, sensor anomaliya.
+
+6. HISOBOTLAR: PDF (ReportLab) va Excel (openpyxl) eksport.
+
+DATABASE ALOQALAR:
+  Animal ─┬─ Detection (har bir YOLO frame)
+          ├─ WeightMeasurement (filtrlangan og'irlik)
+          ├─ HealthRecord (veterinar yozuvlari)
+          ├─ HealthPrediction (ML prognozi)
+          ├─ ADILog (kunlik faollik)
+          ├─ Alert (ogohlantirishlar)
+          ├─ AnimalEmbedding (AI vektori)
+          └─ FeedRecord (oziq-ovqat)
+  Camera ── Detection
+  SensorReading (mustaqil)
+  FarmTask (mustaqil)
+  User ── AuditLog
+  Notification (mustaqil)
+  TrainingRun (model o'qitish tarixi)
+
+WEBSOCKET XABARLARI:
+  {"type": "detection", "camera_id": "CAM-01", "animal_id": 5, "confidence": 0.94}
+  {"type": "alert", "animal_id": 3, "severity": "critical", "message": "..."}
+  {"type": "weight", "animal_id": 7, "weight_kg": 245.3}
+  {"type": "sensor", "sensor_id": "SEN-01", "temperature": 22.5}
+
+══════════════════════════════════
+KODLASH STANDARTLARI
+══════════════════════════════════
+
+PYTHON (majburiy):
+• Barcha funksiyalar async def
+• Type hints har joyda: def func(x: int) -> str
+• logger = get_logger(__name__) — har faylda
+• try/except — har servis metodida
+• Custom exception: EntityNotFoundError, BusinessRuleViolationError, va h.k.
+• Docstring: har public funksiyada (Args + Returns + Raises)
+• N+1 muammosi: selectinload() / joinedload() ishlatiladi
+
+TYPESCRIPT (majburiy):
+• any ishlatma — hamma narsa typed bo'lsin
+• useQuery / useMutation — barcha server operatsiyalar
+• apiFetch<T>() — barcha API chaqiruvlar
+• Props interface har komponentda
+
+NIMA QILMA:
+• print() yozma — faqat logger
+• Sync DB operatsiya — faqat async/await
+• Hardcode URL/secret — faqat config/settings
+• localStorage (artifacts da ishlamaydi)
+• Mavjud arxitekturani buzma — faqat kengayt
+• Sprint raqami kod ichiga yozma
+
+══════════════════════════════════
+GITGA YUKLANMAGAN FAYLLAR (lokalda bor, ishlatilmoqda)
+══════════════════════════════════
+
+Quyidagilar GitHub da yo'q lekin loyihada ishlatilayapti.
+Ular mavjud va ishlaydi deb hisob:
+
+• backend/.env — JWT_SECRET, DATABASE_URL, API keys
+• backend/ml/models/yolo26n.pt — asosiy YOLO modeli (~6MB)
+• backend/ml/models/best.pt — muzzle detector modeli
+• backend/ml/models/feature_extractor.pt — embedding modeli
+• data/images/ — upload qilingan rasmlar
+• data/videos/ — kamera video fragmentlari
+• barcha __pycache__/, node_modules/, .venv/
+
+══════════════════════════════════
+MUHIT O'ZGARUVCHILARI (asosiylar)
+══════════════════════════════════
+
+DATABASE_URL=postgresql+asyncpg://taurus:taurus123@localhost:5432/taurus_vision
+REDIS_URL=redis://localhost:6379/0
+SECRET_KEY=<jwt_secret_key>
+DEBUG=True
+YOLO_MODEL=yolo26n.pt
+MUZZLE_MODEL_PATH=./ml/models/best.pt
+MUZZLE_STRICT_MODE=False  (True bo'lsa best.pt topilmasa xato beradi)
+TRAINING_COLLECTION_ENABLED=True
+TRAINING_FRAMES_DIR=./data/training_frames
+
+══════════════════════════════════
+ISHGA TUSHIRISH
+══════════════════════════════════
+
+docker-compose up --build    → hammasi
+localhost:5173               → frontend
+localhost:8000/docs          → API dokumentatsiya
+localhost:8000/health        → tizim holati
+
+━━━ TAYYOR. ZIP faylni ber, men tahlilni boshlaymanq ━━━
 ```
 
 ---
 
-🗂️ **TO'LIQ FAYL STRUKTURASI**
+## ══════════════════════════════════════════════════════════
+## 📋 LOYIHA TO'LIQ TAFSILOTI (qo'shimcha ma'lumot)
+## ══════════════════════════════════════════════════════════
+
+### 🎯 Maqsad
+
+Chorvachilik fermalarini raqamlashtirish — sigir, qo'y, echki va boshqa hayvonlarni
+kamera orqali kuzatish, AI yordamida sog'lig'ini nazorat qilish, ferma egasiga
+real-time ma'lumot berish.
+
+### 🏗️ Arxitektura diagrammasi
+
 ```
-```taurus-vision/
-│
-├── docs/                           # HUJJATLAR
-│   ├── ARCHITECTURE.md            # Arxitektura tafsiloti
-│   ├── API_DOCUMENTATION.md       # API hujjatlari
-│   ├── SETUP_GUIDE.md             # O'rnatish qo'llanmasi
-│   ├── DEPLOYMENT_GUIDE.md        # Deploy qilish
-│   ├── AI_MODEL_TRAINING.md       # AI o'qitish
-│   └── CONTINUATION_GUIDE.md      # Boshqa AI uchun yo'riqnoma
-│
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                # FastAPI asosiy fayl
-│   │   ├── config.py              # Sozlamalar
-│   │   ├── dependencies.py        # Dependency injection
-│   │   │
-│   │   ├── core/                  # Asosiy modullar
-│   │   │   ├── __init__.py
-│   │   │   ├── database.py        # DB ulanish
-│   │   │   ├── security.py        # Auth (keyinroq)
-│   │   │   └── logging.py         # Logging config
-│   │   │
-│   │   ├── models/                # Database modellar
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py            # Base model
-│   │   │   ├── animal.py          # Jonivor
-│   │   │   ├── detection.py       # Aniqlash log
-│   │   │   ├── weight_log.py      # Vazn tarixi
-│   │   │   ├── health_record.py   # Sog'lik
-│   │   │   └── task.py            # Vazifalar
-│   │   │
-│   │   ├── schemas/               # Pydantic schemas
-│   │   │   ├── __init__.py
-│   │   │   ├── animal.py
-│   │   │   ├── detection.py
-│   │   │   └── response.py        # Umumiy javoblar
-│   │   │
-│   │   ├── services/              # Biznes logika
-│   │   │   ├── __init__.py
-│   │   │   ├── animal_service.py
-│   │   │   ├── detection_service.py
-│   │   │   ├── analytics_service.py
-│   │   │   └── notification_service.py
-│   │   │
-│   │   ├── api/                   # API endpoints
-│   │   │   ├── __init__.py
-│   │   │   ├── deps.py            # Dependencies
-│   │   │   └── v1/
-│   │   │       ├── __init__.py
-│   │   │       ├── animals.py
-│   │   │       ├── detections.py
-│   │   │       ├── analytics.py
-│   │   │       └── health.py
-│   │   │
-│   │   └── utils/                 # Yordamchi funksiyalar
-│   │       ├── __init__.py
-│   │       ├── image_processing.py
-│   │       └── validators.py
-│   │
-│   ├── alembic/                   # Database migrations
-│   │   ├── versions/
-│   │   └── env.py
-│   │
-│   ├── tests/                     # Testlar
-│   │   ├── __init__.py
-│   │   ├── conftest.py
-│   │   ├── test_api/
-│   │   ├── test_services/
-│   │   └── test_models/
-│   │
-│   ├── requirements.txt
-│   ├── requirements-dev.txt       # Dev dependencies
-│   ├── Dockerfile
-│   └── .env.example
-│
-├── ml/                            # AI/ML Engine
-│   ├── __init__.py
-│   ├── config.py                  # ML sozlamalar
-│   │
-│   ├── detection/                 # Obyekt aniqlash
-│   │   ├── __init__.py
-│   │   ├── yolo_detector.py       # YOLO wrapper
-│   │   └── custom_detector.py     # Custom model
-│   │
-│   ├── identification/            # ID berish
-│   │   ├── __init__.py
-│   │   ├── face_identifier.py
-│   │   └── feature_extractor.py
-│   │
-│   ├── analysis/                  # Tahlil
-│   │   ├── __init__.py
-│   │   ├── health_analyzer.py     # Sog'lik tahlili
-│   │   ├── behavior_analyzer.py   # Xatti-harakat
-│   │   └── weight_estimator.py    # Vazn taxmin
-│   │
-│   ├── training/                  # Model o'qitish
-│   │   ├── __init__.py
-│   │   ├── train_identifier.py
-│   │   ├── train_health.py
-│   │   └── data_loader.py
-│   │
-│   ├── models/                    # Saqlangan modellar
-│   │   ├── yolov8n.pt
-│   │   ├── identifier_v1.pt
-│   │   └── health_classifier.pt
-│   │
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── preprocessing.py
-│   │   └── postprocessing.py
-│   │
-│   ├── requirements.txt
-│   └── README.md
-│
-├── camera/                        # Kamera service
-│   ├── __init__.py
-│   ├── camera_manager.py          # Kameralarni boshqarish
-│   ├── stream_handler.py          # Video oqimi
-│   ├── capture_service.py         # Surat olish
-│   ├── config.yaml                # Kamera sozlamalari
-│   └── requirements.txt
-│
-├── workers/                       # Background tasks
-│   ├── __init__.py
-│   ├── celery_app.py             # Celery config
-│   ├── tasks/
-│   │   ├── __init__.py
-│   │   ├── detection_tasks.py
-│   │   ├── analysis_tasks.py
-│   │   └── notification_tasks.py
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── phase1/                    # Vanilla JS versiya
-│   │   ├── index.html
-│   │   ├── css/
-│   │   │   └── style.css
-│   │   ├── js/
-│   │   │   ├── app.js
-│   │   │   ├── api.js
-│   │   │   └── utils.js
-│   │   └── assets/
-│   │
-│   └── phase2/                    # React versiya
-│       ├── package.json
-│       ├── src/
-│       │   ├── App.tsx
-│       │   ├── components/
-│       │   ├── pages/
-│       │   ├── services/
-│       │   └── utils/
-│       └── public/
-│
-├── scripts/                       # Yordamchi skriptlar
-│   ├── setup_db.sh               # Database yaratish
-│   ├── run_migrations.sh         # Migration
-│   ├── backup_db.sh              # Backup
-│   ├── deploy.sh                 # Deploy
-│   └── init_models.py            # ML modellarni yuklab olish
-│
-├── infrastructure/                # Infrastructure
-│   ├── docker/
-│   │   ├── Dockerfile.backend
-│   │   ├── Dockerfile.ml
-│   │   ├── Dockerfile.worker
-│   │   └── Dockerfile.frontend
-│   │
-│   ├── docker-compose.yml        # Dev muhit
-│   ├── docker-compose.prod.yml   # Production
-│   │
-│   ├── nginx/
-│   │   ├── nginx.conf
-│   │   └── sites/
-│   │       └── taurus-vision.conf
-│   │
-│   └── monitoring/
-│       ├── prometheus.yml
-│       └── grafana/
-│           └── dashboards/
-│
-├── data/                          # Ma'lumotlar (gitignore)
-│   ├── images/
-│   ├── videos/
-│   ├── models/
-│   └── logs/
-│
-├── .github/                       # GitHub Actions
-│   └── workflows/
-│       ├── tests.yml
-│       └── deploy.yml
-│
-├── .gitignore
-├── README.md                      # Asosiy README
-├── LICENSE
-└── CHANGELOG.md
+[Kameralar / USB / RTSP]
+        │
+        ▼
+[Detection Pipeline]  ←─ YOLO26n ─→ [MuzzleDetector] ─→ [FeatureExtractor]
+        │                                                        │
+        ▼                                                        ▼
+[PostgreSQL DB] ←──── [FastAPI Backend] ───────────→ [AnimalEmbedding]
+        │                    │
+        ▼                    ▼
+[Celery Workers]      [WebSocket Manager]
+   (ADI, Alert)              │
+                             ▼
+                      [React Frontend]
+                      (18 sahifa, charts)
+```
+
+### 📊 Mavjud frontend sahifalar
+
+| Yo'l | Sahifa | Maqsad |
+|------|--------|--------|
+| `/` | Dashboard | 6 karta: turlar, sog'liq, rivojlanish, ADI trend, diqqat, vazn |
+| `/animals` | Jonivorlar | Ro'yxat, qidiruv, filtr, qo'shish |
+| `/animals/:id` | Tafsilot | Bir jonivorning to'liq tarixi |
+| `/live` | Live Feed | Real-time kamera + WebSocket |
+| `/cameras` | Kameralar | RTSP/USB kamera boshqaruvi |
+| `/health` | Sog'liq | Veterinar yozuvlari |
+| `/predictions` | Prognoz | ML sog'liq bashorati |
+| `/behavior` | Xatti-harakat | Harakat tahlili |
+| `/adi` | ADI Monitor | Kunlik faollik indeksi |
+| `/analytics` | Tahlil | Umumiy statistika, grafiklar |
+| `/reports` | Hisobotlar | PDF/Excel yuklab olish |
+| `/alerts` | Ogohlantirishlar | Aktiv va tarixiy alertlar |
+| `/notifications` | Bildirishnomalar | Tizim xabarlari |
+| `/sensors` | Sensorlar | IoT qurilmalar, harorat/namlik |
+| `/feed` | Oziq-ovqat | Yem sarfi kuzatuvi |
+| `/tasks` | Vazifalar | Ferma ish ro'yxati |
+| `/training` | AI O'qitish | YOLO model fine-tuning UI |
+| `/users` | Foydalanuvchilar | Admin panel |
+
+### 🤖 AI/ML pipeline tafsiloti
+
+**YOLO26n** (Ultralytics 8.4+, 2025):
+- Input: 640×640 frame
+- Output: bounding boxes + confidence + class_id
+- class 19 = cow, class 17 = horse, class 18 = sheep
+- CPU uchun optimallashtirilgan, ~43% tezroq YOLO8 dan
+
+**MuzzleDetector** (best.pt — custom trained):
+- Input: YOLO bbox crop (jonivor qismi)
+- Output: burun ROI bounding box
+- MUZZLE_STRICT_MODE=False → topilmasa fallback heuristik
+
+**FeatureExtractor** (MobileNetV2):
+- Input: burun ROI crop (224×224)
+- Output: 128-dim float32 vector
+- DB da AnimalEmbedding jadvalida saqlanadi
+
+**Identifikatsiya:**
+- Yangi embedding ↔ barcha mavjud embeddinglar cosine similarity
+- Threshold: 0.85 (sozlanadi)
+- Ko'p embedding bo'lsa: average pooling strategiyasi
+
+**ADI hisoblash (adi_service.py):**
+```
+ADI = (D × 0.35) + (M × 0.25) + (F × 0.20) + (W × 0.20)
+  D = deteksiya chastotasi (bugungi / o'rtacha)
+  M = harakat intensivligi (bbox displacement)
+  F = yem iste'moli (FeedRecord ga asoslanadi)
+  W = og'irlik stabilligi (keskin o'zgarish → kamayadi)
+Celery Beat: har kecha 00:30 UTC
+```
+
+### 🔐 Xavfsizlik
+
+- JWT Bearer token (access + refresh)
+- bcrypt parol xeshlash
+- RateLimitMiddleware (100 req/min, DEBUG da o'chirilgan)
+- SecurityHeadersMiddleware (X-Frame-Options, CSP, va h.k.)
+- CORS: faqat ruxsat berilgan originlar
+- Admin operatsiyalar: CurrentAdmin dependency
+
+### 📦 Docker servislari
+
+```yaml
+services:
+  postgres:  localhost:5432
+  redis:     localhost:6379
+  backend:   localhost:8000
+  worker:    (celery)
+  beat:      (celery-beat)
+  frontend:  localhost:5173 (dev) / nginx (prod)
+  prometheus: localhost:9090
+  grafana:   localhost:3001
 ```
 
 ---
 
-## 🗺️ **YO'L XARITASI (Batafsil)**
+*Taurus Vision — Chorvachilik kelajagi, sun'iy intellekt bilan*
+*Bu README faylni o'zgartirma — loyiha uchun doimiy yo'riqnoma*
 
-### **PHASE 1: FOUNDATION (Oy 1-3)**
+---
 
-**Sprint 1 (2 hafta): Infrastructure**
+## ══════════════════════════════════════════════════════════
+## 🎯 LOYIHANING TO'LIQ MANZILI — AI NIMAGA QARAB ISHLAYDI
+## ══════════════════════════════════════════════════════════
+
+> Bu bo'lim AI uchun "nishon" dir. Hozir nima bor, nima qilinishi kerak —
+> AI har doim shu xaritaga qarab keyingi qadamni o'zi tanlaydi.
+
+---
+
+### 🗺️ FEATURE MAP — To'liq mahsulot ko'rinishi
+
+Quyidagi jadval loyihaning BARCHA feature larini ko'rsatadi.
+AI har chat boshida fayllarni tekshirib, `[TAYYOR]` / `[YARIM]` / `[YO'Q]`
+holatini o'zi aniqlaydi va mantiqan keyingisini qurishni boshlaydi.
+
 ```
-□ PostgreSQL setup
-□ FastAPI boilerplate
-□ Docker containerization
-□ Git repository setup
-□ Basic logging
-□ Database schema v1.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK A — POYDEVOR (Infrastructure + Auth)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+A1  FastAPI + PostgreSQL + Redis + Docker           → ishga tushirish
+A2  JWT Auth (login/logout/refresh)                 → xavfsizlik
+A3  3 rol: VIEWER / MANAGER / ADMIN                 → ruxsatlar
+A4  Celery + Beat (scheduled tasks)                 → background ishlar
+A5  WebSocket manager (real-time xabarlar)          → jonli yangilanish
+A6  Prometheus + Grafana (monitoring)               → server holati
+A7  Nginx reverse proxy (prod uchun)                → deploy
 
-Deliverable: Ishlaydigan API skeleton
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK B — JONIVORLAR BOSHQARUVI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B1  Jonivor CRUD (qo'shish, tahrirlash, o'chirish)  → asosiy ma'lumotlar
+B2  Tag ID tizimi (JNV-001 format)                  → noyob ID
+B3  Jonivor holati (active/sick/sold/deceased)      → hayot sikli
+B4  Jonivor tafsilot sahifasi (barcha tarixi)       → to'liq profil
+B5  Foto yuklash va profil rasm                     → vizual ID
+B6  Ko'p jonivor import (CSV dan)                   → tez yuklash
+B7  Jonivor eksport (Excel/PDF ro'yxat)             → hisobot
 
-**Sprint 2 (2 hafta): Core ML**
-```
-□ YOLO integration
-□ Animal detection pipeline
-□ Image preprocessing
-□ Basic identification
-□ Model storage setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK C — KAMERA VA REAL-TIME DETECTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+C1  RTSP IP kamera ulash                            → professional kameralar
+C2  USB webcam ulash                                → oddiy kameralar
+C3  Simulyatsiya rejimi (haqiqiy kamerasiz test)    → ishlab chiqish uchun
+C4  YOLO26n real-time detection (30 FPS target)     → jonivor aniqlash
+C5  Detection natijalarini DB ga yozish             → tarix
+C6  Live feed sahifasi (WebSocket stream)           → jonli kuzatuv
+C7  Ko'p kamera bir vaqtda (CameraManager)          → katta ferma
+C8  Kamera sog'lig'ini tekshirish (Celery, 5 daqiqa) → uzilishlarni bilish
 
-Deliverable: Jonivorni aniqlash ishlaydi
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK D — AI IDENTIFIKATSIYA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+D1  MuzzleDetector — burun regionini crop qilish    → prep bosqichi
+D2  MobileNetV2 — 128-dim embedding yaratish        → "barmoq izi"
+D3  Cosine similarity (≥0.85) — kimligini topish    → identifikatsiya
+D4  Embedding DB da saqlash (AnimalEmbedding)       → o'rganish
+D5  Yangi jonivor uchun embedding yig'ish (≥5 rasm) → ro'yxatdan o'tish
+D6  Identifikatsiya natijasini detectionga bog'lash  → to'liq tarix
+D7  Manual embedding tasdiqlash (MANAGER)           → sifat nazorat
 
-**Sprint 3 (2 hafta): Backend API v1**
-```
-□ Animal CRUD operations
-□ Detection logging
-□ API endpoints
-□ Database migrations
-□ Unit tests
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK E — OG'IRLIK KUZATUVI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+E1  YOLO bbox area → vazn taxmini (kalibrlangan)    → avtomatik o'lchov
+E2  WeightMeasurement DB yozuvi                     → tarix
+E3  O'sish sur'ati hisoblash (kg/kun)               → rivojlanish
+E4  Og'irlik grafigi (jonivor tafsilot sahifasida)  → vizual
+E5  Kutilgan og'irlik vs haqiqiy (tur standartlari) → qiyoslov
+E6  Keskin tushish → avtomatik alert (>5% bir hafta) → erta ogohlantirish
 
-Deliverable: REST API ishlaydi
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK F — SOGLIQ VA VETERINAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+F1  HealthRecord CRUD (kasallik, dori, profilaktika) → tibbiy tarix
+F2  Vaksinatsiya jadval va eslatmalar                → profilaktika
+F3  Karantin holati boshqaruvi                       → izolyatsiya
+F4  3-model ensemble: RuleEngine + RF + IsolationForest → sog'liq bashorati
+F5  Xavf darajasi: low/moderate/high/critical        → prioritet
+F6  30-kunlik xavf trend grafigi                     → kuzatuv
+F7  "Darhol tekshiring" tavsiyalari (AI asosida)     → harakat rejasi
 
-**Sprint 4 (2 hafta): Basic Frontend**
-```
-□ HTML/CSS/JS interface
-□ Animal list view
-□ Detection history
-□ Basic statistics
-□ API integration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK G — ADI (Animal Daily Index)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+G1  Kunlik ADI hisoblash (0-100 ball)               → asosiy ko'rsatkich
+    Formula: 35%×deteksiya + 25%×harakat + 20%×yem + 20%×og'irlik stabilligi
+G2  ADI trendi grafigi (30/60/90 kun)               → uzoq muddatli kuzatuv
+G3  ADI taqsimoti (poda bo'yicha)                   → umumiy holat
+G4  Celery Beat: har kecha 00:30 UTC avtomatik      → hisoblash
+G5  ADI Monitoring sahifasi (to'liq dashboard)      → nazorat markazi
 
-Deliverable: Web dashboard ishlaydi
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK H — XATTI-HARAKAT TAHLILI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+H1  4 komponent: faollik, oziqlanish, harakat, ijtimoiy → to'liq obraz
+H2  Zona aniqlash: oziqlanish/dam olish/suv ichish      → fazoviy tahlil
+H3  Anomaliya aniqlash (normadan chetlashish)            → erta signal
+H4  Poda umumiy holati (HerdBehaviorSummary)            → bir qarashda ko'rish
+H5  24h / 48h / 72h tahlil oynasi                       → moslashuvchan
 
-**Sprint 5 (2 hafta): Integration & Testing**
-```
-□ Camera integration
-□ End-to-end testing
-□ Bug fixing
-□ Documentation
-□ Deployment setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK I — ALERTLAR VA BILDIRISHNOMALAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+I1  Avtomatik alertlar:
+     • >24h ko'rinmagan jonivor     → "Ko'rinmaydi"
+     • ADI < 30                     → "Faollik keskin tushdi"
+     • Og'irlik >5% tushdi          → "Vazn muammosi"
+     • Sensor anomaliya (harorat)   → "Muhit xavfli"
+     • Sog'liq prognozi: high/critical → "Veterinar kerak"
+I2  Alert darajasi: INFO / WARNING / CRITICAL         → ustuvorlik
+I3  Alert yopish va izoh qoldirish (MANAGER)          → boshqarish
+I4  Bildirishnoma tizimi (in-app)                     → xabar
+I5  Email bildirishnoma (kelajak)                     → tashqi kanal
 
-Deliverable: MVP TAYYOR ✅
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK J — IoT SENSORLAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+J1  SensorReading yozuvlari (harorat, namlik, CO2)   → muhit kuzatuvi
+J2  Normal diapazon tekshiruvi:
+     Harorat: 38.0–39.5°C, Yurak: 40–80 bpm          → qoramol standarti
+J3  Anomaliya aniqlash → avtomatik alert              → tezkor javob
+J4  Real-time sensor dashboard (30s yangilanish)      → jonli monitoring
+J5  Sensor qurilmalar holati (online/offline)         → qurilma boshqaruvi
 
-**Sprint 6 (2 hafta): Real-world testing**
-```
-□ Test fermada deploy
-□ Data collection
-□ Performance tuning
-□ User feedback
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK K — OZIQ-OVQAT BOSHQARUVI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+K1  Yem turlari va ombor (FeedStock)                  → inventar
+K2  Oziqlantiruv yozuvlari (FeedRecord)               → sarflanish tarixi
+K3  Kam qolgan yem haqida ogohlantirish               → erta to'ldirish
+K4  Ombor to'ldirish operatsiyasi (restock)           → kirim
+K5  Yem sarfi tahlili (oylik/yillik trend)            → xarajat nazorat
 
-Deliverable: Production-ready v1.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK L — FERMA VAZIFALARI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+L1  FarmTask CRUD (vazifa yaratish, bajarish, yopish) → ish ro'yxati
+L2  Vazifa holati: pending/in_progress/done/overdue   → nazorat
+L3  Muddatli eslatmalar (deadline tracking)           → vaqt nazorat
+L4  Vazifalarga jonivor/kamera bog'lash               → kontekst
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK M — HISOBOTLAR VA EKSPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+M1  PDF hisobot: ferma umumiy holati (ReportLab)     → professional hujjat
+M2  Excel eksport: jonivorlar ro'yxati (openpyxl)    → ma'lumot tahlil
+M3  CSV eksport: detection tarixi                    → ham yoqimli
+M4  Davr tanlash: oxirgi 7/30/90 kun yoki custom     → moslashuvchan
+M5  Hisobot shablonlari (tur bo'yicha)               → tezkor yaratish
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK N — TAHLIL VA STATISTIKA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+N1  Poda statistikasi KPI lar                        → boshqacha ko'rish
+N2  ADI trendi, o'sish regressiyasi, xatti-harakat   → tab 2 trendlar
+N3  Davr-davr taqqoslash (bu oy vs o'tgan oy)        → o'sish o'lchash
+N4  Ko'p jonivor taqqoslash                          → individual farq
+N5  Deteksiya soatlik/kunlik naqshlari               → faollik vaqti
+N6  Kamera samaradorligi tahlili                     → qurilma ROI
+N7  Avtomatik insights ("Bu hafta 3 jonivor ADI tushdi") → aqlli xulosalar
+N8  Sog'liq metrikalar: xavf balli taqsimoti         → risk panorama
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK O — AI MODEL O'QITISH (Custom YOLO)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+O1  FrameCollector: kameradan avtomatik kadr yig'ish → dataset
+O2  DatasetBuilder: YOLO format dataset yaratish     → o'qitish tayyor
+O3  TrainingPipeline: YOLO fine-tuning (CPU safe)    → custom model
+O4  mAP50 taqqoslov: yangi model yaxshiroqmi?        → sifat nazorat
+O5  Model deploy: avtomatik yoki qo'lda tasdiqlash   → production
+O6  Training sahifasi: progress, metrikalar, deploy UI → vizual boshqaruv
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK P — FOYDALANUVCHILAR VA XAVFSIZLIK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+P1  Foydalanuvchi CRUD (admin tomonidan)             → hisob boshqaruvi
+P2  3 rol: VIEWER (ko'rish) / MANAGER (boshqarish) / ADMIN (hammasi)
+P3  Parol o'zgartirish                               → xavfsizlik
+P4  Audit log: kim, nima qildi, qachon               → tekshiruv
+P5  Session boshqaruvi (access + refresh token)      → seans
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BLOK Q — KELAJAK FEATURE LAR (hozircha yo'q, keyinroq)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Q1  📱 PWA / Mobile-responsive dizayn               → telefon bilan ishlatish
+Q2  📧 Email / SMS bildirishnomalar                 → tashqi kanal
+Q3  🗺️ Ko'p ferma qo'llab-quvvatlash (multi-tenant) → kengayish
+Q4  💰 Moliyaviy modul (xarajat, daromad, ROI)      → biznes hisob
+Q5  🌐 REST API (tashqi tizimlar uchun)              → integratsiya
+Q6  🔊 Ovoz tahlili (mayin, qichqirish anomaliyasi) → audio AI
+Q7  🌡️ Tarozi bilan to'g'ridan integratsiya         → aniq vazn
+Q8  📡 LoRaWAN sensor protokoli                     → uzoq masofali IoT
 ```
 
 ---
 
-### **PHASE 2: ENHANCEMENT (Oy 4-6)**
+### ⚡ AI QAROR QILISH ALGORITMI
 
-**Sprint 7-8 (4 hafta): Advanced Features**
+AI har chat boshida quyidagi tartibda harakat qiladi:
+
 ```
-□ Weight estimation
-□ Search & filtering
-□ Advanced analytics
-□ Export functionality
-□ React frontend start
-
-Deliverable: Advanced dashboard
-```
-
-**Sprint 9-10 (4 hafta): Multi-camera**
-```
-□ Multiple camera support
-□ Camera management UI
-□ Stream optimization
-□ Load balancing
-
-Deliverable: Scalable camera system
-```
-
-**Sprint 11-12 (4 hafta): Health Monitoring**
-```
-□ Behavior analysis
-□ Health indicators
-□ Alert system
-□ Notification service
-
-Deliverable: Health monitoring system
+1. ZIP faylni ol → barcha fayllarni o'qi
+        ↓
+2. Feature Map dagi har blokni tekshir:
+   "Bu feature uchun backend endpoint bormi?"
+   "Frontend sahifasi to'liqmi (stub emas)?"
+   "Backend-frontend mos keladi/jadval?"
+        ↓
+3. Holat xulosasini yoz (TAYYOR / YARIM / YO'Q)
+        ↓
+4. Xatolarni tuzat (duplicate key, broken import, type mismatch...)
+        ↓
+5. YARIM bo'lgan birinchi featureni TAYYOR qil
+   (mantiqan: backend → schema → repo → service → endpoint → frontend)
+        ↓
+6. Agar YARIM yo'q → YO'Q bo'lgan birinchi featureni qur
+   Prioritet: B → C → D → E → F → G → H → I → J → K → L → M → N → O → P
 ```
 
 ---
 
-### **PHASE 3: AI INTELLIGENCE (Oy 7-12)**
+### 🏁 TO'LIQ TAYYOR MAHSULOT QANDAY KO'RINADI?
 
-**Sprint 13-16 (8 hafta): Custom AI Training**
-```
-□ Data collection & labeling
-□ Custom model training
-□ Health prediction
-□ Behavior classification
-□ Model optimization
+Ferma egasi telefon yoki kompyuterdan kiradi:
 
-Deliverable: Custom AI models
-```
+1. **Dashboard** → Bir qarashda: 250 ta jonivordan 8 tasi diqqat talab qiladi,
+   bugungi o'rtacha ADI 74, umumiy tirik vazn 45 tonna
 
-**Sprint 17-20 (8 hafta): Automation**
-```
-□ Task management system
-□ Automated alerts
-□ Feed management
-□ IoT integration (sensors)
+2. **Live Feed** → Kameradan jonli video, har jonivor tepasida ismi va ADI balli
 
-Deliverable: Semi-automated farm
-```
+3. **Ogohlantirishlar** → "Ayolim-03 ikki kundan beri ko'rinmaydi",
+   "Buzoq-12 vazni 3 kg tushdi" — bularni bir bosishda yopadi
 
-**Sprint 21-24 (8 hafta): Advanced Analytics**
-```
-□ Predictive analytics
-□ Trend analysis
-□ Reporting system
-□ Data visualization
+4. **Jonivor tafsilot** → Har bir jonivorning to'liq tarixi:
+   og'irlik grafigi, sog'liq yozuvlari, ADI trendi, so'nggi 10 ta deteksiya
 
-Deliverable: Business intelligence
-```
+5. **Haftalik hisobot** → PDF ni yuklab, veterinarga beradi
 
----
+6. **Sensor panel** → Molov harorati, namlik — hammasi normal ko'rinadi
 
-## 📊 **MILESTONE TRACKER**
-```
-Milestone 1: MVP (3 oy)
-├── Jonivorni aniqlash ✅
-├── Database saqlash ✅
-├── API ✅
-├── Basic dashboard ✅
-└── 1 kamera ishlaydi ✅
+Bu — loyihaning oxirgi manzili.
 
-Milestone 2: Production v1 (6 oy)
-├── Multi-camera ✅
-├── Search & filter ✅
-├── Weight tracking ✅
-├── React dashboard ✅
-└── 100+ jonivor support ✅
-
-Milestone 3: AI-Powered (12 oy)
-├── Custom AI models ✅
-├── Health prediction ✅
-├── Automated alerts ✅
-├── Task automation ✅
-└── 1000+ jonivor support ✅
-
-
-
-
-# TAURUS VISION - CONTINUATION GUIDE
-
-## PROJECT OVERVIEW
-Taurus Vision - chorvachilik fermasini raqamlashtirish tizimi.
-Jonivorlarni AI orqali tanish, monitoring, health tracking.
-
-## CURRENT STATE
-- Phase: [1/2/3]
-- Last completed sprint: [Sprint #]
-- Working features: [ro'yxat]
-- In progress: [nima ustida ishlanmoqda]
-
-## ARCHITECTURE
-[ARCHITECTURE.md linkini ko'ring]
-- Backend: FastAPI + PostgreSQL
-- ML: PyTorch + YOLO
-- Frontend: React
-- Pattern: Layered Architecture
-
-## CODE STANDARDS
-- Python: PEP 8, type hints
-- Git: Conventional commits
-- Tests: pytest, 80%+ coverage
-- Docs: Docstrings har joyda
-
-## SETUP INSTRUCTIONS
-1. Clone repo
-2. `docker-compose up`
-3. Run migrations
-4. Load ML models
-[Batafsil SETUP_GUIDE.md da]
-
-## CURRENT TASKS
-Kanban board: [link]
-Priority:
-1. [Task 1]
-2. [Task 2]
-
-## KNOWN ISSUES
-- [Issue 1]
-- [Issue 2]
-
-## NEXT STEPS
-According to roadmap:
-- [Keyingi sprint vazifasi]
-
-## CONTACT
-Owner: [Sen]
-GitHub: [repo link]
-Docs: [hujjat link]
-
-
-# CODE STYLE EXAMPLE
-
-"""
-Module docstring - har bir faylda
-"""
-
-from typing import List, Optional
-from datetime import datetime
-from sqlalchemy.orm import Session
-from app.models import Animal
-from app.schemas import AnimalCreate, AnimalResponse
-
-
-class AnimalService:
-    """
-    Animal management service.
-    
-    Handles all business logic related to animals.
-    """
-    
-    def __init__(self, db: Session):
-        """
-        Initialize service.
-        
-        Args:
-            db: Database session
-        """
-        self.db = db
-    
-    def create_animal(
-        self, 
-        data: AnimalCreate
-    ) -> AnimalResponse:
-        """
-        Create new animal record.
-        
-        Args:
-            data: Animal creation data
-            
-        Returns:
-            Created animal object
-            
-        Raises:
-            ValueError: If tag_id already exists
-            
-        Example:
-            >>> service = AnimalService(db)
-            >>> animal = service.create_animal(
-            ...     AnimalCreate(tag_id="JNV-001")
-            ... )
-        """
-        # Check duplicate
-        existing = self.db.query(Animal).filter(
-            Animal.tag_id == data.tag_id
-        ).first()
-        
-        if existing:
-            raise ValueError(f"Animal {data.tag_id} already exists")
-        
-        # Create
-        animal = Animal(**data.dict())
-        self.db.add(animal)
-        self.db.commit()
-        self.db.refresh(animal)
-        
-        return AnimalResponse.from_orm(animal)
-    
-    # Type hints hamma joyda
-    # Docstrings hamma funksiyada
-    # Error handling
-    # Clear variable names
+READMEEOF
+echo "Done: $?"
