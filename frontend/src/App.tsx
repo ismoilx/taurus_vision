@@ -15,10 +15,10 @@ import {
   LayoutDashboard, Activity, TrendingUp, Brain,
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
-  LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield,
+  LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield, Building2, Scale,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WebSocketProvider } from './context/WebSocketContext';
@@ -92,6 +92,8 @@ const SensorPage        = lazy(() => import('./pages/SensorPage'));
 const FinancePage       = lazy(() => import('./pages/FinancePage'));
 const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'));
 const AuditLogPage      = lazy(() => import('./pages/AuditLogPage'));
+const FarmsPage         = lazy(() => import('./pages/FarmsPage'));
+const ScalePage         = lazy(() => import('./pages/ScalePage'));
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -143,15 +145,17 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label:'Boshqaruv', icon:Bell,
     items:[
-      { to:'/alerts',    icon:Bell,          label:'Alertlar',           also:['/notifications'] },
-      { to:'/feed',      icon:Wheat,         label:'Ozuqa'               },
-      { to:'/finance',       icon:Coins,         label:'Moliya'              },
-      { to:'/integrations',  icon:Radio,         label:'Integratsiyalar'     },
-      { to:'/tasks',     icon:ClipboardList, label:'Vazifalar'           },
-      { to:'/cameras',   icon:Camera,        label:'Kameralar'           },
-      { to:'/users',     icon:Users,         label:'Foydalanuvchilar'    },
-      { to:'/audit-log', icon:Shield,         label:'Audit Log'           },
-      { to:'/training',  icon:Cpu,           label:'AI Training'         },
+      { to:'/alerts',       icon:Bell,          label:'Alertlar',           also:['/notifications'] },
+      { to:'/feed',         icon:Wheat,         label:'Ozuqa'               },
+      { to:'/finance',      icon:Coins,         label:'Moliya'              },
+      { to:'/integrations', icon:Radio,         label:'Integratsiyalar'     },
+      { to:'/tasks',        icon:ClipboardList, label:'Vazifalar'           },
+      { to:'/cameras',      icon:Camera,        label:'Kameralar'           },
+      { to:'/farms',        icon:Building2,     label:'Fermalar'            },
+      { to:'/scales',       icon:Scale,         label:'Tarozlar'            },
+      { to:'/users',        icon:Users,         label:'Foydalanuvchilar'    },
+      { to:'/audit-log',    icon:Shield,         label:'Audit Log'          },
+      { to:'/training',     icon:Cpu,           label:'AI Training'         },
     ],
   },
 ];
@@ -234,6 +238,114 @@ function AlertBell() {
         </span>
       )}
     </button>
+  );
+}
+
+// =============================================================================
+// FARM SWITCHER
+// =============================================================================
+
+const FARM_STORAGE_KEY = 'tv_current_farm';
+
+function FarmSwitcher() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [currentFarmId, setCurrentFarmId] = useState<number | null>(() => {
+    try { const r = localStorage.getItem(FARM_STORAGE_KEY); return r ? parseInt(r) : null; } catch { return null; }
+  });
+  const [currentFarmName, setCurrentFarmName] = useState<string>(() => {
+    try { return localStorage.getItem('tv_current_farm_name') ?? 'Ferma'; } catch { return 'Ferma'; }
+  });
+
+  const { data } = useQuery({
+    queryKey: ['farms-nav'],
+    queryFn:  () => apiFetch<{ items: Array<{ id: number; name: string; is_active: boolean; animal_count: number }> }>('/api/v1/farms?limit=50&active_only=true'),
+    staleTime: 30_000,
+  });
+
+  const switchMut = useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<{ farm_id: number; farm_name: string }>(`/api/v1/farms/${id}/switch`, { method: 'POST' }),
+    onSuccess: (res) => {
+      try {
+        localStorage.setItem(FARM_STORAGE_KEY, String(res.farm_id));
+        localStorage.setItem('tv_current_farm_name', res.farm_name);
+      } catch { /* ignore */ }
+      setCurrentFarmId(res.farm_id);
+      setCurrentFarmName(res.farm_name);
+      setOpen(false);
+    },
+  });
+
+  const farms = data?.items ?? [];
+  if (!user || farms.length <= 1) return null;
+
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '4px 10px 4px 8px', borderRadius: 8,
+          background: open ? 'rgba(30,62,180,0.07)' : 'transparent',
+          border: `1px solid ${open ? 'rgba(30,62,180,0.18)' : 'var(--border)'}`,
+          cursor: 'pointer', outline: 'none', transition: 'all .15s',
+        }}
+      >
+        <Building2 size={13} color="#1E3EB4"/>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'Outfit',sans-serif" }}>
+          {currentFarmName}
+        </span>
+        <ChevronDown size={11} color="var(--text-muted)" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}/>
+      </button>
+
+      {open && (<>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpen(false)}/>
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+          minWidth: 200, background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 11,
+          boxShadow: '0 8px 32px var(--shadow)', zIndex: 200,
+          overflow: 'hidden', animation: 'tv-drop .15s ease',
+        }}>
+          <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--border)', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: "'Outfit',sans-serif" }}>
+            Ferma tanlash
+          </div>
+          {farms.map(farm => (
+            <button
+              key={farm.id}
+              onClick={() => switchMut.mutate(farm.id)}
+              disabled={switchMut.isPending}
+              style={{
+                width: '100%', padding: '9px 14px',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: farm.id === currentFarmId ? 'rgba(30,62,180,0.07)' : 'none',
+                border: 'none', cursor: 'pointer', fontSize: 13,
+                color: farm.id === currentFarmId ? '#1E3EB4' : 'var(--text-secondary)',
+                fontFamily: "'Outfit',sans-serif", fontWeight: farm.id === currentFarmId ? 600 : 400,
+                textAlign: 'left',
+              }}
+            >
+              <span>{farm.name}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{farm.animal_count}</span>
+            </button>
+          ))}
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+            <button
+              onClick={() => { setOpen(false); navigate('/farms'); }}
+              style={{
+                width: '100%', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 6,
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 12,
+                color: 'var(--text-muted)', fontFamily: "'Outfit',sans-serif", textAlign: 'left',
+              }}
+            >
+              <Building2 size={12}/> Barcha fermalarga o'tish
+            </button>
+          </div>
+        </div>
+      </>)}
+    </div>
   );
 }
 
@@ -573,6 +685,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
           {/* RIGHT: Soat + AlertBell + User */}
           <LiveClock/>
+          <FarmSwitcher/>
           <div style={{width:6}}/>
           <AlertBell/>
           <div style={{width:6}}/>
@@ -663,6 +776,8 @@ export default function App() {
                     <Route path="/cameras"       element={<CamerasPage/>}/>
                     <Route path="/users"         element={<UsersPage/>}/>
                     <Route path="/audit-log"     element={<AuditLogPage/>}/>
+                    <Route path="/farms"         element={<FarmsPage/>}/>
+                    <Route path="/scales"        element={<ScalePage/>}/>
                     <Route path="/training"      element={<TrainingPage/>}/>
                     <Route path="/tasks"         element={<TasksPage/>}/>
                     <Route path="/feed"          element={<FeedPage/>}/>

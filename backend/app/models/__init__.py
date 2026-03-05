@@ -8,13 +8,15 @@ bir joyda ko'rinishini ta'minlaydi.
 """
 
 from app.models.base             import BaseModel
+from app.models.farm             import Farm
 from app.models.user             import User, UserRole
 from app.models.camera           import Camera, CameraType
 from app.models.animal           import Animal, AnimalSpecies, AnimalGender, AnimalStatus
 from app.models.animal_photo     import AnimalPhoto
 from app.models.detection        import Detection
 from app.models.animal_embedding import AnimalEmbedding
-from app.models.weight_measurement import WeightMeasurement
+from app.models.scale            import Scale, ScaleType, ScaleStatus
+from app.models.weight_measurement import WeightMeasurement, WeightSource
 from app.models.health_record    import HealthRecord
 from app.models.adi_log          import ADILog, ADICategory
 from app.models.alert            import Alert, AlertType, AlertSeverity, AlertStatus
@@ -41,6 +43,8 @@ from app.models.finance          import (                             # Q4 Finan
 __all__ = [
     # Base
     "BaseModel",
+    # Farms
+    "Farm",
     # Auth
     "User",
     "UserRole",
@@ -53,8 +57,11 @@ __all__ = [
     "AnimalGender",
     "AnimalStatus",
     "AnimalPhoto",
-    # Monitoring
-    "Detection",
+    # Scales (Q7)
+    "Scale",
+    "ScaleType",
+    "ScaleStatus",
+    "WeightSource",
     "AnimalEmbedding",
     "WeightMeasurement",
     "HealthRecord",

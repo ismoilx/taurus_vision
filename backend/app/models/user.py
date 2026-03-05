@@ -19,7 +19,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime
+from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -122,6 +122,18 @@ class User(BaseModel):
         DateTime(timezone=True),
         nullable=True,
         comment="Oxirgi muvaffaqiyatli login vaqti (UTC)",
+    )
+
+    # =========================================================================
+    # MULTI-FARM
+    # =========================================================================
+
+    current_farm_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("farms.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Foydalanuvchi hozir ishlayotgan ferma ID si",
     )
 
     # =========================================================================

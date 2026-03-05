@@ -1,8 +1,11 @@
 """
-Weight Measurement model for AI-generated weight estimations.
+Weight Measurement model for AI-generated and scale-based weight measurements.
 
-This is a time-series table optimized for high-frequency writes.
-Stores AI predictions along with metadata for model retraining.
+YANGILANISH (Q7 — Tarozi integratsiyasi):
+  source          — o'lchovning manbai: camera_ai | manual | scale_serial | scale_api
+  actual_weight_kg — tarozidan kelgan haqiqiy vazn (AI taxmin bilan taqqoslash uchun)
+  scale_id        — qaysi tarozi qurilmadan kelgani
+  notes           — foydalanuvchi izohi
 
 DESIGN CONSIDERATIONS:
 - High write volume (multiple cameras, frequent measurements)
@@ -11,6 +14,7 @@ DESIGN CONSIDERATIONS:
 - Relationship to Animal entity
 """
 
+import enum
 from datetime import datetime
 from typing import Optional, Any
 from sqlalchemy import (
@@ -21,10 +25,20 @@ from sqlalchemy import (
     Index,
     CheckConstraint,
     JSON,
+    Enum as SQLEnum,
+    Integer,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
+
+
+class WeightSource(str, enum.Enum):
+    CAMERA_AI    = "camera_ai"    # YOLO + bbox area taxmini
+    MANUAL       = "manual"       # Foydalanuvchi qo'lda kiritdi
+    SCALE_SERIAL = "scale_serial" # USB/RS-232 tarozi
+    SCALE_API    = "scale_api"    # Ethernet/Wi-Fi tarozi
 
 
 class WeightMeasurement(BaseModel):
@@ -116,12 +130,55 @@ class WeightMeasurement(BaseModel):
         nullable=True,
         comment="Path to stored image frame (if enabled)",
     )
+
+    # ------------------------------------------------------------------ #
+    # Q7 — Tarozi integratsiyasi                                           #
+    # ------------------------------------------------------------------ #
+
+    source: Mapped[WeightSource] = mapped_column(
+        SQLEnum(WeightSource, name="weight_source"),
+        nullable=False,
+        default=WeightSource.CAMERA_AI,
+        index=True,
+        comment="O'lchov manbai: camera_ai | manual | scale_serial | scale_api",
+    )
+
+    # Tarozidan kelgan haqiqiy vazn (AI taxmin bilan taqqoslash uchun)
+    # NULL = faqat AI taxmini bor, haqiqiy vazn yo'q
+    actual_weight_kg: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Tarozidan kelgan haqiqiy vazn (kg). NULL = faqat AI taxmini.",
+    )
+
+    # Qaysi tarozi qurilmadan kelgani (MANUAL uchun NULL bo'lishi mumkin)
+    scale_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("scales.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Tarozi qurilma ID si (agar tarozidan kelgan bo'lsa)",
+    )
+
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Foydalanuvchi izohi yoki tarozi xabari",
+    )
     
     # Relationship to Animal
     animal: Mapped["Animal"] = relationship(
         "Animal",
         back_populates="weight_measurements",
-        lazy="selectin",  # Eager load animal data (common use case)
+        lazy="selectin",
+    )
+
+    # Relationship to Scale
+    scale: Mapped[Optional["Scale"]] = relationship(  # type: ignore[name-defined]
+        "Scale",
+        back_populates="readings",
+        lazy="noload",
+        foreign_keys=[scale_id],
     )
     
     # Table-level constraints and indexes

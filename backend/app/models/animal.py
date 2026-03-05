@@ -6,7 +6,7 @@ in the farm monitoring system.
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Enum as SQLEnum, Index, CheckConstraint
+from sqlalchemy import String, Enum as SQLEnum, Index, CheckConstraint, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -143,8 +143,26 @@ class Animal(BaseModel):
     )
 
     # ------------------------------------------------------------------ #
+    # Multi-Farm                                                           #
+    # ------------------------------------------------------------------ #
+
+    farm_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("farms.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Jonivor tegishli bo'lgan ferma ID si",
+    )
+
+    # ------------------------------------------------------------------ #
     # Relationships                                                        #
     # ------------------------------------------------------------------ #
+
+    farm: Mapped[Optional["Farm"]] = relationship(  # type: ignore[name-defined]
+        "Farm",
+        back_populates="animals",
+        lazy="noload",
+    )
 
     # noload: API endpointda kerak bo'lganda selectinload() ishlatiladi
     detections: Mapped[list["Detection"]] = relationship(  # type: ignore[name-defined]

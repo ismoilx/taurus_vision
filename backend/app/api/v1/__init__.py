@@ -33,6 +33,8 @@ from app.api.v1.endpoints import (
     feed,              # Sprint 20
     finance,           # Q4 — Moliyaviy modul
     integrations,      # Q5 — Tashqi integratsiya
+    farms,             # Q3 — Multi-farm
+    scales,            # Q7 — Tarozi integratsiyasi
 )
 
 router = APIRouter(prefix="/v1")
@@ -90,3 +92,9 @@ router.include_router(finance.router)
 
 # --- Integration Module (Q5) ---
 router.include_router(integrations.router)
+
+# --- Multi-Farm Module (Q3) ---
+router.include_router(farms.router)
+
+# --- Scale Integration (Q7) ---
+router.include_router(scales.router)
