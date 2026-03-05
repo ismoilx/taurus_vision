@@ -15,7 +15,7 @@ import {
   LayoutDashboard, Activity, TrendingUp, Brain,
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
-  LogOut, ChevronDown, MoreHorizontal, X,
+  LogOut, ChevronDown, MoreHorizontal, X, Radio,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 
@@ -86,6 +86,7 @@ const PredictionsPage   = lazy(() => import('./pages/PredictionsPage'));
 const TrainingPage      = lazy(() => import('./pages/TrainingPage'));
 const TasksPage         = lazy(() => import('./pages/TasksPage'));
 const FeedPage          = lazy(() => import('./pages/FeedPage'));
+const SensorPage        = lazy(() => import('./pages/SensorPage'));
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -131,6 +132,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/live',      icon:Video,       label:'Live Feed'    },
       { to:'/reports',   icon:FileText,    label:'Hisobotlar'   },
       { to:'/health',    icon:Stethoscope, label:'Veterinariya' },
+      { to:'/sensors',   icon:Radio,       label:'IoT Sensorlar'},
     ],
   },
   {
@@ -577,6 +579,7 @@ export default function App() {
                     <Route path="/training"      element={<TrainingPage/>}/>
                     <Route path="/tasks"         element={<TasksPage/>}/>
                     <Route path="/feed"          element={<FeedPage/>}/>
+                    <Route path="/sensors"       element={<SensorPage/>}/>
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>
                 </Layout>

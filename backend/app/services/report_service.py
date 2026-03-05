@@ -1,747 +1,867 @@
 """
-Report Service - Taurus Vision
+Taurus Vision — Report Service
 
-Professional PDF report generation for animals, farm, and health data.
-Uses ReportLab for high-quality, customizable PDF documents.
+Professional PDF hisobotlarini yaratish xizmati.
+ReportLab orqali yuqori sifatli PDF hujjatlar generatsiya qiladi.
 
-Author: Taurus Vision Team
-Date: 2026-02-16
+TUZATILGAN BUGLAR (eski versiyadan):
+    XATO:  d.detected_at      → TO'GRI: d.timestamp          (Detection.timestamp)
+    XATO:  d.confidence_score → TO'GRI: d.confidence          (Detection.confidence)
+    XATO:  Detection.detected_at → TO'GRI: Detection.timestamp
+    XATO:  naive vs aware datetime solishtirish → TO'GRI: UTC aware qilindi
+
+HISOBOT TURLARI:
+    generate_animal_report()  — Bitta jonivor: tarix, vazn, deteksiya, sog'liq
+    generate_farm_report()    — Ferma xulosasi: statistika, trendlar, top jonivorlar
+    generate_health_report()  — Sog'liq hisoboti: alertlar, xavf tahlili, tavsiyalar
+
+ARXITEKTURA:
+    Endpoint → ReportService → SQLAlchemy ORM → ReportLab → PDF bytes
+    Barcha metodlar async, AsyncSession bilan ishlaydi.
 """
 
-from datetime import datetime, date, timedelta
-from typing import Optional, List, Dict, Any, BinaryIO
+from __future__ import annotations
+
+import logging
+from datetime import datetime, date, timedelta, timezone
 from io import BytesIO
-from sqlalchemy import select, func, and_, desc
+from typing import Optional, List, Dict, Any
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.platypus import (
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+from sqlalchemy import and_, desc, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch, cm
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image as RLImage, KeepTogether
-)
-from reportlab.pdfgen import canvas
-from reportlab.graphics.shapes import Drawing
-from reportlab.graphics.charts.linecharts import HorizontalLineChart
-from reportlab.graphics.charts.barcharts import VerticalBarChart
-
+from app.core.logging_config import get_logger
+from app.models.alert import Alert as AlertModel, AlertStatus, AlertSeverity
 from app.models.animal import Animal, AnimalStatus
 from app.models.detection import Detection
 from app.models.weight_measurement import WeightMeasurement
-from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Dizayn konstantalari
+# ---------------------------------------------------------------------------
+_BRAND_DARK    = colors.HexColor("#1a3a2a")
+_BRAND_GREEN   = colors.HexColor("#2d6a4f")
+_BRAND_ACCENT  = colors.HexColor("#52b788")
+_TABLE_HEADER  = colors.HexColor("#40916c")
+_TABLE_ROW_ALT = colors.HexColor("#f0faf5")
+_CRITICAL_RED  = colors.HexColor("#d62828")
+_WARNING_AMBER = colors.HexColor("#e85d04")
+_NEUTRAL_GREY  = colors.HexColor("#6c757d")
+
+_PAGE_MARGIN   = 0.65 * inch
 
 
 class ReportService:
     """
-    Professional PDF report generation service.
-    
-    Generates comprehensive PDF reports for:
-    - Individual animals (history, weight, health)
-    - Farm-wide summaries (statistics, trends)
-    - Health reports (alerts, risk analysis)
-    
-    All reports include:
-    - Professional header/footer
-    - Tables with styling
-    - Charts and graphs
-    - Page numbers
-    - Generation timestamp
+    Professional PDF hisobot generatsiya servisi.
+
+    Barcha metodlar async va side-effect'siz (faqat DB o'qish + PDF yaratish).
+    Har bir metod PDF ni bytes sifatida qaytaradi.
+
+    Usage:
+        svc = ReportService()
+        pdf = await svc.generate_animal_report(db, animal_id=12)
     """
-    
-    def __init__(self):
-        """Initialize report service."""
-        self.page_size = A4
-        self.margin = 0.75 * inch
-        
-        # Define styles
-        self.styles = getSampleStyleSheet()
-        
-        # Custom styles
-        self.styles.add(ParagraphStyle(
-            name='CustomTitle',
-            parent=self.styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1a472a'),
-            spaceAfter=30,
+
+    def __init__(self) -> None:
+        self._styles = getSampleStyleSheet()
+
+        self._styles.add(ParagraphStyle(
+            name="TVTitle",
+            parent=self._styles["Heading1"],
+            fontSize=22,
+            textColor=_BRAND_DARK,
+            spaceAfter=6,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName="Helvetica-Bold",
+            leading=26,
         ))
-        
-        self.styles.add(ParagraphStyle(
-            name='CustomHeading',
-            parent=self.styles['Heading2'],
-            fontSize=16,
-            textColor=colors.HexColor('#2d5a3d'),
-            spaceBefore=20,
-            spaceAfter=12,
-            fontName='Helvetica-Bold'
-        ))
-        
-        self.styles.add(ParagraphStyle(
-            name='CustomBody',
-            parent=self.styles['Normal'],
+        self._styles.add(ParagraphStyle(
+            name="TVSubtitle",
+            parent=self._styles["Normal"],
             fontSize=11,
-            leading=14,
-            alignment=TA_LEFT
+            textColor=_BRAND_GREEN,
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName="Helvetica",
         ))
-    
-    # =========================================================================
+        self._styles.add(ParagraphStyle(
+            name="TVSection",
+            parent=self._styles["Heading2"],
+            fontSize=13,
+            textColor=_BRAND_GREEN,
+            spaceBefore=16,
+            spaceAfter=8,
+            fontName="Helvetica-Bold",
+        ))
+        self._styles.add(ParagraphStyle(
+            name="TVBody",
+            parent=self._styles["Normal"],
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#2c2c2c"),
+            fontName="Helvetica",
+        ))
+        self._styles.add(ParagraphStyle(
+            name="TVCaption",
+            parent=self._styles["Normal"],
+            fontSize=8,
+            textColor=_NEUTRAL_GREY,
+            fontName="Helvetica",
+            alignment=TA_RIGHT,
+        ))
+
+    # ==================================================================
     # ANIMAL REPORT
-    # =========================================================================
-    
+    # ==================================================================
+
     async def generate_animal_report(
         self,
-        db: AsyncSession,
-        animal_id: int
+        db:        AsyncSession,
+        animal_id: int,
     ) -> bytes:
         """
-        Generate comprehensive PDF report for a single animal.
-        
+        Bitta jonivor uchun to'liq PDF hisobot yaratadi.
+
         Args:
-            db: Database session
-            animal_id: Animal ID
-        
+            db:        Async database session
+            animal_id: Jonivor ID
+
         Returns:
-            PDF file as bytes
-        
+            PDF fayl baytlari (application/pdf uchun)
+
         Raises:
-            ValueError: If animal not found
-        
-        Report sections:
-        1. Animal Information (tag, species, gender, status, etc)
-        2. Weight History (table + chart)
-        3. Detection Timeline (last 30 days)
-        4. Health Summary
-        5. Statistics
-        
-        Example:
-            >>> service = ReportService()
-            >>> pdf_bytes = await service.generate_animal_report(db, 5)
-            >>> with open('animal_5.pdf', 'wb') as f:
-            ...     f.write(pdf_bytes)
+            ValueError: Jonivor topilmasa
+
+        To'g'ri ORM maydon nomlari:
+            Detection.timestamp    (detected_at EMAS)
+            Detection.confidence   (confidence_score EMAS)
+            WeightMeasurement.timestamp
+            WeightMeasurement.confidence_score
+            WeightMeasurement.estimated_weight_kg
         """
-        logger.info(f"Generating animal report: animal_id={animal_id}")
-        
-        try:
-            # ===== Fetch animal data =====
-            query = select(Animal).options(
+        logger.info(
+            "Generating animal report",
+            extra={"extra_data": {"animal_id": animal_id}},
+        )
+
+        result = await db.execute(
+            select(Animal)
+            .options(
                 selectinload(Animal.weight_measurements),
-                selectinload(Animal.detections)
-            ).where(Animal.id == animal_id)
-            
-            result = await db.execute(query)
-            animal = result.scalar_one_or_none()
-            
-            if not animal:
-                raise ValueError(f"Animal with id {animal_id} not found")
-            
-            # ===== Create PDF =====
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                buffer,
-                pagesize=self.page_size,
-                rightMargin=self.margin,
-                leftMargin=self.margin,
-                topMargin=self.margin,
-                bottomMargin=self.margin,
-                title=f"Animal Report - {animal.tag_id}"
+                selectinload(Animal.detections),
             )
-            
-            # Story (content elements)
-            story = []
-            
-            # ===== HEADER =====
+            .where(Animal.id == animal_id)
+        )
+        animal = result.scalar_one_or_none()
+
+        if animal is None:
+            raise ValueError(f"Animal with id={animal_id} not found")
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=_PAGE_MARGIN,
+            leftMargin=_PAGE_MARGIN,
+            topMargin=_PAGE_MARGIN,
+            bottomMargin=_PAGE_MARGIN + 0.3 * inch,
+            title=f"Animal Report — {animal.tag_id}",
+            author="Taurus Vision",
+        )
+
+        story: List[Any] = []
+        story.extend(self._build_header(
+            title="Jonivor Hisoboti",
+            subtitle=f"Tag ID: {animal.tag_id}",
+        ))
+
+        # ── Bo'lim 1: Jonivor ma'lumotlari ────────────────────────────
+        story.append(Paragraph("1. Jonivor Ma'lumotlari", self._styles["TVSection"]))
+
+        species_val = getattr(animal.species, "value", str(animal.species))
+        gender_val  = getattr(animal.gender,  "value", str(animal.gender))
+        status_val  = getattr(animal.status,  "value", str(animal.status))
+
+        info_rows = [
+            ["Tag ID",            animal.tag_id],
+            ["Tur (species)",     species_val.capitalize()],
+            ["Jinsi",             gender_val.capitalize()],
+            ["Holat",             status_val.capitalize()],
+            ["Zot (breed)",       animal.breed or "Ko'rsatilmagan"],
+            ["Ro'yxatga olingan", self._fmt_date(animal.acquisition_date)],
+            ["Tug'ilgan sana",    self._fmt_date(animal.birth_date) if animal.birth_date else "Noma'lum"],
+            ["Jami deteksiyalar", str(animal.total_detections)],
+            ["Oxirgi ko'rinish",  self._fmt_datetime(animal.last_detected_at) if animal.last_detected_at else "Hech qachon"],
+        ]
+        story.append(self._build_kv_table(info_rows))
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Bo'lim 2: Vazn tarixi ─────────────────────────────────────
+        story.append(Paragraph("2. Vazn Tarixi", self._styles["TVSection"]))
+
+        # ✅ WeightMeasurement.timestamp — to'g'ri
+        sorted_weights = sorted(
+            animal.weight_measurements,
+            key=lambda w: w.timestamp,
+            reverse=True,
+        )
+
+        if sorted_weights:
+            latest_w = sorted_weights[0]
             story.append(Paragraph(
-                "🐄 TAURUS VISION",
-                self.styles['CustomTitle']
+                f"<b>Joriy vazn:</b> {latest_w.estimated_weight_kg:.1f} kg "
+                f"(Ishonch: {latest_w.confidence_score * 100:.0f}%)",
+                self._styles["TVBody"],
             ))
-            story.append(Paragraph(
-                f"Animal Report: {animal.tag_id}",
-                self.styles['Heading1']
-            ))
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== SECTION 1: Animal Information =====
-            story.append(Paragraph("1. Animal Information", self.styles['CustomHeading']))
-            
-            info_data = [
-                ['Tag ID:', animal.tag_id],
-                ['Species:', animal.species.capitalize()],
-                ['Gender:', animal.gender.capitalize()],
-                ['Status:', animal.status.value.capitalize()],
-                ['Breed:', animal.breed or 'Not specified'],
-                ['Acquisition Date:', animal.acquisition_date.strftime('%Y-%m-%d') if animal.acquisition_date else 'N/A'],
-                ['Total Detections:', str(animal.total_detections)],
-                ['Last Detected:', animal.last_detected_at.strftime('%Y-%m-%d %H:%M') if animal.last_detected_at else 'Never'],
-            ]
-            
-            info_table = Table(info_data, colWidths=[2.5*inch, 4*inch])
-            info_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e8f5e9')),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1b5e20')),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 12),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            story.append(info_table)
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== SECTION 2: Weight History =====
-            story.append(Paragraph("2. Weight History", self.styles['CustomHeading']))
-            
-            # Get weight measurements (last 30 days)
-            weight_measurements = sorted(
-                [w for w in animal.weight_measurements],
-                key=lambda w: w.timestamp,
-                reverse=True
-            )[:30]
-            
-            if weight_measurements:
-                # Latest weight
-                latest = weight_measurements[0]
-                story.append(Paragraph(
-                    f"<b>Current Weight:</b> {latest.estimated_weight_kg:.1f} kg "
-                    f"(Confidence: {latest.confidence_score*100:.1f}%)",
-                    self.styles['CustomBody']
-                ))
+            story.append(Spacer(1, 0.1 * inch))
+
+            # ✅ .timestamp, .confidence_score, .estimated_weight_kg — hammasi to'g'ri
+            w_rows = [["Sana va vaqt", "Vazn (kg)", "Ishonch", "Kamera"]]
+            for w in sorted_weights[:10]:
+                w_rows.append([
+                    self._fmt_datetime(w.timestamp),
+                    f"{w.estimated_weight_kg:.1f}",
+                    f"{w.confidence_score * 100:.0f}%",
+                    w.camera_id or "—",
+                ])
+            story.append(self._build_data_table(w_rows, header_row=True))
+
+            if len(sorted_weights) >= 2:
+                newest = sorted_weights[0].estimated_weight_kg
+                oldest = sorted_weights[-1].estimated_weight_kg
+                delta  = newest - oldest
+                pct    = (delta / oldest * 100) if oldest > 0 else 0.0
+                if delta > 0:
+                    trend_html = (
+                        f"<b>Trend:</b> "
+                        f"<font color='#2d6a4f'>↑ +{delta:.1f} kg (+{pct:.1f}%)</font>"
+                        f" ({len(sorted_weights)} o'lchov)"
+                    )
+                elif delta < 0:
+                    trend_html = (
+                        f"<b>Trend:</b> "
+                        f"<font color='#d62828'>↓ {delta:.1f} kg ({pct:.1f}%)</font>"
+                        f" ({len(sorted_weights)} o'lchov)"
+                    )
+                else:
+                    trend_html = "<b>Trend:</b> Barqaror (o'zgarish yo'q)"
+
                 story.append(Spacer(1, 0.1 * inch))
-                
-                # Weight table (last 10 measurements)
-                weight_data = [['Date', 'Weight (kg)', 'Confidence', 'Camera']]
-                for w in weight_measurements[:10]:
-                    weight_data.append([
-                        w.timestamp.strftime('%Y-%m-%d %H:%M'),
-                        f"{w.estimated_weight_kg:.1f}",
-                        f"{w.confidence_score*100:.0f}%",
-                        w.camera_id
-                    ])
-                
-                weight_table = Table(weight_data, colWidths=[1.8*inch, 1.3*inch, 1.3*inch, 1.8*inch])
-                weight_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4caf50')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 11),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('ALIGN', (1, 1), (2, -1), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(weight_table)
-                
-                # Weight trend analysis
-                if len(weight_measurements) >= 2:
-                    oldest = weight_measurements[-1]
-                    change = latest.estimated_weight_kg - oldest.estimated_weight_kg
-                    change_pct = (change / oldest.estimated_weight_kg) * 100
-                    
-                    trend_text = f"<b>Trend:</b> "
-                    if change > 0:
-                        trend_text += f"<font color='green'>↑ +{change:.1f} kg (+{change_pct:.1f}%)</font>"
-                    elif change < 0:
-                        trend_text += f"<font color='red'>↓ {change:.1f} kg ({change_pct:.1f}%)</font>"
-                    else:
-                        trend_text += "Stable"
-                    
-                    story.append(Spacer(1, 0.1 * inch))
-                    story.append(Paragraph(trend_text, self.styles['CustomBody']))
-            else:
-                story.append(Paragraph(
-                    "No weight measurements available.",
-                    self.styles['CustomBody']
-                ))
-            
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== SECTION 3: Detection Timeline =====
-            story.append(Paragraph("3. Detection Activity", self.styles['CustomHeading']))
-            
-            # Get detections (last 30 days)
-            thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-            recent_detections = [
-                d for d in animal.detections
-                if d.detected_at >= thirty_days_ago
-            ]
-            recent_detections = sorted(recent_detections, key=lambda d: d.detected_at, reverse=True)
-            
-            if recent_detections:
-                story.append(Paragraph(
-                    f"Total detections (last 30 days): <b>{len(recent_detections)}</b>",
-                    self.styles['CustomBody']
-                ))
-                story.append(Spacer(1, 0.1 * inch))
-                
-                # Detection frequency by day
-                detection_by_day: Dict[date, int] = {}
-                for d in recent_detections:
-                    day = d.detected_at.date()
-                    detection_by_day[day] = detection_by_day.get(day, 0) + 1
-                
-                # Average per day
-                avg_per_day = len(recent_detections) / 30
-                story.append(Paragraph(
-                    f"Average detections per day: <b>{avg_per_day:.1f}</b>",
-                    self.styles['CustomBody']
-                ))
-                
-                # Last 5 detections table
-                story.append(Spacer(1, 0.1 * inch))
-                story.append(Paragraph("Recent Detections:", self.styles['CustomBody']))
-                
-                detection_data = [['Date & Time', 'Camera', 'Confidence']]
-                for d in recent_detections[:5]:
-                    detection_data.append([
-                        d.detected_at.strftime('%Y-%m-%d %H:%M:%S'),
-                        d.camera_id,
-                        f"{d.confidence_score*100:.0f}%"
-                    ])
-                
-                detection_table = Table(detection_data, colWidths=[2.5*inch, 2.5*inch, 1.5*inch])
-                detection_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4caf50')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 11),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('ALIGN', (2, 1), (2, -1), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(detection_table)
-            else:
-                story.append(Paragraph(
-                    "No detections in the last 30 days.",
-                    self.styles['CustomBody']
-                ))
-            
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== SECTION 4: Notes =====
-            if animal.notes:
-                story.append(Paragraph("4. Notes", self.styles['CustomHeading']))
-                story.append(Paragraph(animal.notes, self.styles['CustomBody']))
-                story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== FOOTER =====
-            story.append(Spacer(1, 0.5 * inch))
+                story.append(Paragraph(trend_html, self._styles["TVBody"]))
+        else:
             story.append(Paragraph(
-                f"<i>Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-                self.styles['CustomBody']
+                "Vazn o'lchovlari hali kiritilmagan.",
+                self._styles["TVBody"],
             ))
+
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Bo'lim 3: Deteksiya faolligi ──────────────────────────────
+        story.append(Paragraph("3. Deteksiya Faolligi", self._styles["TVSection"]))
+
+        now_utc    = datetime.now(timezone.utc)
+        thirty_ago = now_utc - timedelta(days=30)
+
+        # ✅ d.timestamp — to'g'ri (detected_at EMAS)
+        # ✅ timezone-aware solishtirish — _to_utc() orqali
+        recent_dets = sorted(
+            [d for d in animal.detections if self._to_utc(d.timestamp) >= thirty_ago],
+            key=lambda d: d.timestamp,
+            reverse=True,
+        )
+
+        if recent_dets:
+            avg_per_day = len(recent_dets) / 30.0
             story.append(Paragraph(
-                "<i>Taurus Vision - AI-Powered Livestock Monitoring</i>",
-                self.styles['CustomBody']
+                f"<b>So'nggi 30 kun:</b> {len(recent_dets)} ta deteksiya "
+                f"(kuniga o'rtacha {avg_per_day:.1f} ta)",
+                self._styles["TVBody"],
             ))
-            
-            # ===== Build PDF =====
-            doc.build(story, onFirstPage=self._add_page_number, onLaterPages=self._add_page_number)
-            
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"Animal report generated: {len(pdf_bytes)} bytes")
-            return pdf_bytes
-            
-        except Exception as e:
-            logger.error(f"Error generating animal report: {e}", exc_info=True)
-            raise
-    
-    # =========================================================================
+            story.append(Spacer(1, 0.1 * inch))
+            story.append(Paragraph("So'nggi deteksiyalar:", self._styles["TVBody"]))
+            story.append(Spacer(1, 0.06 * inch))
+
+            # ✅ d.timestamp va d.confidence — to'g'ri maydon nomlari
+            det_rows = [["Sana va vaqt", "Kamera", "Ishonch"]]
+            for d in recent_dets[:5]:
+                det_rows.append([
+                    self._fmt_datetime(d.timestamp),
+                    d.camera_id or "—",
+                    f"{d.confidence * 100:.0f}%",
+                ])
+            story.append(self._build_data_table(det_rows, header_row=True))
+        else:
+            story.append(Paragraph(
+                "So'nggi 30 kunda deteksiya qayd etilmagan.",
+                self._styles["TVBody"],
+            ))
+
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Bo'lim 4: Izohlar (mavjud bo'lsa) ─────────────────────────
+        if animal.notes:
+            story.append(Paragraph("4. Izohlar", self._styles["TVSection"]))
+            story.append(Paragraph(animal.notes, self._styles["TVBody"]))
+            story.append(Spacer(1, 0.25 * inch))
+
+        story.extend(self._build_footer())
+
+        doc.build(
+            story,
+            onFirstPage=self._page_decorator,
+            onLaterPages=self._page_decorator,
+        )
+
+        pdf_bytes = buffer.getvalue()
+        buffer.close()
+
+        logger.info(
+            "Animal report generated",
+            extra={"extra_data": {"animal_id": animal_id, "size_bytes": len(pdf_bytes)}},
+        )
+        return pdf_bytes
+
+    # ==================================================================
     # FARM REPORT
-    # =========================================================================
-    
+    # ==================================================================
+
     async def generate_farm_report(
         self,
-        db: AsyncSession,
-        date_from: date,
-        date_to: date,
-        report_type: str = "summary"
+        db:          AsyncSession,
+        date_from:   date,
+        date_to:     date,
+        report_type: str = "summary",
     ) -> bytes:
         """
-        Generate farm-wide summary report.
-        
+        Ferma bo'yicha to'liq yig'ma hisobot.
+
         Args:
-            db: Database session
-            date_from: Start date
-            date_to: End date
-            report_type: Report type (summary/detailed/health)
-        
+            db:          Async database session
+            date_from:   Hisobot boshi (YYYY-MM-DD)
+            date_to:     Hisobot oxiri  (YYYY-MM-DD)
+            report_type: "summary" | "detailed" | "health"
+
         Returns:
-            PDF file as bytes
-        
-        Report types:
-        - summary: High-level statistics and trends
-        - detailed: Comprehensive data with all animals
-        - health: Health-focused with alerts
-        
-        Report sections:
-        1. Executive Summary
-        2. Animal Statistics
-        3. Detection Summary
-        4. Weight Trends
-        5. Top Performers
-        6. Alerts (if health report)
-        
-        Example:
-            >>> service = ReportService()
-            >>> pdf_bytes = await service.generate_farm_report(
-            ...     db,
-            ...     date(2026, 2, 1),
-            ...     date(2026, 2, 16),
-            ...     "summary"
-            ... )
+            PDF fayl baytlari
+
+        To'g'ri ORM maydon nomlari:
+            Detection.timestamp    (detected_at EMAS)
+            Detection.confidence   (confidence_score EMAS)
         """
-        logger.info(f"Generating farm report: {date_from} to {date_to}, type={report_type}")
-        
-        try:
-            # ===== Fetch data =====
-            
-            # Animals
-            total_animals = await db.scalar(select(func.count(Animal.id)))
-            active_animals = await db.scalar(
-                select(func.count(Animal.id)).where(Animal.status == AnimalStatus.ACTIVE)
+        logger.info(
+            "Generating farm report",
+            extra={"extra_data": {
+                "date_from": str(date_from),
+                "date_to":   str(date_to),
+                "type":      report_type,
+            }},
+        )
+
+        # timezone-aware datetime chegara qiymatlari
+        dt_from = datetime(date_from.year, date_from.month, date_from.day, tzinfo=timezone.utc)
+        dt_to   = (
+            datetime(date_to.year, date_to.month, date_to.day, tzinfo=timezone.utc)
+            + timedelta(days=1)
+        )
+        days_count = (date_to - date_from).days + 1
+
+        # ── Statistika yig'ish ─────────────────────────────────────────
+
+        total_animals  = await db.scalar(select(func.count(Animal.id))) or 0
+        active_animals = await db.scalar(
+            select(func.count(Animal.id)).where(Animal.status == AnimalStatus.ACTIVE)
+        ) or 0
+
+        # ✅ Detection.timestamp — to'g'ri
+        total_dets = await db.scalar(
+            select(func.count(Detection.id)).where(
+                and_(Detection.timestamp >= dt_from, Detection.timestamp < dt_to)
             )
-            
-            # Detections
-            detections_query = select(func.count(Detection.id)).where(
+        ) or 0
+
+        # ✅ Detection.confidence — to'g'ri
+        avg_conf = await db.scalar(
+            select(func.avg(Detection.confidence)).where(
+                and_(Detection.timestamp >= dt_from, Detection.timestamp < dt_to)
+            )
+        )
+
+        avg_weight = await db.scalar(
+            select(func.avg(WeightMeasurement.estimated_weight_kg)).where(
                 and_(
-                    func.date(Detection.detected_at) >= date_from,
-                    func.date(Detection.detected_at) <= date_to
+                    WeightMeasurement.timestamp >= dt_from,
+                    WeightMeasurement.timestamp <  dt_to,
                 )
             )
-            total_detections = await db.scalar(detections_query)
-            
-            # Average weight
-            avg_weight_query = select(
-                func.avg(WeightMeasurement.estimated_weight_kg)
-            ).where(
-                and_(
-                    func.date(WeightMeasurement.timestamp) >= date_from,
-                    func.date(WeightMeasurement.timestamp) <= date_to
-                )
+        )
+
+        # Holat bo'yicha taqsimot
+        status_rows = (await db.execute(
+            select(Animal.status, func.count(Animal.id).label("cnt"))
+            .group_by(Animal.status)
+        )).all()
+
+        # Top 10 aktiv jonivorlar
+        # ✅ Detection.timestamp — to'g'ri
+        top_rows = (await db.execute(
+            select(
+                Animal.tag_id,
+                Animal.species,
+                func.count(Detection.id).label("det_count"),
             )
-            avg_weight = await db.scalar(avg_weight_query)
-            
-            # ===== Create PDF =====
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                buffer,
-                pagesize=self.page_size,
-                rightMargin=self.margin,
-                leftMargin=self.margin,
-                topMargin=self.margin,
-                bottomMargin=self.margin,
-                title=f"Farm Report - {date_from} to {date_to}"
-            )
-            
-            story = []
-            
-            # ===== HEADER =====
-            story.append(Paragraph("🐄 TAURUS VISION", self.styles['CustomTitle']))
-            story.append(Paragraph(f"Farm Report", self.styles['Heading1']))
-            story.append(Paragraph(
-                f"Period: {date_from.strftime('%Y-%m-%d')} to {date_to.strftime('%Y-%m-%d')}",
-                self.styles['CustomBody']
-            ))
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== EXECUTIVE SUMMARY =====
-            story.append(Paragraph("Executive Summary", self.styles['CustomHeading']))
-            
-            summary_data = [
-                ['Total Animals:', str(total_animals or 0)],
-                ['Active Animals:', str(active_animals or 0)],
-                ['Total Detections:', str(total_detections or 0)],
-                ['Average Weight:', f"{avg_weight:.1f} kg" if avg_weight else 'N/A'],
-                ['Report Period:', f"{(date_to - date_from).days + 1} days"],
-            ]
-            
-            summary_table = Table(summary_data, colWidths=[2.5*inch, 4*inch])
-            summary_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e8f5e9')),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1b5e20')),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 12),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            story.append(summary_table)
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== ANIMAL STATISTICS =====
-            story.append(Paragraph("Animal Statistics", self.styles['CustomHeading']))
-            
-            # Animals by status
-            status_query = select(
-                Animal.status,
-                func.count(Animal.id).label('count')
-            ).group_by(Animal.status)
-            
-            status_result = await db.execute(status_query)
-            status_rows = status_result.all()
-            
-            status_data = [['Status', 'Count']]
-            for row in status_rows:
-                status_data.append([row.status.value.capitalize(), str(row.count)])
-            
-            status_table = Table(status_data, colWidths=[3*inch, 3*inch])
-            status_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4caf50')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 11),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 12),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            story.append(status_table)
-            story.append(Spacer(1, 0.5 * inch))
-            
-            # ===== FOOTER =====
-            story.append(Paragraph(
-                f"<i>Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-                self.styles['CustomBody']
-            ))
-            story.append(Paragraph(
-                "<i>Taurus Vision - AI-Powered Livestock Monitoring</i>",
-                self.styles['CustomBody']
-            ))
-            
-            # ===== Build PDF =====
-            doc.build(story, onFirstPage=self._add_page_number, onLaterPages=self._add_page_number)
-            
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"Farm report generated: {len(pdf_bytes)} bytes")
-            return pdf_bytes
-            
-        except Exception as e:
-            logger.error(f"Error generating farm report: {e}", exc_info=True)
-            raise
-    
-    # =========================================================================
+            .select_from(Detection)
+            .join(Animal, Detection.animal_id == Animal.id)
+            .where(and_(Detection.timestamp >= dt_from, Detection.timestamp < dt_to))
+            .group_by(Animal.id, Animal.tag_id, Animal.species)
+            .order_by(desc("det_count"))
+            .limit(10)
+        )).all()
+
+        # ── PDF yaratish ───────────────────────────────────────────────
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=_PAGE_MARGIN,
+            leftMargin=_PAGE_MARGIN,
+            topMargin=_PAGE_MARGIN,
+            bottomMargin=_PAGE_MARGIN + 0.3 * inch,
+            title=f"Farm Report — {date_from} to {date_to}",
+            author="Taurus Vision",
+        )
+
+        story: List[Any] = []
+        story.extend(self._build_header(
+            title="Ferma Hisoboti",
+            subtitle=(
+                f"Davr: {self._fmt_date(date_from)} — {self._fmt_date(date_to)} "
+                f"({days_count} kun)"
+            ),
+        ))
+
+        # ── Bosh xulosa ────────────────────────────────────────────────
+        story.append(Paragraph("1. Bosh Xulosa", self._styles["TVSection"]))
+
+        avg_det_per_day = total_dets / days_count if days_count else 0.0
+
+        summary_rows = [
+            ["Ko'rsatkich",                   "Qiymat"],
+            ["Jami jonivorlar",               str(total_animals)],
+            ["Aktiv jonivorlar",              str(active_animals)],
+            ["Jami deteksiyalar (davr)",       str(total_dets)],
+            ["Kunlik o'rtacha deteksiya",      f"{avg_det_per_day:.1f}"],
+            ["O'rtacha ishonch (confidence)",  f"{float(avg_conf) * 100:.1f}%" if avg_conf else "—"],
+            ["O'rtacha vazn",                  f"{float(avg_weight):.1f} kg" if avg_weight else "—"],
+            ["Hisobot davri",                  f"{days_count} kun"],
+        ]
+        story.append(self._build_data_table(summary_rows, header_row=True))
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Holat taqsimoti ────────────────────────────────────────────
+        story.append(Paragraph("2. Jonivor Holati", self._styles["TVSection"]))
+
+        st_rows = [["Holat", "Soni"]]
+        for row in status_rows:
+            sv = getattr(row.status, "value", str(row.status))
+            st_rows.append([sv.capitalize(), str(row.cnt)])
+        story.append(self._build_data_table(st_rows, header_row=True))
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Top 10 faol jonivorlar ─────────────────────────────────────
+        if top_rows:
+            story.append(Paragraph("3. Eng Faol Jonivorlar (Top 10)", self._styles["TVSection"]))
+
+            top_table = [["#", "Tag ID", "Tur", "Deteksiyalar"]]
+            for i, r in enumerate(top_rows, 1):
+                sp = getattr(r.species, "value", str(r.species))
+                top_table.append([str(i), r.tag_id, sp.capitalize(), str(r.det_count)])
+            story.append(self._build_data_table(top_table, header_row=True))
+            story.append(Spacer(1, 0.25 * inch))
+
+        story.extend(self._build_footer())
+
+        doc.build(
+            story,
+            onFirstPage=self._page_decorator,
+            onLaterPages=self._page_decorator,
+        )
+
+        pdf_bytes = buffer.getvalue()
+        buffer.close()
+
+        logger.info(
+            "Farm report generated",
+            extra={"extra_data": {"size_bytes": len(pdf_bytes)}},
+        )
+        return pdf_bytes
+
+    # ==================================================================
     # HEALTH REPORT
-    # =========================================================================
-    
+    # ==================================================================
+
     async def generate_health_report(
         self,
-        db: AsyncSession,
-        animal_ids: Optional[List[int]] = None
+        db:         AsyncSession,
+        animal_ids: Optional[List[int]] = None,
     ) -> bytes:
         """
-        Generate health-focused report with alerts.
-        
+        Sog'liq yo'naltirilgan hisobot: alertlar, xavf tahlili, tavsiyalar.
+
         Args:
-            db: Database session
-            animal_ids: Specific animal IDs (None = all active animals)
-        
+            db:         Async database session
+            animal_ids: Aniq jonivor ID'lar (None = barcha aktiv)
+
         Returns:
-            PDF file as bytes
-        
-        Report sections:
-        1. Health Overview
-        2. Weight Loss Alerts
-        3. No Detection Alerts
-        4. Risk Assessment
-        5. Recommendations
-        
-        Example:
-            >>> service = ReportService()
-            >>> pdf_bytes = await service.generate_health_report(db)
+            PDF fayl baytlari
         """
-        logger.info(f"Generating health report: animal_ids={animal_ids}")
-        
-        try:
-            # ===== Fetch animals =====
-            query = select(Animal).where(Animal.status == AnimalStatus.ACTIVE)
-            if animal_ids:
-                query = query.where(Animal.id.in_(animal_ids))
-            
-            result = await db.execute(query)
-            animals = result.scalars().all()
-            
-            # ===== Analyze health =====
-            alerts = []
-            now = datetime.utcnow()
-            
-            for animal in animals:
-                # Check detection frequency
-                if animal.last_detected_at:
-                    days_since = (now - animal.last_detected_at).days
-                    if days_since > 7:
-                        alerts.append({
-                            'animal': animal,
-                            'type': 'no_detection',
-                            'severity': 'warning',
-                            'message': f"No detection for {days_since} days"
-                        })
-                else:
-                    alerts.append({
-                        'animal': animal,
-                        'type': 'never_detected',
-                        'severity': 'critical',
-                        'message': "Never detected by system"
-                    })
-            
-            # ===== Create PDF =====
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                buffer,
-                pagesize=self.page_size,
-                rightMargin=self.margin,
-                leftMargin=self.margin,
-                topMargin=self.margin,
-                bottomMargin=self.margin,
-                title="Health Report"
-            )
-            
-            story = []
-            
-            # ===== HEADER =====
-            story.append(Paragraph("🐄 TAURUS VISION", self.styles['CustomTitle']))
-            story.append(Paragraph("Health Report", self.styles['Heading1']))
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== OVERVIEW =====
-            story.append(Paragraph("Health Overview", self.styles['CustomHeading']))
-            
-            overview_data = [
-                ['Animals Monitored:', str(len(animals))],
-                ['Active Alerts:', str(len(alerts))],
-                ['Critical Alerts:', str(len([a for a in alerts if a['severity'] == 'critical']))],
-                ['Warning Alerts:', str(len([a for a in alerts if a['severity'] == 'warning']))],
-            ]
-            
-            overview_table = Table(overview_data, colWidths=[2.5*inch, 4*inch])
-            overview_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e8f5e9')),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#1b5e20')),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 12),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            story.append(overview_table)
-            story.append(Spacer(1, 0.3 * inch))
-            
-            # ===== ALERTS =====
-            if alerts:
-                story.append(Paragraph("Active Alerts", self.styles['CustomHeading']))
-                
-                alert_data = [['Animal', 'Type', 'Severity', 'Message']]
-                for alert in alerts:
-                    alert_data.append([
-                        alert['animal'].tag_id,
-                        alert['type'].replace('_', ' ').title(),
-                        alert['severity'].title(),
-                        alert['message']
-                    ])
-                
-                alert_table = Table(alert_data, colWidths=[1.3*inch, 1.5*inch, 1.3*inch, 2.5*inch])
-                alert_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d32f2f')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#ffebee')),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ]))
-                story.append(alert_table)
+        logger.info(
+            "Generating health report",
+            extra={"extra_data": {"animal_ids": animal_ids}},
+        )
+
+        q = select(Animal).where(Animal.status == AnimalStatus.ACTIVE)
+        if animal_ids:
+            q = q.where(Animal.id.in_(animal_ids))
+        animals = (await db.execute(q)).scalars().all()
+
+        now_utc  = datetime.now(timezone.utc)
+        week_ago = now_utc - timedelta(days=7)
+
+        # Ko'rinmaslik alertlari
+        detection_alerts: List[Dict] = []
+        for a in animals:
+            if a.last_detected_at is None:
+                detection_alerts.append({
+                    "tag_id":   a.tag_id,
+                    "severity": "critical",
+                    "message":  "Hech qachon kamera orqali aniqlanmagan",
+                    "days":     None,
+                })
             else:
-                story.append(Paragraph(
-                    "✓ No active health alerts. All animals appear healthy.",
-                    self.styles['CustomBody']
-                ))
-            
-            story.append(Spacer(1, 0.5 * inch))
-            
-            # ===== FOOTER =====
+                last_utc   = self._to_utc(a.last_detected_at)
+                days_since = (now_utc - last_utc).days
+                if days_since > 7:
+                    detection_alerts.append({
+                        "tag_id":   a.tag_id,
+                        "severity": "warning" if days_since < 14 else "critical",
+                        "message":  f"So'nggi ko'rinish: {days_since} kun oldin",
+                        "days":     days_since,
+                    })
+
+        # DB dagi ochiq alertlar
+        db_alerts = (await db.execute(
+            select(AlertModel)
+            .where(AlertModel.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]))
+            .order_by(AlertModel.severity.desc(), AlertModel.created_at.desc())
+            .limit(50)
+        )).scalars().all()
+
+        # ── PDF ────────────────────────────────────────────────────────
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=_PAGE_MARGIN,
+            leftMargin=_PAGE_MARGIN,
+            topMargin=_PAGE_MARGIN,
+            bottomMargin=_PAGE_MARGIN + 0.3 * inch,
+            title="Health Report — Taurus Vision",
+            author="Taurus Vision",
+        )
+
+        story: List[Any] = []
+        story.extend(self._build_header(
+            title="Sog'liq Hisoboti",
+            subtitle=f"Sana: {self._fmt_date(now_utc.date())}",
+        ))
+
+        # ── Umumiy ko'rinish ───────────────────────────────────────────
+        story.append(Paragraph("1. Sog'liq Umumiy Ko'rinishi", self._styles["TVSection"]))
+
+        critical_det = sum(1 for a in detection_alerts if a["severity"] == "critical")
+        warning_det  = len(detection_alerts) - critical_det
+        critical_db  = sum(
+            1 for a in db_alerts
+            if getattr(a.severity, "value", str(a.severity)) in ("critical",)
+        )
+        warning_db   = len(db_alerts) - critical_db
+
+        overview_rows = [
+            ["Ko'rsatkich",              "Qiymat"],
+            ["Monitoring jonivorlari",   str(len(animals))],
+            ["Ko'rinmaslik alertlari",    str(len(detection_alerts))],
+            ["  — Kritik",               str(critical_det)],
+            ["  — Ogohlantirish",         str(warning_det)],
+            ["Tizim alertlari (ochiq)",   str(len(db_alerts))],
+            ["  — Kritik",               str(critical_db)],
+            ["  — Boshqalar",            str(warning_db)],
+        ]
+        story.append(self._build_data_table(overview_rows, header_row=True))
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Ko'rinmaslik alertlari ─────────────────────────────────────
+        story.append(Paragraph("2. Ko'rinmaslik Alertlari", self._styles["TVSection"]))
+        if detection_alerts:
+            da_rows = [["Tag ID", "Daraja", "Xabar"]]
+            for a in detection_alerts:
+                da_rows.append([a["tag_id"], a["severity"].capitalize(), a["message"]])
+            story.append(self._build_alert_table(da_rows))
+        else:
             story.append(Paragraph(
-                f"<i>Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-                self.styles['CustomBody']
+                "✓ Barcha aktiv jonivorlar so'nggi 7 kun ichida aniqlangan.",
+                self._styles["TVBody"],
             ))
-            story.append(Paragraph(
-                "<i>Taurus Vision - AI-Powered Livestock Monitoring</i>",
-                self.styles['CustomBody']
-            ))
-            
-            # ===== Build PDF =====
-            doc.build(story, onFirstPage=self._add_page_number, onLaterPages=self._add_page_number)
-            
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"Health report generated: {len(pdf_bytes)} bytes")
-            return pdf_bytes
-            
-        except Exception as e:
-            logger.error(f"Error generating health report: {e}", exc_info=True)
-            raise
-    
-    # =========================================================================
-    # HELPER METHODS
-    # =========================================================================
-    
-    def _add_page_number(self, canvas_obj: canvas.Canvas, doc: SimpleDocTemplate):
-        """
-        Add page number to footer.
-        
-        Args:
-            canvas_obj: ReportLab canvas
-            doc: Document template
-        """
+        story.append(Spacer(1, 0.25 * inch))
+
+        # ── Tizim alertlari ────────────────────────────────────────────
+        if db_alerts:
+            story.append(Paragraph("3. Tizim Alertlari (Ochiq)", self._styles["TVSection"]))
+            sys_rows = [["Tag ID", "Tur", "Daraja", "Sarlavha"]]
+            for a in db_alerts[:20]:
+                sev   = getattr(a.severity,   "value", str(a.severity))
+                atype = getattr(a.alert_type, "value", str(a.alert_type))
+                sys_rows.append([
+                    getattr(a, "animal_tag_id", None) or "—",
+                    atype.replace("_", " ").title(),
+                    sev.capitalize(),
+                    (a.title or "")[:55],
+                ])
+            story.append(self._build_alert_table(sys_rows))
+            story.append(Spacer(1, 0.25 * inch))
+
+        # ── Tavsiyalar ─────────────────────────────────────────────────
+        story.append(Paragraph("4. Tavsiyalar", self._styles["TVSection"]))
+        for rec in self._build_recommendations(detection_alerts, db_alerts, len(animals)):
+            story.append(Paragraph(f"• {rec}", self._styles["TVBody"]))
+            story.append(Spacer(1, 0.04 * inch))
+
+        story.extend(self._build_footer())
+
+        doc.build(
+            story,
+            onFirstPage=self._page_decorator,
+            onLaterPages=self._page_decorator,
+        )
+
+        pdf_bytes = buffer.getvalue()
+        buffer.close()
+
+        logger.info(
+            "Health report generated",
+            extra={"extra_data": {"size_bytes": len(pdf_bytes), "animal_count": len(animals)}},
+        )
+        return pdf_bytes
+
+    # ==================================================================
+    # PRIVATE — PDF qurilish yordamchi metodlari
+    # ==================================================================
+
+    def _build_header(self, title: str, subtitle: str) -> List[Any]:
+        return [
+            Paragraph("TAURUS VISION", self._styles["TVTitle"]),
+            Paragraph(title,            self._styles["TVTitle"]),
+            Paragraph(subtitle,         self._styles["TVSubtitle"]),
+            Spacer(1, 0.1 * inch),
+            self._build_divider(),
+            Spacer(1, 0.15 * inch),
+        ]
+
+    def _build_footer(self) -> List[Any]:
+        return [
+            Spacer(1, 0.4 * inch),
+            self._build_divider(),
+            Spacer(1, 0.1 * inch),
+            Paragraph(
+                "Taurus Vision — AI-Powered Livestock Monitoring System",
+                self._styles["TVCaption"],
+            ),
+            Paragraph(
+                f"Hisobot yaratilgan: "
+                f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+                self._styles["TVCaption"],
+            ),
+        ]
+
+    def _build_divider(self) -> Table:
+        t = Table([[""]], colWidths=[7.1 * inch])
+        t.setStyle(TableStyle([("LINEABOVE", (0, 0), (-1, 0), 1.0, _BRAND_ACCENT)]))
+        return t
+
+    def _build_kv_table(self, rows: List[List[str]]) -> Table:
+        tbl = Table(rows, colWidths=[2.4 * inch, 4.5 * inch])
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (0, -1), colors.HexColor("#e8f5ee")),
+            ("TEXTCOLOR",     (0, 0), (0, -1), _BRAND_GREEN),
+            ("FONTNAME",      (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME",      (1, 0), (1, -1), "Helvetica"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 10),
+            ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
+            ("TOPPADDING",    (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        return tbl
+
+    def _build_data_table(
+        self,
+        rows: List[List[str]],
+        header_row: bool = True,
+    ) -> Table:
+        col_count  = len(rows[0]) if rows else 1
+        col_widths = [7.0 * inch / col_count] * col_count
+
+        tbl   = Table(rows, colWidths=col_widths)
+        style = [
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]
+        if header_row and rows:
+            style += [
+                ("BACKGROUND", (0, 0), (-1, 0), _TABLE_HEADER),
+                ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+                ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME",   (0, 1), (-1, -1), "Helvetica"),
+            ]
+            for i in range(1, len(rows)):
+                if i % 2 == 0:
+                    style.append(("BACKGROUND", (0, i), (-1, i), _TABLE_ROW_ALT))
+        tbl.setStyle(TableStyle(style))
+        return tbl
+
+    def _build_alert_table(self, rows: List[List[str]]) -> Table:
+        col_count  = len(rows[0]) if rows else 1
+        col_widths = [7.0 * inch / col_count] * col_count
+
+        tbl = Table(rows, colWidths=col_widths)
+        style = [
+            ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#b5202a")),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME",      (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#e8aaaa")),
+            ("BACKGROUND",    (0, 1), (-1, -1), colors.HexColor("#fff5f5")),
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+            ("TOPPADDING",    (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]
+        for i, row in enumerate(rows[1:], 1):
+            if any("kritik" in str(c).lower() or "critical" in str(c).lower() for c in row):
+                style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#ffe0e0")))
+        tbl.setStyle(TableStyle(style))
+        return tbl
+
+    @staticmethod
+    def _build_recommendations(
+        detection_alerts: List[Dict],
+        db_alerts: List[Any],
+        animal_count: int,
+    ) -> List[str]:
+        recs: List[str] = []
+        critical_count = sum(1 for a in detection_alerts if a["severity"] == "critical")
+        if critical_count > 0:
+            recs.append(
+                f"{critical_count} ta jonivor kritik holat ko'rsatmoqda — "
+                "darhol veterinar ko'rigidan o'tkazish tavsiya etiladi."
+            )
+        long_missing = sum(1 for a in detection_alerts if (a.get("days") or 0) > 14)
+        if long_missing > 0:
+            recs.append(
+                f"{long_missing} ta jonivor 14 kundan ortiq ko'rinmayapti — "
+                "kamera burchagi va jonivor joylashuvini tekshirish zarur."
+            )
+        open_count = len(db_alerts)
+        if open_count > 10:
+            recs.append(
+                f"Tizimda {open_count} ta ochiq alert mavjud — "
+                "Alertlar sahifasida ko'rib chiqish tavsiya etiladi."
+            )
+        elif open_count > 0:
+            recs.append(
+                f"{open_count} ta ochiq tizim alerti mavjud — ko'rib chiqing."
+            )
+        if not recs:
+            recs.append(
+                f"Barcha {animal_count} ta aktiv jonivorning holati qoniqarli. "
+                "Joriy monitoring rejimlari samarali ishlayapti."
+            )
+        return recs
+
+    # ==================================================================
+    # PRIVATE — Sahifa bezaklari va formatlash
+    # ==================================================================
+
+    @staticmethod
+    def _page_decorator(
+        canvas_obj: rl_canvas.Canvas,
+        doc: SimpleDocTemplate,
+    ) -> None:
+        """Har bir sahifaga raqam qo'shadi (pastki o'ng burchak)."""
         canvas_obj.saveState()
-        canvas_obj.setFont('Helvetica', 9)
-        canvas_obj.setFillColor(colors.grey)
-        
-        page_num = canvas_obj.getPageNumber()
-        text = f"Page {page_num}"
-        
+        canvas_obj.setFont("Helvetica", 8)
+        canvas_obj.setFillColor(_NEUTRAL_GREY)
         canvas_obj.drawRightString(
             doc.width + doc.rightMargin,
-            0.5 * inch,
-            text
+            0.35 * inch,
+            f"Sahifa {canvas_obj.getPageNumber()}",
         )
-        
         canvas_obj.restoreState()
+
+    @staticmethod
+    def _fmt_date(d: Any) -> str:
+        """date yoki datetime → 'YYYY-MM-DD'."""
+        if d is None:
+            return "—"
+        if hasattr(d, "strftime"):
+            return d.strftime("%Y-%m-%d")
+        return str(d)
+
+    @staticmethod
+    def _fmt_datetime(dt: Any) -> str:
+        """datetime → 'YYYY-MM-DD HH:MM' (UTC)."""
+        if dt is None:
+            return "—"
+        if hasattr(dt, "strftime"):
+            return dt.strftime("%Y-%m-%d %H:%M")
+        return str(dt)
+
+    @staticmethod
+    def _to_utc(dt: datetime) -> datetime:
+        """
+        Naive datetime ni UTC-aware ga aylantiradi.
+        Allaqachon aware bo'lsa — o'zgarmaydi.
+        Timezone-aware solishtirish xatolarini oldini olish uchun.
+        """
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
