@@ -45,6 +45,7 @@ from app.models.detection import Detection
 from app.models.weight_measurement import WeightMeasurement
 from app.models.adi_log import ADILog, ADICategory
 from app.models.alert import Alert as AlertModel, AlertStatus, AlertSeverity
+from app.models.feed import FeedRecord
 from app.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -1672,13 +1673,110 @@ class AnalyticsService:
                     "animals_missing_7d":      missing_7d,
                     "avg_weight_kg":           avg_weight,
                     "total_weight_gain_kg":    total_weight_gain,
-                    "feed_efficiency_index":   None,  # IoT ma'lumoti bilan keyingi sprint'da
+                    "feed_efficiency_index":   await self._compute_feed_efficiency_index(
+                        db, month_ago_dt, active
+                    ),
                 },
             }
 
         except Exception as exc:
             logger.error(f"Error generating herd statistics: {exc}", exc_info=True)
             raise
+
+    async def _compute_feed_efficiency_index(
+        self,
+        db:             AsyncSession,
+        since:          datetime,
+        active_count:   int,
+    ) -> Optional[float]:
+        """
+        Feed Efficiency Index (FEI) hisoblash — Sprint 21-24 KPI.
+
+        FORMULA:
+            FEI = total_weight_gain_kg / total_feed_consumed_kg
+
+        TALQIN:
+            FEI > 0.15 → yaxshi (100 kg yem → 15+ kg go'sht)
+            FEI 0.08–0.15 → o'rtacha
+            FEI < 0.08 → past samaradorlik
+
+        Ma'lumot yo'q bo'lsa (feed yozuvlari kiritilmagan):
+            None qaytaradi — frontend "N/A" ko'rsatadi.
+
+        Args:
+            db:           Async session
+            since:        Hisob boshlanish vaqti (odatda 30 kun oldin)
+            active_count: Aktiv jonivorlar soni (log uchun)
+
+        Returns:
+            FEI float (2 xona) yoki None
+        """
+        try:
+            # Jami iste'mol qilingan ozuqa (kg) — davr ichida
+            feed_row = (await db.execute(
+                select(func.sum(FeedRecord.quantity_kg).label("total_feed"))
+                .where(FeedRecord.fed_at >= since)
+            )).one_or_none()
+
+            total_feed_kg: Optional[float] = (
+                float(feed_row.total_feed) if feed_row and feed_row.total_feed else None
+            )
+
+            # Ma'lumot kiritilmagan bo'lsa — None qaytaramiz
+            if not total_feed_kg or total_feed_kg <= 0:
+                return None
+
+            # Vazn o'sishi: davr boshidagi va oxiridagi o'rtacha vaznlar farqi × jonivorlar soni
+            # Har bir aktiv jonivor uchun birinchi va oxirgi vazn o'lchovini olamiz
+            earliest_w = (await db.execute(
+                select(
+                    WeightMeasurement.animal_id,
+                    func.min(WeightMeasurement.estimated_weight_kg).label("w_early"),
+                )
+                .join(Animal, Animal.id == WeightMeasurement.animal_id)
+                .where(
+                    and_(
+                        Animal.status == AnimalStatus.ACTIVE,
+                        WeightMeasurement.timestamp >= since,
+                    )
+                )
+                .group_by(WeightMeasurement.animal_id)
+            )).all()
+
+            latest_w = (await db.execute(
+                select(
+                    WeightMeasurement.animal_id,
+                    func.max(WeightMeasurement.estimated_weight_kg).label("w_late"),
+                )
+                .join(Animal, Animal.id == WeightMeasurement.animal_id)
+                .where(
+                    and_(
+                        Animal.status == AnimalStatus.ACTIVE,
+                        WeightMeasurement.timestamp >= since,
+                    )
+                )
+                .group_by(WeightMeasurement.animal_id)
+            )).all()
+
+            early_map = {r.animal_id: float(r.w_early) for r in earliest_w}
+            late_map  = {r.animal_id: float(r.w_late)  for r in latest_w}
+
+            # Faqat ikkalasi mavjud bo'lgan jonivorlar bo'yicha gain hisoblanadi
+            total_gain_kg = sum(
+                late_map[aid] - early_map[aid]
+                for aid in early_map
+                if aid in late_map and late_map[aid] > early_map[aid]
+            )
+
+            if total_gain_kg <= 0:
+                return None
+
+            fei = total_gain_kg / total_feed_kg
+            return round(fei, 4)
+
+        except Exception as exc:
+            logger.warning(f"FEI hisoblashda xato: {exc}")
+            return None
 
     def _build_age_distribution(self, animals: List[Any]) -> List[Dict[str, Any]]:
         """Jonivorlarni yosh bo'yicha guruhlaydi."""

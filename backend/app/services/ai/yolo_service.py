@@ -115,11 +115,10 @@ class YoloService(AIServiceInterface):
             from ultralytics import YOLO
             
             # Construct model path
-            #######################################################################################
-            #Buni gemini maslahat bergan
-            model_name = settings.YOLO_MODEL
-            model_path = Path("/app/ml/models") / model_name  
-            ########################################################################################
+            # settings.yolo_model_path — config.py da aniqlangan property:
+            # Path(ML_MODEL_PATH) / YOLO_MODEL  (env orqali sozlanadi)
+            model_path = settings.yolo_model_path
+            model_name = model_path.name
             logger.info(f"Loading YOLO model: {model_path}")
             
             # Check if model file exists
