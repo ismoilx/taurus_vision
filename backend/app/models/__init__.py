@@ -23,6 +23,19 @@ from app.models.sensor_reading   import SensorReading
 from app.models.farm_task        import FarmTask, TaskType, TaskPriority, TaskStatus
 from app.models.feed             import FeedStock, FeedRecord, FeedType, FeedUnit
 from app.models.training_run     import TrainingRun, TrainingStatus  # ✅ TUZATILDI
+from app.models.integration      import (                             # Q5 Integration Module
+    APIKey,
+    Webhook,
+    APIKeyScope,
+    WebhookEvent,
+)
+from app.models.finance          import (                             # Q4 Finance Module
+    FinanceTransaction,
+    TransactionType,
+    ExpenseCategory,
+    IncomeCategory,
+    PaymentMethod,
+)
 
 __all__ = [
     # Base
@@ -73,4 +86,15 @@ __all__ = [
     # AI Training
     "TrainingRun",
     "TrainingStatus",
+    # Finance Module (Q4)
+    "FinanceTransaction",
+    "TransactionType",
+    "ExpenseCategory",
+    "IncomeCategory",
+    "PaymentMethod",
+    # Integration Module (Q5)
+    "APIKey",
+    "Webhook",
+    "APIKeyScope",
+    "WebhookEvent",
 ]

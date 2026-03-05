@@ -112,7 +112,9 @@ class Settings(BaseSettings):
 
     # Muzzle topilmasa identifikatsiyani o'tkazib yuborish (True = strict mode).
     # False qilinsa eski heuristik (bbox pastki 45%) ga qaytadi.
-    MUZZLE_STRICT_MODE: bool = True
+    # Development: False (best.pt bo'lmasa ham ishlaydi)
+    # Production:  True  (aniq identifikatsiya talab qilinadi)
+    MUZZLE_STRICT_MODE: bool = False
 
     # =========================================================================
     # AI INFERENCE
@@ -172,6 +174,35 @@ class Settings(BaseSettings):
     # Training faol yoki o'chirilganmi
     # False qilinganda FrameCollector kadrlarni yig'maydi (performance talab qilsa)
     TRAINING_COLLECTION_ENABLED: bool = True
+
+    # =========================================================================
+    # EMAIL / SMTP  (Bildirishnomalar uchun)
+    # =========================================================================
+
+    # Gmail uchun: Google Account → Security → App Passwords → Create
+    # Yandex uchun: smtp.yandex.ru:587
+    SMTP_HOST:     str  = ""
+    SMTP_PORT:     int  = 587
+    SMTP_USER:     str  = ""
+    SMTP_PASSWORD: str  = ""
+    SMTP_FROM:     str  = "Taurus Vision <noreply@taurus-vision.uz>"
+
+    # SMTP_HOST bo'sh bo'lsa — email log ga yoziladi (development mode)
+    @property
+    def smtp_configured(self) -> bool:
+        """SMTP to'liq sozlanganmi (host va user mavjudmi)?"""
+        return bool(self.SMTP_HOST and self.SMTP_USER)
+
+    # Vergul bilan ajratilgan email manzillar — alert qabul qiluvchilar
+    # Misol: "admin@farm.uz,vet@farm.uz"
+    NOTIFICATION_EMAILS: str = ""
+
+    @property
+    def notification_recipients(self) -> list[str]:
+        """Bildirishnoma oluvchilar ro'yxati (tozalangan)."""
+        if not self.NOTIFICATION_EMAILS:
+            return []
+        return [e.strip() for e in self.NOTIFICATION_EMAILS.split(",") if e.strip()]
 
     # =========================================================================
     # LOGGING

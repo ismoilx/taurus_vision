@@ -315,23 +315,19 @@ class NotificationService:
 
     def _load_smtp_settings(self) -> dict:
         """
-        SMTP sozlamalarini environment o'zgaruvchilardan yuklaydi.
+        SMTP sozlamalarini app.config.settings dan yuklaydi.
 
         .env da bo'lmasa — development mode (faqat log).
         """
-        import os
+        from app.config import settings as app_settings
         return {
-            "host":       os.getenv("SMTP_HOST", ""),
-            "port":       int(os.getenv("SMTP_PORT", "587")),
-            "user":       os.getenv("SMTP_USER", ""),
-            "password":   os.getenv("SMTP_PASSWORD", ""),
-            "from_addr":  os.getenv("SMTP_FROM", "Taurus Vision <noreply@taurus-vision.uz>"),
-            "recipients": [
-                e.strip()
-                for e in os.getenv("NOTIFICATION_EMAILS", "").split(",")
-                if e.strip()
-            ],
-            "enabled":    bool(os.getenv("SMTP_HOST", "")),
+            "host":       app_settings.SMTP_HOST,
+            "port":       app_settings.SMTP_PORT,
+            "user":       app_settings.SMTP_USER,
+            "password":   app_settings.SMTP_PASSWORD,
+            "from_addr":  app_settings.SMTP_FROM,
+            "recipients": app_settings.notification_recipients,
+            "enabled":    app_settings.smtp_configured,
         }
 
     @property

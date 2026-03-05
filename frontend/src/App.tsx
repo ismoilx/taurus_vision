@@ -15,7 +15,7 @@ import {
   LayoutDashboard, Activity, TrendingUp, Brain,
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
-  LogOut, ChevronDown, MoreHorizontal, X, Radio,
+  LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 
@@ -87,6 +87,8 @@ const TrainingPage      = lazy(() => import('./pages/TrainingPage'));
 const TasksPage         = lazy(() => import('./pages/TasksPage'));
 const FeedPage          = lazy(() => import('./pages/FeedPage'));
 const SensorPage        = lazy(() => import('./pages/SensorPage'));
+const FinancePage       = lazy(() => import('./pages/FinancePage'));
+const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'));
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -140,6 +142,8 @@ const NAV_GROUPS: NavGroup[] = [
     items:[
       { to:'/alerts',    icon:Bell,          label:'Alertlar',           also:['/notifications'] },
       { to:'/feed',      icon:Wheat,         label:'Ozuqa'               },
+      { to:'/finance',       icon:Coins,         label:'Moliya'              },
+      { to:'/integrations',  icon:Radio,         label:'Integratsiyalar'     },
       { to:'/tasks',     icon:ClipboardList, label:'Vazifalar'           },
       { to:'/cameras',   icon:Camera,        label:'Kameralar'           },
       { to:'/users',     icon:Users,         label:'Foydalanuvchilar'    },
@@ -321,10 +325,12 @@ function BottomNav() {
 
   return (<>
     <nav style={{
-      position:'fixed', bottom:0, left:0, right:0, height:58,
+      position:'fixed', bottom:0, left:0, right:0,
+      height:'calc(58px + env(safe-area-inset-bottom, 0px))',
       background:'var(--surface)', borderTop:'1px solid var(--border)',
-      display:'flex', alignItems:'stretch',
+      display:'flex', alignItems:'flex-start', paddingTop: 0,
       zIndex:100, boxShadow:'0 -2px 16px var(--shadow)',
+      paddingBottom:'env(safe-area-inset-bottom, 0px)',
     }}>
       {BOTTOM_MAIN.map(item => {
         const isAlso = item.also?.some(p => location.pathname === p || location.pathname.startsWith(p)) ?? false;
@@ -551,7 +557,7 @@ export default function App() {
             @media (max-width: 767px) {
               .tv-desktop-nav { display: none  !important; }
               .tv-mobile-nav  { display: block !important; }
-              :root { --bottom-nav-safe: 58px; }
+              :root { --bottom-nav-safe: calc(58px + env(safe-area-inset-bottom, 0px)); }
             }
           `}</style>
 
@@ -578,6 +584,8 @@ export default function App() {
                     <Route path="/training"      element={<TrainingPage/>}/>
                     <Route path="/tasks"         element={<TasksPage/>}/>
                     <Route path="/feed"          element={<FeedPage/>}/>
+                    <Route path="/finance"       element={<FinancePage/>}/>
+                    <Route path="/integrations" element={<IntegrationsPage/>}/>
                     <Route path="/sensors"       element={<SensorPage/>}/>
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>

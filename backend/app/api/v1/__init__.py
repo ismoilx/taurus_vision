@@ -31,6 +31,8 @@ from app.api.v1.endpoints import (
     training,          # Sprint 15-16
     tasks,             # Sprint 19-20
     feed,              # Sprint 20
+    finance,           # Q4 — Moliyaviy modul
+    integrations,      # Q5 — Tashqi integratsiya
 )
 
 router = APIRouter(prefix="/v1")
@@ -81,3 +83,9 @@ router.include_router(tasks.router)
 
 # --- Feed Management (Sprint 20) ---
 router.include_router(feed.router)
+
+# --- Finance Module (Q4) ---
+router.include_router(finance.router)
+
+# --- Integration Module (Q5) ---
+router.include_router(integrations.router)

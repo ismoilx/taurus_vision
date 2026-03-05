@@ -371,7 +371,7 @@ function CsvImportModal({ onClose, onImported }: CsvImportModalProps) {
 
   // Namuna CSV ni yuklab olish
   const downloadTemplate = () => {
-    window.open(`${config.apiBaseUrl ?? ''}/api/v1/animals/import/template`, '_blank');
+    window.open(`${config.apiUrl ?? ''}/api/v1/animals/import/template`, '_blank');
   };
 
   // Fayl tanlash yoki drag-drop
