@@ -31,6 +31,9 @@ interface Animal {
   id:      number;
   tag_id:  string;
   species: string;
+  status:  'active' | 'sick' | 'quarantine' | 'sold' | 'deceased';
+  breed:   string | null;
+  notes:   string | null;
 }
 
 interface HealthRecord {
