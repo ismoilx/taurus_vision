@@ -22,18 +22,9 @@ from app.models.audit_log        import AuditLog, AuditEventType, AuditSeverity
 from app.models.sensor_reading   import SensorReading
 from app.models.farm_task        import FarmTask, TaskType, TaskPriority, TaskStatus
 from app.models.feed             import FeedStock, FeedRecord, FeedType, FeedUnit
+from app.models.training_run     import TrainingRun, TrainingStatus  # ✅ TUZATILDI
 
 __all__ = [
-    "SensorReading",
-    "FarmTask",
-    "TaskType",
-    "TaskPriority",
-    "TaskStatus",
-    # Feed Management
-    "FeedStock",
-    "FeedRecord",
-    "FeedType",
-    "FeedUnit",
     # Base
     "BaseModel",
     # Auth
@@ -67,4 +58,19 @@ __all__ = [
     "AuditLog",
     "AuditEventType",
     "AuditSeverity",
+    # IoT Sensors
+    "SensorReading",
+    # Farm Tasks
+    "FarmTask",
+    "TaskType",
+    "TaskPriority",
+    "TaskStatus",
+    # Feed Management
+    "FeedStock",
+    "FeedRecord",
+    "FeedType",
+    "FeedUnit",
+    # AI Training
+    "TrainingRun",
+    "TrainingStatus",
 ]

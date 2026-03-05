@@ -1,32 +1,33 @@
 /**
- * Taurus Vision — Reports & Export Page (Sprint 13)
- *
- * PDF hisobotlar va ma'lumotlar eksporti.
+ * Taurus Vision — Reports & Export Page
  *
  * PDF HISOBOTLAR:
- *   - Bitta jonivor hisoboti (og'irlik, deteksiya tarixi)
- *   - Ferma umumiy hisobot (haftalik / oylik / choraklik)
+ *   - Bitta jonivor hisoboti (og'irlik, deteksiya tarixi, ADI)
+ *   - Ferma umumiy hisobot (xulosa / batafsil / sog'liq)
  *   - Sog'liq hisoboti (alertlar, risk baholash)
  *
- * EKSPORT:
- *   - Jonivorlar CSV
+ * CSV EKSPORT:
+ *   - Jonivorlar CSV (filtrlangan)
  *   - Deteksiyalar CSV (sana oralig'i)
- *   - Og'irlik o'lchovlari Excel (multi-sheet)
- *   - Barcha ma'lumotlar Excel (to'liq arxiv)
+ *
+ * EXCEL EKSPORT:
+ *   - Jonivorlar Excel — professional, 2 varaqli  ← B7 yangi
+ *   - Og'irlik o'lchovlari Excel (har jonivor alohida varaq)
+ *   - To'liq arxiv Excel (4 varaqli)
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  FileText, Download, AlertCircle, CheckCircle,
-  Calendar, BarChart2, Heart, Layers, Table,
-  ChevronRight, RefreshCw, Clock, FileSpreadsheet,
+  AlertCircle, BarChart2, Calendar, CheckCircle,
+  Clock, Download, FileSpreadsheet, FileText,
+  Heart, Layers, Table, Users,
 } from 'lucide-react';
 import { apiFetch } from '../utils/apiFetch';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// =============================================================================
+// TYPES
+// =============================================================================
 
 interface Animal {
   id:      number;
@@ -35,62 +36,87 @@ interface Animal {
   status:  string;
 }
 
-type ReportStatus = 'idle' | 'loading' | 'success' | 'error';
+interface AnimalListResponse {
+  items: Animal[];
+  total: number;
+}
 
-interface DownloadState {
-  status:  ReportStatus;
+type DlStatus = 'idle' | 'loading' | 'success' | 'error';
+
+interface DlState {
+  status:  DlStatus;
   message: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// =============================================================================
+// HELPERS
+// =============================================================================
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
+function today()         { return new Date().toISOString().slice(0, 10); }
 function daysAgo(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
+  const d = new Date(); d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-async function downloadBlob(url: string, filename: string, options?: RequestInit): Promise<void> {
-  const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token') || '';
+/**
+ * Blob yuklab olish — token bilan.
+ * Content-Type ni body bor/yo'qligiga qarab belgilaydi.
+ */
+async function downloadBlob(
+  url: string,
+  filename: string,
+  options?: RequestInit,
+): Promise<void> {
+  const token = localStorage.getItem('access_token')
+    || sessionStorage.getItem('access_token')
+    || '';
+
+  const isJson = options?.body !== undefined;
   const res = await fetch(url, {
     ...options,
     headers: {
       'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
+      ...(isJson ? { 'Content-Type': 'application/json' } : {}),
+      ...(options?.headers ?? {}),
     },
   });
+
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Server xatosi' }));
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
+
   const blob = await res.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
-function useDownload() {
-  const [state, setState] = useState<Record<string, DownloadState>>({});
+// =============================================================================
+// DOWNLOAD HOOK
+// =============================================================================
 
-  async function run(key: string, fn: () => Promise<void>) {
+function useDownload() {
+  const [state, setState] = useState<Record<string, DlState>>({});
+
+  async function run(key: string, fn: () => Promise<void>): Promise<void> {
     setState(p => ({ ...p, [key]: { status: 'loading', message: '' } }));
     try {
       await fn();
       setState(p => ({ ...p, [key]: { status: 'success', message: 'Yuklandi!' } }));
-      setTimeout(() => setState(p => ({ ...p, [key]: { status: 'idle', message: '' } })), 3000);
+      setTimeout(
+        () => setState(p => ({ ...p, [key]: { status: 'idle', message: '' } })),
+        3000,
+      );
     } catch (err) {
       setState(p => ({
         ...p,
-        [key]: { status: 'error', message: err instanceof Error ? err.message : 'Xato' },
+        [key]: {
+          status:  'error',
+          message: err instanceof Error ? err.message : 'Xato',
+        },
       }));
     }
   }
@@ -98,18 +124,20 @@ function useDownload() {
   return { state, run };
 }
 
-// ---------------------------------------------------------------------------
-// Section Header
-// ---------------------------------------------------------------------------
+// =============================================================================
+// UI COMPONENTS
+// =============================================================================
 
-function SectionHeader({ icon: Icon, title, subtitle, color = '#1E3EB4' }: {
-  icon: any; title: string; subtitle: string; color?: string;
+function SectionHeader({
+  icon: Icon, title, subtitle, color = '#1E3EB4',
+}: {
+  icon: React.ElementType; title: string; subtitle: string; color?: string;
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
       <div style={{
         width: 44, height: 44, borderRadius: 11,
-        background: `${color}14`,
+        background: `${color}18`,
         display: 'grid', placeItems: 'center', flexShrink: 0,
       }}>
         <Icon size={20} color={color} />
@@ -122,33 +150,58 @@ function SectionHeader({ icon: Icon, title, subtitle, color = '#1E3EB4' }: {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Download Button
-// ---------------------------------------------------------------------------
+function ReportCard({
+  children, highlight = false,
+}: {
+  children: React.ReactNode; highlight?: boolean;
+}) {
+  return (
+    <div style={{
+      background:   '#fff',
+      border:       `1px solid ${highlight ? '#C7D2FE' : '#E4E7ED'}`,
+      borderRadius: 14,
+      padding:      24,
+      boxShadow:    highlight
+        ? '0 2px 12px rgba(30,62,180,0.08)'
+        : '0 1px 3px rgba(0,0,0,0.04)',
+    }}>
+      {children}
+    </div>
+  );
+}
 
 function DownloadBtn({
-  dlKey, state, onClick, label, icon: Icon = Download, color = '#1E3EB4',
+  dlKey, state, onClick, label,
+  icon: Icon = Download, color = '#1E3EB4',
 }: {
-  dlKey: string; state: DownloadState | undefined;
-  onClick: () => void; label: string;
-  icon?: any; color?: string;
+  dlKey: string;
+  state: DlState | undefined;
+  onClick: () => void;
+  label: string;
+  icon?: React.ElementType;
+  color?: string;
 }) {
   const s = state?.status ?? 'idle';
   return (
-    <button onClick={onClick} disabled={s === 'loading'} style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-      padding: '10px 20px',
-      background: s === 'loading' ? '#9CA3AF'
-               : s === 'success'  ? '#10B981'
-               : s === 'error'    ? '#FEF2F2'
-               : color,
-      color: s === 'error' ? '#DC2626' : '#fff',
-      border: s === 'error' ? '1px solid #FECACA' : 'none',
-      borderRadius: 8, fontSize: 13, fontWeight: 700,
-      cursor: s === 'loading' ? 'not-allowed' : 'pointer',
-      fontFamily: 'Outfit, sans-serif', transition: 'background .15s',
-      whiteSpace: 'nowrap',
-    }}>
+    <button
+      onClick={onClick}
+      disabled={s === 'loading'}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        width: '100%', padding: '10px 20px',
+        background: s === 'loading' ? '#9CA3AF'
+                  : s === 'success'  ? '#10B981'
+                  : s === 'error'    ? '#FEF2F2'
+                  : color,
+        color:  s === 'error' ? '#DC2626' : '#fff',
+        border: s === 'error' ? '1px solid #FECACA' : 'none',
+        borderRadius: 8, fontSize: 13, fontWeight: 700,
+        cursor: s === 'loading' ? 'not-allowed' : 'pointer',
+        fontFamily: 'Outfit, sans-serif',
+        transition: 'background .15s, transform .1s',
+        whiteSpace: 'nowrap',
+      }}
+    >
       {s === 'loading' ? (
         <div style={{
           width: 14, height: 14, borderRadius: '50%',
@@ -165,33 +218,32 @@ function DownloadBtn({
       )}
       {s === 'loading' ? 'Yuklanmoqda...'
      : s === 'success'  ? 'Yuklandi!'
-     : s === 'error'    ? (state?.message?.slice(0, 30) || 'Xato')
+     : s === 'error'    ? (state?.message?.slice(0, 35) || 'Xato')
      : label}
     </button>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Report Card
-// ---------------------------------------------------------------------------
-
-function ReportCard({ children, highlight = false }: { children: React.ReactNode; highlight?: boolean }) {
+// Kichik info blok
+function InfoBox({
+  children, color, bg, border,
+}: {
+  children: React.ReactNode;
+  color: string; bg: string; border: string;
+}) {
   return (
     <div style={{
-      background: '#fff',
-      border: `1px solid ${highlight ? '#C7D2FE' : '#E4E7ED'}`,
-      borderRadius: 14,
-      padding: 24,
-      boxShadow: highlight ? '0 2px 8px rgba(30,62,180,0.07)' : '0 1px 3px rgba(0,0,0,0.04)',
+      padding: '10px 12px', background: bg,
+      border: `1px solid ${border}`, borderRadius: 8, marginBottom: 14,
     }}>
-      {children}
+      <p style={{ fontSize: 11, color, margin: 0, lineHeight: 1.6 }}>{children}</p>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Input helpers
-// ---------------------------------------------------------------------------
+// =============================================================================
+// INPUT STYLES
+// =============================================================================
 
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '9px 12px',
@@ -205,72 +257,69 @@ const labelStyle: React.CSSProperties = {
   color: '#374151', marginBottom: 5,
 };
 
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
+// =============================================================================
+// MAIN PAGE
+// =============================================================================
 
 export default function ReportsPage() {
   const { state: dl, run } = useDownload();
 
-  // Animals list (for animal report selector)
+  // Jonivorlar ro'yxati (PDF va Excel selectorlar uchun)
   const { data: animalsRes, isLoading: loadingAnimals } = useQuery({
-    queryKey: ['animals', 'list-200'],
-    queryFn:  () => apiFetch<{ items: Animal[] }>('/api/v1/animals/?limit=200'),
+    queryKey:  ['animals', 'list-200'],
+    queryFn:   () => apiFetch<AnimalListResponse>('/api/v1/animals/?limit=200'),
+    staleTime: 60_000,
   });
   const animals = animalsRes?.items ?? [];
 
-  // PDF: Animal report
-  const [animalId, setAnimalId]   = useState('');
+  // ─── PDF holatlari ───────────────────────────────────────────────────────
+  const [animalId,  setAnimalId]  = useState('');
+  const [farmFrom,  setFarmFrom]  = useState(daysAgo(30));
+  const [farmTo,    setFarmTo]    = useState(today());
+  const [farmType,  setFarmType]  = useState<'summary' | 'detailed' | 'health'>('summary');
+  const [healthIds, setHealthIds] = useState('');
 
-  // PDF: Farm report
-  const [farmFrom, setFarmFrom]   = useState(daysAgo(30));
-  const [farmTo, setFarmTo]       = useState(today());
-  const [farmType, setFarmType]   = useState<'summary' | 'detailed' | 'health'>('summary');
-
-  // PDF: Health report
-  const [healthIds, setHealthIds] = useState('');   // comma-separated
-
-  // CSV: Animals
-  const [csvStatus, setCsvStatus] = useState('');
+  // ─── CSV holatlari ───────────────────────────────────────────────────────
+  const [csvStatus,  setCsvStatus]  = useState('');
   const [csvSpecies, setCsvSpecies] = useState('');
+  const [detFrom,    setDetFrom]    = useState(daysAgo(7));
+  const [detTo,      setDetTo]      = useState(today());
+  const [detAnimal,  setDetAnimal]  = useState('');
 
-  // CSV: Detections
-  const [detFrom, setDetFrom]     = useState(daysAgo(7));
-  const [detTo, setDetTo]         = useState(today());
-  const [detAnimal, setDetAnimal] = useState('');
+  // ─── Excel holatlari ─────────────────────────────────────────────────────
+  const [xlsStatus,  setXlsStatus]  = useState('');   // B7: Animals Excel filtr
+  const [xlsSpecies, setXlsSpecies] = useState('');   // B7
+  const [wExcelIds,  setWExcelIds]  = useState('');   // Weights Excel
 
-  // Excel: Weights
-  const [wExcelIds, setWExcelIds] = useState('');
+  // ==========================================================================
+  // DOWNLOAD HANDLERS
+  // ==========================================================================
 
-  // ─── DOWNLOAD HANDLERS ──────────────────────────────────────────────────
-
-  // PDF: single animal
+  // PDF — bitta jonivor
   async function dlAnimalPdf() {
     if (!animalId) return;
-    const id = parseInt(animalId);
+    const id     = parseInt(animalId);
     const animal = animals.find(a => a.id === id);
-    const fname = `animal_${animal?.tag_id || id}_${today()}.pdf`;
     await downloadBlob(
       `/api/v1/reports/generate/animal/${id}`,
-      fname,
+      `animal_${animal?.tag_id || id}_${today()}.pdf`,
       { method: 'POST' },
     );
   }
 
-  // PDF: farm
+  // PDF — ferma
   async function dlFarmPdf() {
-    const fname = `farm_${farmType}_${farmFrom}_${farmTo}.pdf`;
     await downloadBlob(
       '/api/v1/reports/generate/farm',
-      fname,
+      `farm_${farmType}_${farmFrom}_${farmTo}.pdf`,
       {
         method: 'POST',
-        body: JSON.stringify({ date_from: farmFrom, date_to: farmTo, report_type: farmType }),
+        body:   JSON.stringify({ date_from: farmFrom, date_to: farmTo, report_type: farmType }),
       },
     );
   }
 
-  // PDF: health
+  // PDF — sog'liq
   async function dlHealthPdf() {
     const ids = healthIds
       ? healthIds.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
@@ -282,9 +331,9 @@ export default function ReportsPage() {
     );
   }
 
-  // CSV: animals
+  // CSV — jonivorlar
   async function dlAnimalsCsv() {
-    const body: any = {};
+    const body: Record<string, string> = {};
     if (csvStatus)  body.status  = csvStatus;
     if (csvSpecies) body.species = csvSpecies;
     await downloadBlob(
@@ -294,9 +343,9 @@ export default function ReportsPage() {
     );
   }
 
-  // CSV: detections
+  // CSV — deteksiyalar
   async function dlDetectionsCsv() {
-    const body: any = { date_from: detFrom, date_to: detTo };
+    const body: Record<string, unknown> = { date_from: detFrom, date_to: detTo };
     if (detAnimal) body.animal_id = parseInt(detAnimal);
     await downloadBlob(
       '/api/v1/export/detections/csv',
@@ -305,7 +354,19 @@ export default function ReportsPage() {
     );
   }
 
-  // Excel: weights
+  // Excel — jonivorlar (B7)
+  async function dlAnimalsExcel() {
+    const params = new URLSearchParams();
+    if (xlsStatus)  params.set('status',  xlsStatus);
+    if (xlsSpecies) params.set('species', xlsSpecies);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    await downloadBlob(
+      `/api/v1/export/animals/excel${qs}`,
+      `animals_${today()}.xlsx`,
+    );
+  }
+
+  // Excel — og'irliklar
   async function dlWeightsExcel() {
     const ids = wExcelIds
       ? wExcelIds.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
@@ -317,7 +378,7 @@ export default function ReportsPage() {
     );
   }
 
-  // Excel: all data
+  // Excel — to'liq arxiv
   async function dlAllExcel() {
     await downloadBlob(
       '/api/v1/export/all/excel',
@@ -325,7 +386,9 @@ export default function ReportsPage() {
     );
   }
 
-  // ─── RENDER ─────────────────────────────────────────────────────────────
+  // ==========================================================================
+  // RENDER
+  // ==========================================================================
 
   return (
     <div style={{
@@ -334,7 +397,7 @@ export default function ReportsPage() {
       fontFamily: 'Outfit, sans-serif',
     }}>
 
-      {/* Page header */}
+      {/* ─── Page header ─────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0D1117', margin: 0 }}>
           Hisobotlar & Eksport
@@ -344,12 +407,16 @@ export default function ReportsPage() {
         </p>
       </div>
 
-      {/* Quick stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 32 }}>
+      {/* ─── Quick stats ─────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 14, marginBottom: 36,
+      }}>
         {[
           { icon: FileText,        label: 'PDF Hisobotlar',  value: '3 tur',   color: '#DC2626', bg: '#FEF2F2' },
           { icon: Table,           label: 'CSV Eksport',     value: '2 tur',   color: '#059669', bg: '#F0FDF4' },
-          { icon: FileSpreadsheet, label: 'Excel Eksport',   value: '2 tur',   color: '#1D4ED8', bg: '#EFF6FF' },
+          { icon: FileSpreadsheet, label: 'Excel Eksport',   value: '3 tur',   color: '#1D4ED8', bg: '#EFF6FF' },
           { icon: Layers,          label: "To'liq Arxiv",    value: 'Excel',   color: '#7C3AED', bg: '#F5F3FF' },
         ].map(({ icon: Icon, label, value, color, bg }) => (
           <div key={label} style={{
@@ -357,7 +424,10 @@ export default function ReportsPage() {
             borderRadius: 12, padding: '14px 18px',
             display: 'flex', alignItems: 'center', gap: 12,
           }}>
-            <div style={{ width: 38, height: 38, borderRadius: 9, background: bg, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 9,
+              background: bg, display: 'grid', placeItems: 'center', flexShrink: 0,
+            }}>
               <Icon size={17} color={color} />
             </div>
             <div>
@@ -368,11 +438,11 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* PDF HISOBOTLAR                                              */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ================================================================== */}
+      {/* PDF HISOBOTLAR                                                       */}
+      {/* ================================================================== */}
 
-      <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 40 }}>
         <SectionHeader
           icon={FileText}
           title="PDF Hisobotlar"
@@ -382,17 +452,10 @@ export default function ReportsPage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
 
-          {/* Animal PDF */}
+          {/* Jonivor PDF */}
           <ReportCard highlight>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#FEF2F2', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <BarChart2 size={16} color="#DC2626" />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Jonivor Hisoboti</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Og'irlik · Deteksiya · Sog'liq</div>
-              </div>
-            </div>
+            <CardIcon icon={BarChart2} color="#DC2626" bg="#FEF2F2" />
+            <CardTitle title="Jonivor Hisoboti" sub="Og'irlik · Deteksiya · ADI" />
 
             <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Jonivor tanlash</label>
@@ -420,48 +483,36 @@ export default function ReportsPage() {
               icon={FileText}
               color={animalId ? '#DC2626' : '#9CA3AF'}
             />
-
-            <div style={{ marginTop: 12, fontSize: 11, color: '#9CA3AF', lineHeight: 1.5 }}>
+            <p style={{ fontSize: 11, color: '#9CA3AF', margin: '10px 0 0', lineHeight: 1.5 }}>
               Og'irlik tarixi, deteksiya vaqtlari, ADI ko'rsatkichi va batafsil statistika
-            </div>
+            </p>
           </ReportCard>
 
-          {/* Farm PDF */}
+          {/* Ferma PDF */}
           <ReportCard highlight>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#FFF7ED', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <Layers size={16} color="#EA580C" />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Ferma Hisoboti</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Umumiy statistika · Trendlar</div>
-              </div>
-            </div>
+            <CardIcon icon={Layers} color="#EA580C" bg="#FFF7ED" />
+            <CardTitle title="Ferma Hisoboti" sub="Umumiy statistika · Trendlar" />
 
-            {/* Report type */}
             <div style={{ marginBottom: 12 }}>
               <label style={labelStyle}>Hisobot turi</label>
               <div style={{ display: 'flex', gap: 6 }}>
-                {([
-                  { key: 'summary',  label: 'Xulosa' },
-                  { key: 'detailed', label: "Batafsil" },
-                  { key: 'health',   label: "Sog'liq" },
-                ] as const).map(({ key, label }) => (
-                  <button key={key} onClick={() => setFarmType(key)} style={{
-                    flex: 1, padding: '7px 4px',
-                    border: `1px solid ${farmType === key ? '#EA580C' : '#D1D5DB'}`,
-                    borderRadius: 7, background: farmType === key ? '#FFF7ED' : '#fff',
-                    color: farmType === key ? '#EA580C' : '#6B7280',
-                    fontSize: 11, fontWeight: farmType === key ? 700 : 500,
-                    cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
-                  }}>
-                    {label}
-                  </button>
-                ))}
+                {([ ['summary', 'Xulosa'], ['detailed', "Batafsil"], ['health', "Sog'liq"] ] as const).map(
+                  ([key, lbl]) => (
+                    <button key={key} onClick={() => setFarmType(key)} style={{
+                      flex: 1, padding: '7px 4px',
+                      border: `1px solid ${farmType === key ? '#EA580C' : '#D1D5DB'}`,
+                      borderRadius: 7,
+                      background: farmType === key ? '#FFF7ED' : '#fff',
+                      color:      farmType === key ? '#EA580C' : '#6B7280',
+                      fontSize: 11, fontWeight: farmType === key ? 700 : 500,
+                      cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
+                    }}>{lbl}</button>
+                  )
+                )}
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
               <div>
                 <label style={labelStyle}>Boshlanish</label>
                 <input type="date" value={farmFrom} onChange={e => setFarmFrom(e.target.value)} style={inputStyle} />
@@ -472,26 +523,7 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Quick presets */}
-            <div style={{ display: 'flex', gap: 5, marginBottom: 14 }}>
-              {[
-                { label: '7 kun',  from: daysAgo(7) },
-                { label: '30 kun', from: daysAgo(30) },
-                { label: '90 kun', from: daysAgo(90) },
-              ].map(({ label, from }) => (
-                <button key={label} onClick={() => { setFarmFrom(from); setFarmTo(today()); }}
-                  style={{
-                    flex: 1, padding: '5px 0',
-                    border: '1px solid #E5E7EB', borderRadius: 6,
-                    background: farmFrom === from ? '#FFF7ED' : '#fff',
-                    color: farmFrom === from ? '#EA580C' : '#9CA3AF',
-                    fontSize: 11, fontWeight: 500,
-                    cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
-                  }}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            <QuickDates current={farmFrom} onSelect={from => { setFarmFrom(from); setFarmTo(today()); }} color="#EA580C" />
 
             <DownloadBtn
               dlKey="farm-pdf" state={dl['farm-pdf']}
@@ -502,26 +534,20 @@ export default function ReportsPage() {
             />
           </ReportCard>
 
-          {/* Health PDF */}
+          {/* Sog'liq PDF */}
           <ReportCard highlight>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#F0FDF4', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <Heart size={16} color="#059669" />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Sog'liq Hisoboti</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Alertlar · Risk baholash</div>
-              </div>
-            </div>
+            <CardIcon icon={Heart} color="#059669" bg="#F0FDF4" />
+            <CardTitle title="Sog'liq Hisoboti" sub="Alertlar · Risk baholash" />
 
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 10 }}>
               <label style={labelStyle}>
-                Jonivor IDlar <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
+                Jonivor IDlar{' '}
+                <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
               </label>
               <input
                 type="text" value={healthIds}
                 onChange={e => setHealthIds(e.target.value)}
-                placeholder="1, 2, 3 — bo'sh qoldiring = hammasi"
+                placeholder="1, 2, 3 — bo'sh = hammasi"
                 style={inputStyle}
               />
               <p style={{ fontSize: 11, color: '#9CA3AF', margin: '4px 0 0' }}>
@@ -529,15 +555,10 @@ export default function ReportsPage() {
               </p>
             </div>
 
-            {/* Info box */}
-            <div style={{
-              padding: '10px 12px', background: '#F0FDF4',
-              border: '1px solid #A7F3D0', borderRadius: 8, marginBottom: 14,
-            }}>
-              <p style={{ fontSize: 11, color: '#065F46', margin: 0, lineHeight: 1.5 }}>
-                Hisobot o'z ichiga oladi: og'irlik yo'qotish alertlari (5%), 7+ kun ko'rinmagan jonivorlar, umumiy sog'liq skori va tavsiyalar
-              </p>
-            </div>
+            <InfoBox color="#065F46" bg="#F0FDF4" border="#A7F3D0">
+              Hisobot o'z ichiga oladi: og'irlik yo'qotish alertlari (≥5%),
+              7+ kun ko'rinmagan jonivorlar, umumiy sog'liq skori va tavsiyalar
+            </InfoBox>
 
             <DownloadBtn
               dlKey="health-pdf" state={dl['health-pdf']}
@@ -551,51 +572,46 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* CSV EKSPORT                                                  */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ================================================================== */}
+      {/* CSV EKSPORT                                                          */}
+      {/* ================================================================== */}
 
-      <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 40 }}>
         <SectionHeader
           icon={Table}
           title="CSV Eksport"
-          subtitle="Excel, Google Sheets yoki tahlil uchun"
+          subtitle="Elektron jadval, Python / R tahlili uchun CSV fayllar"
           color="#059669"
         />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
-          {/* Animals CSV */}
+          {/* Jonivorlar CSV */}
           <ReportCard>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 8, background: '#F0FDF4', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                  <Table size={15} color="#059669" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Jonivorlar CSV</div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>ID, teg, tur, holat, oxirgi deteksiya</div>
-                </div>
-              </div>
-            </div>
+            <CardIcon icon={Users} color="#059669" bg="#F0FDF4" />
+            <CardTitle title="Jonivorlar CSV" sub="Tag ID, tur, holat, zot, deteksiya soni" />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
               <div>
-                <label style={labelStyle}>Holat filtri</label>
+                <label style={labelStyle}>Holat</label>
                 <select value={csvStatus} onChange={e => setCsvStatus(e.target.value)} style={inputStyle}>
-                  <option value="">Hammasi</option>
+                  <option value="">Barchasi</option>
                   <option value="active">Faol</option>
+                  <option value="sick">Kasal</option>
+                  <option value="quarantine">Karantin</option>
                   <option value="sold">Sotilgan</option>
-                  <option value="deceased">Halok bo'lgan</option>
+                  <option value="deceased">Vafot etgan</option>
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>Tur filtri</label>
+                <label style={labelStyle}>Tur</label>
                 <select value={csvSpecies} onChange={e => setCsvSpecies(e.target.value)} style={inputStyle}>
-                  <option value="">Hammasi</option>
+                  <option value="">Barchasi</option>
                   <option value="cattle">Qoramol</option>
                   <option value="sheep">Qo'y</option>
                   <option value="goat">Echki</option>
+                  <option value="horse">Ot</option>
+                  <option value="other">Boshqa</option>
                 </select>
               </div>
             </div>
@@ -609,19 +625,12 @@ export default function ReportsPage() {
             />
           </ReportCard>
 
-          {/* Detections CSV */}
+          {/* Deteksiyalar CSV */}
           <ReportCard>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, background: '#F0FDF4', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <Clock size={15} color="#059669" />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Deteksiyalar CSV</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Vaqt, kamera, ishonch, bbox</div>
-              </div>
-            </div>
+            <CardIcon icon={Clock} color="#059669" bg="#F0FDF4" />
+            <CardTitle title="Deteksiyalar CSV" sub="Vaqt, kamera, ishonch, bbox koordinatalari" />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
               <div>
                 <label style={labelStyle}>Boshlanish *</label>
                 <input type="date" value={detFrom} onChange={e => setDetFrom(e.target.value)} style={inputStyle} />
@@ -632,9 +641,10 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 10 }}>
               <label style={labelStyle}>
-                Jonivor <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
+                Jonivor{' '}
+                <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
               </label>
               <select value={detAnimal} onChange={e => setDetAnimal(e.target.value)} style={inputStyle}>
                 <option value="">Barcha jonivorlar</option>
@@ -644,26 +654,16 @@ export default function ReportsPage() {
               </select>
             </div>
 
-            {/* Quick presets */}
-            <div style={{ display: 'flex', gap: 5, marginBottom: 14 }}>
-              {[
-                { label: 'Bugun',   from: today() },
-                { label: '7 kun',  from: daysAgo(7) },
+            <QuickDates
+              current={detFrom}
+              onSelect={from => { setDetFrom(from); setDetTo(today()); }}
+              color="#059669"
+              options={[
+                { label: 'Bugun', from: today() },
+                { label: '7 kun', from: daysAgo(7) },
                 { label: '30 kun', from: daysAgo(30) },
-              ].map(({ label, from }) => (
-                <button key={label} onClick={() => { setDetFrom(from); setDetTo(today()); }}
-                  style={{
-                    flex: 1, padding: '5px 0',
-                    border: '1px solid #E5E7EB', borderRadius: 6,
-                    background: detFrom === from ? '#F0FDF4' : '#fff',
-                    color: detFrom === from ? '#059669' : '#9CA3AF',
-                    fontSize: 11, fontWeight: 500,
-                    cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
-                  }}>
-                  {label}
-                </button>
-              ))}
-            </div>
+              ]}
+            />
 
             <DownloadBtn
               dlKey="detections-csv" state={dl['detections-csv']}
@@ -677,35 +677,90 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* EXCEL EKSPORT                                               */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ================================================================== */}
+      {/* EXCEL EKSPORT                                                        */}
+      {/* ================================================================== */}
 
       <div>
         <SectionHeader
           icon={FileSpreadsheet}
           title="Excel Eksport"
-          subtitle="Ko'p varaqli .xlsx fayllar — professional tahlil uchun"
+          subtitle="Professional .xlsx fayllar — ko'p varaqli, formatlangan"
           color="#1D4ED8"
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
 
-          {/* Weights Excel */}
-          <ReportCard>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, background: '#EFF6FF', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <BarChart2 size={15} color="#1D4ED8" />
+          {/* ─── B7: JONIVORLAR EXCEL (yangi) ──────────────────────────── */}
+          <ReportCard highlight>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: '#EFF6FF', border: '1px solid #BFDBFE',
+              borderRadius: 20, padding: '3px 10px',
+              marginBottom: 12,
+            }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#1D4ED8', letterSpacing: 0.5 }}>
+                B7 · YANGI
+              </span>
+            </div>
+
+            <CardIcon icon={Users} color="#1D4ED8" bg="#EFF6FF" />
+            <CardTitle
+              title="Jonivorlar Excel"
+              sub="Professional formatlash · 2 varaqli"
+            />
+
+            {/* Filtrlar */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              <div>
+                <label style={labelStyle}>Holat</label>
+                <select value={xlsStatus} onChange={e => setXlsStatus(e.target.value)} style={inputStyle}>
+                  <option value="">Barchasi</option>
+                  <option value="active">Faol</option>
+                  <option value="sick">Kasal</option>
+                  <option value="quarantine">Karantin</option>
+                  <option value="sold">Sotilgan</option>
+                  <option value="deceased">Vafot etgan</option>
+                </select>
               </div>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Og'irlik Excel</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Har jonivor uchun alohida varaq</div>
+                <label style={labelStyle}>Tur</label>
+                <select value={xlsSpecies} onChange={e => setXlsSpecies(e.target.value)} style={inputStyle}>
+                  <option value="">Barchasi</option>
+                  <option value="cattle">Qoramol</option>
+                  <option value="sheep">Qo'y</option>
+                  <option value="goat">Echki</option>
+                  <option value="horse">Ot</option>
+                  <option value="other">Boshqa</option>
+                </select>
               </div>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            {/* Tarkib haqida ma'lumot */}
+            <InfoBox color="#1E40AF" bg="#EFF6FF" border="#BFDBFE">
+              <strong>Fayl tarkibi:</strong><br />
+              📋 Varaq 1 — Ro'yxat: holat ranglari, muzlatilgan sarlavha<br />
+              📊 Varaq 2 — Statistika: tur / holat taqsimot
+            </InfoBox>
+
+            <DownloadBtn
+              dlKey="animals-excel" state={dl['animals-excel']}
+              onClick={() => run('animals-excel', dlAnimalsExcel)}
+              label="Excel Yuklab Olish"
+              icon={FileSpreadsheet}
+              color="#1D4ED8"
+            />
+          </ReportCard>
+
+          {/* ─── OG'IRLIK EXCEL ──────────────────────────────────────── */}
+          <ReportCard>
+            <CardIcon icon={BarChart2} color="#1D4ED8" bg="#EFF6FF" />
+            <CardTitle title="Og'irlik Excel" sub="Har jonivor uchun alohida varaq" />
+
+            <div style={{ marginBottom: 10 }}>
               <label style={labelStyle}>
-                Jonivor IDlar <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
+                Jonivor IDlar{' '}
+                <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy)</span>
               </label>
               <input
                 type="text" value={wExcelIds}
@@ -715,17 +770,11 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* Excel structure info */}
-            <div style={{
-              padding: '10px 12px', background: '#EFF6FF',
-              border: '1px solid #BFDBFE', borderRadius: 8, marginBottom: 16,
-            }}>
-              <p style={{ fontSize: 11, color: '#1D4ED8', margin: 0, lineHeight: 1.6 }}>
-                <strong>Fayl tarkibi:</strong><br />
-                📊 Varaq 1: Xulosa (barcha jonivorlar)<br />
-                📋 Varaq 2+: Har bir jonivor uchun alohida
-              </p>
-            </div>
+            <InfoBox color="#1E40AF" bg="#EFF6FF" border="#BFDBFE">
+              <strong>Fayl tarkibi:</strong><br />
+              📊 Varaq 1 — Xulosa (barcha jonivorlar)<br />
+              📋 Varaq 2+ — Har bir jonivor uchun alohida
+            </InfoBox>
 
             <DownloadBtn
               dlKey="weights-excel" state={dl['weights-excel']}
@@ -736,47 +785,36 @@ export default function ReportsPage() {
             />
           </ReportCard>
 
-          {/* All Data Excel */}
+          {/* ─── TO'LIQ ARXIV ───────────────────────────────────────── */}
           <ReportCard>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, background: '#F5F3FF', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                <Layers size={15} color="#7C3AED" />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>To'liq Arxiv Excel</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>Barcha ma'lumotlar bitta faylda</div>
-              </div>
-            </div>
+            <CardIcon icon={Layers} color="#7C3AED" bg="#F5F3FF" />
+            <CardTitle title="To'liq Arxiv Excel" sub="Barcha ma'lumotlar bitta faylda" />
 
-            {/* Sheets info */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+            {/* 4 varaq */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12 }}>
               {[
-                { sheet: 'Varaq 1', content: 'Barcha jonivorlar', color: '#7C3AED', bg: '#F5F3FF' },
-                { sheet: 'Varaq 2', content: 'Deteksiyalar (30 kun)', color: '#1D4ED8', bg: '#EFF6FF' },
-                { sheet: 'Varaq 3', content: "Og'irlik o'lchovlari", color: '#059669', bg: '#F0FDF4' },
-                { sheet: 'Varaq 4', content: 'Umumiy statistika', color: '#DC2626', bg: '#FEF2F2' },
-              ].map(({ sheet, content, color, bg }) => (
-                <div key={sheet} style={{
+                { n: '1', text: 'Jonivorlar',           color: '#7C3AED', bg: '#F5F3FF' },
+                { n: '2', text: 'Deteksiyalar (30 kun)', color: '#1D4ED8', bg: '#EFF6FF' },
+                { n: '3', text: "Og'irlik o'lchovlari", color: '#059669', bg: '#F0FDF4' },
+                { n: '4', text: 'Statistika',           color: '#DC2626', bg: '#FEF2F2' },
+              ].map(({ n, text, color, bg }) => (
+                <div key={n} style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 10px',
+                  padding: '6px 10px',
                   background: bg, border: `1px solid ${color}22`,
                   borderRadius: 7,
                 }}>
-                  <FileSpreadsheet size={12} color={color} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color }}>{sheet}:</span>
-                  <span style={{ fontSize: 12, color: '#374151' }}>{content}</span>
+                  <FileSpreadsheet size={11} color={color} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color }}>Varaq {n}:</span>
+                  <span style={{ fontSize: 11, color: '#374151' }}>{text}</span>
                 </div>
               ))}
             </div>
 
-            <div style={{
-              padding: '8px 12px', background: '#FFFBEB',
-              border: '1px solid #FDE68A', borderRadius: 8, marginBottom: 16,
-            }}>
-              <p style={{ fontSize: 11, color: '#92400E', margin: 0 }}>
-                ⚠ Katta fermalarda fayl hajmi 100MB+ bo'lishi mumkin. Kichik eksportlar uchun filtrli variantlardan foydalaning.
-              </p>
-            </div>
+            <InfoBox color="#92400E" bg="#FFFBEB" border="#FDE68A">
+              ⚠ Katta fermalarda fayl 100MB+ bo'lishi mumkin.
+              Kichik eksportlar uchun yuqoridagi variantlardan foydalaning.
+            </InfoBox>
 
             <DownloadBtn
               dlKey="all-excel" state={dl['all-excel']}
@@ -793,6 +831,77 @@ export default function ReportsPage() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
+    </div>
+  );
+}
+
+// =============================================================================
+// LOCAL HELPERS (faqat shu fayl uchun)
+// =============================================================================
+
+function CardIcon({
+  icon: Icon, color, bg,
+}: { icon: React.ElementType; color: string; bg: string }) {
+  return (
+    <div style={{
+      width: 36, height: 36, borderRadius: 8,
+      background: bg, display: 'grid', placeItems: 'center',
+      marginBottom: 10, flexShrink: 0,
+    }}>
+      <Icon size={16} color={color} />
+    </div>
+  );
+}
+
+function CardTitle({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>{title}</div>
+      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{sub}</div>
+    </div>
+  );
+}
+
+function QuickDates({
+  current, onSelect, color,
+  options = [
+    { label: '7 kun',  from: '' },
+    { label: '30 kun', from: '' },
+    { label: '90 kun', from: '' },
+  ],
+}: {
+  current: string;
+  onSelect: (from: string) => void;
+  color: string;
+  options?: { label: string; from: string }[];
+}) {
+  // Agar from bo'sh bo'lsa, daysAgo bilan hisoblash
+  const today0 = new Date().toISOString().slice(0, 10);
+  const resolved = options.map(o => ({
+    label: o.label,
+    from:  o.from || (() => {
+      const days = parseInt(o.label);
+      if (isNaN(days)) return today0;
+      const d = new Date(); d.setDate(d.getDate() - days);
+      return d.toISOString().slice(0, 10);
+    })(),
+  }));
+
+  return (
+    <div style={{ display: 'flex', gap: 5, marginBottom: 12 }}>
+      {resolved.map(({ label, from }) => (
+        <button key={label} onClick={() => onSelect(from)} style={{
+          flex: 1, padding: '5px 0',
+          border: '1px solid #E5E7EB', borderRadius: 6,
+          background: current === from ? `${color}14` : '#fff',
+          color:      current === from ? color          : '#9CA3AF',
+          fontSize: 11, fontWeight: current === from ? 700 : 500,
+          cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
+          transition: 'all .15s',
+        }}>
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

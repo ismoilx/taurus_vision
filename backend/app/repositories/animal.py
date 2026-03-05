@@ -1,23 +1,41 @@
 """
-Animal repository for data access operations.
+Taurus Vision — Animal Repository
 
-RESPONSIBILITY: Database access ONLY — no business logic here.
-All queries use SQLAlchemy 2.0 async syntax with full type safety.
+JAVOBGARLIK: Faqat ma'lumotlar bazasi operatsiyalari.
+Biznes logikasi YO'Q — bu Service qatlamining ishi.
 
-PATTERN: Repository pattern isolates DB layer from business logic.
-Service layer calls repository; repository never calls service.
+PATTERN: Repository pattern DB qatlamini biznes logikadan ajratadi.
+Barcha metodlar async, to'liq type-annotated, SQLAlchemy 2.0.
+
+METODLAR:
+    create()                 — Bitta jonivor qo'shish
+    bulk_create()            — Ko'p jonivorni bir tranzaksiyada qo'shish
+    get_by_id()              — ID bo'yicha qidirish
+    get_by_tag_id()          — Tag ID bo'yicha qidirish (case-insensitive)
+    get_existing_tags()      — Mavjud tag_id lar to'plami (import uchun)
+    get_all()                — Filtrlangan ro'yxat (pagination)
+    count()                  — Filtrlangan soni
+    update()                 — Qisman yangilash
+    delete()                 — O'chirish
+    get_first_active()       — Birinchi aktiv jonivor (pipeline uchun)
+    increment_detection_count() — Deteksiya hisobini oshirish
+    advanced_search()        — Ko'p maydonli qidirish
+    search_by_text()         — Matn bo'yicha qidirish
 """
 
+from __future__ import annotations
+
 from typing import Optional, Sequence
-from sqlalchemy import select, func, and_
+
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.animal import Animal, AnimalStatus, AnimalSpecies
-from app.schemas.animal import AnimalCreate, AnimalUpdate
 from app.core.exceptions import DatabaseError
-import logging
+from app.core.logging_config import get_logger
+from app.models.animal import Animal, AnimalSpecies, AnimalStatus
+from app.schemas.animal import AnimalCreate, AnimalUpdate
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnimalRepository:
@@ -34,30 +52,30 @@ class AnimalRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # CREATE
-    # -------------------------------------------------------------------------
+    # =========================================================================
 
     async def create(self, animal_data: AnimalCreate) -> Animal:
         """
-        Insert a new animal row.
+        Bitta yangi jonivor satrini qo'shadi.
 
-        NOTE: Does NOT check uniqueness — that is the Service layer's job.
+        NOTE: Noyoblikni tekshirmaydi — bu Service qatlamining ishi.
 
         Args:
-            animal_data: Validated Pydantic schema
+            animal_data: Validatsiyadan o'tgan Pydantic sxema
 
         Returns:
-            Persisted Animal ORM instance (with generated id)
+            Persistlanган Animal ORM instance (generatsiya qilingan id bilan)
 
         Raises:
-            DatabaseError: On any SQLAlchemy/DB-level failure
+            DatabaseError: Har qanday SQLAlchemy / DB xatosida
         """
         try:
             animal = Animal(**animal_data.model_dump())
             self.db.add(animal)
-            await self.db.flush()          # Get generated PK without commit
-            await self.db.refresh(animal)  # Load DB-computed defaults
+            await self.db.flush()           # Commit qilmasdan PK oling
+            await self.db.refresh(animal)   # DB tomonidan hisoblangan default larni yuklang
             logger.debug(f"[repo] Created animal pk={animal.id} tag={animal.tag_id}")
             return animal
         except Exception as exc:
@@ -67,16 +85,72 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    # -------------------------------------------------------------------------
-    # READ — single
-    # -------------------------------------------------------------------------
+    async def bulk_create(
+        self,
+        animals_data: list[AnimalCreate],
+    ) -> list[Animal]:
+        """
+        Bir tranzaksiyada bir nechta jonivorni qo'shadi.
+
+        NOTE:
+            - Noyoblikni tekshirmaydi — chaqiruvchi tekshirishi kerak.
+            - Barcha yozuvlar bitta flush() da saqlanadi (samarali).
+            - Xato bo'lsa butun to'plam rollback qilinadi.
+
+        Args:
+            animals_data: AnimalCreate ob'ektlari ro'yxati
+
+        Returns:
+            Yaratilgan Animal ORM instance lar ro'yxati (PK lar bilan)
+
+        Raises:
+            DatabaseError: Har qanday DB xatosida
+
+        Example:
+            animals = await repo.bulk_create([
+                AnimalCreate(tag_id="JNV-001", species="cattle", ...),
+                AnimalCreate(tag_id="JNV-002", species="sheep", ...),
+            ])
+        """
+        if not animals_data:
+            return []
+
+        try:
+            orm_objects: list[Animal] = []
+            for data in animals_data:
+                animal = Animal(**data.model_dump())
+                self.db.add(animal)
+                orm_objects.append(animal)
+
+            # Barcha ob'ektlarni bitta flush da saqlash (N+1 muammosidan qochish)
+            await self.db.flush()
+
+            # DB tomonidan hisoblangan qiymatlarni yuklash (id, created_at, ...)
+            for animal in orm_objects:
+                await self.db.refresh(animal)
+
+            logger.info(
+                f"[repo] bulk_create: {len(orm_objects)} ta jonivor qo'shildi"
+            )
+            return orm_objects
+
+        except Exception as exc:
+            logger.error(f"[repo] bulk_create failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message=f"Ommaviy yaratishda xato ({len(animals_data)} ta yozuv)",
+                details={"error": str(exc), "count": len(animals_data)},
+            ) from exc
+
+    # =========================================================================
+    # READ — yagona yozuv
+    # =========================================================================
 
     async def get_by_id(self, animal_id: int) -> Optional[Animal]:
         """
-        Fetch animal by primary key.
+        Jonivorni asosiy kalit (PK) bo'yicha topadi.
 
         Returns:
-            Animal instance or None if not found
+            Animal instance yoki None (topilmasa)
         """
         try:
             result = await self.db.execute(
@@ -92,13 +166,13 @@ class AnimalRepository:
 
     async def get_by_tag_id(self, tag_id: str) -> Optional[Animal]:
         """
-        Fetch animal by tag identifier (case-insensitive).
+        Tag identifikatori bo'yicha topadi (katta/kichik harfga sezgir emas).
 
         Args:
-            tag_id: e.g. "jnv-001" or "JNV-001" — treated equally
+            tag_id: masalan "jnv-001" yoki "JNV-001" — bir xil natija
 
         Returns:
-            Animal instance or None
+            Animal instance yoki None
         """
         try:
             result = await self.db.execute(
@@ -114,9 +188,48 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    # -------------------------------------------------------------------------
-    # READ — collection
-    # -------------------------------------------------------------------------
+    async def get_existing_tags(
+        self,
+        tag_ids: list[str],
+    ) -> set[str]:
+        """
+        Berilgan tag_id lar ichidan bazada mavjud bo'lganlarini qaytaradi.
+
+        Import jarayonida takroriy yozuvlarni aniqlash uchun ishlatiladi.
+        Bitta so'rov bilan ishlaydi — samarali.
+
+        Args:
+            tag_ids: Tekshiriladigan tag_id lar ro'yxati
+
+        Returns:
+            Bazada mavjud tag_id lar to'plami (katta harflarda)
+
+        Example:
+            existing = await repo.get_existing_tags(["JNV-001", "JNV-002", "JNV-999"])
+            # {"JNV-001"}  — faqat JNV-001 allaqachon bazada bor
+        """
+        if not tag_ids:
+            return set()
+
+        try:
+            upper_tags = [t.upper() for t in tag_ids]
+            result = await self.db.execute(
+                select(func.upper(Animal.tag_id)).where(
+                    func.upper(Animal.tag_id).in_(upper_tags)
+                )
+            )
+            return {row[0] for row in result.fetchall()}
+
+        except Exception as exc:
+            logger.error(f"[repo] get_existing_tags failed: {exc}", exc_info=True)
+            raise DatabaseError(
+                message="Mavjud tag larni tekshirishda xato",
+                details={"error": str(exc)},
+            ) from exc
+
+    # =========================================================================
+    # READ — to'plam
+    # =========================================================================
 
     async def get_all(
         self,
@@ -126,29 +239,26 @@ class AnimalRepository:
         status: Optional[AnimalStatus] = None,
     ) -> Sequence[Animal]:
         """
-        Paginated list with optional filters.
+        Filtrlar bilan sahifalangan ro'yxat qaytaradi.
 
         Args:
-            skip:    Offset for pagination
-            limit:   Page size (caller should cap at 100)
-            species: Filter by species string (e.g. "cattle")
-            status:  Filter by AnimalStatus enum
+            skip:    Sahifalash ofset
+            limit:   Sahifa hajmi (chaqiruvchi 100 da cheklashi kerak)
+            species: Tur bo'yicha filtr (masalan "cattle")
+            status:  AnimalStatus enum bo'yicha filtr
 
         Returns:
-            Sequence of Animal instances (may be empty)
+            Animal instance lar ro'yxati (bo'sh bo'lishi mumkin)
         """
         try:
             stmt = select(Animal)
-
-            # Build WHERE clauses dynamically
             conditions = []
+
             if species:
                 try:
-                    conditions.append(
-                        Animal.species == AnimalSpecies(species.lower())
-                    )
+                    conditions.append(Animal.species == AnimalSpecies(species.lower()))
                 except ValueError:
-                    logger.warning(f"[repo] Unknown species filter: {species!r} — ignored")
+                    logger.warning(f"[repo] Noma'lum species filtri: {species!r} — e'tiborsiz qoldirildi")
 
             if status:
                 conditions.append(Animal.status == status)
@@ -157,7 +267,6 @@ class AnimalRepository:
                 stmt = stmt.where(and_(*conditions))
 
             stmt = stmt.offset(skip).limit(limit).order_by(Animal.id)
-
             result = await self.db.execute(stmt)
             return result.scalars().all()
 
@@ -174,22 +283,20 @@ class AnimalRepository:
         status: Optional[AnimalStatus] = None,
     ) -> int:
         """
-        Count animals matching optional filters.
+        Filtrlarga mos jonivolar sonini hisoblaydi.
 
-        Used alongside get_all() to build paginated responses.
+        get_all() bilan birga ishlatiladi (sahifalangan javob uchun).
 
         Returns:
-            Integer count
+            Integer son
         """
         try:
             stmt = select(func.count()).select_from(Animal)
-
             conditions = []
+
             if species:
                 try:
-                    conditions.append(
-                        Animal.species == AnimalSpecies(species.lower())
-                    )
+                    conditions.append(Animal.species == AnimalSpecies(species.lower()))
                 except ValueError:
                     pass
 
@@ -209,9 +316,9 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # UPDATE
-    # -------------------------------------------------------------------------
+    # =========================================================================
 
     async def update(
         self,
@@ -219,24 +326,23 @@ class AnimalRepository:
         update_data: AnimalUpdate,
     ) -> Optional[Animal]:
         """
-        Partial update — only non-None fields are applied.
+        Qisman yangilash — faqat None bo'lmagan maydonlar o'zgaradi.
 
         Args:
-            animal_id:   PK of the animal to update
-            update_data: Pydantic schema; None fields are skipped
+            animal_id:   Yangilanadigan jonivor PK si
+            update_data: Pydantic sxema; None maydonlar o'tkazib yuboriladi
 
         Returns:
-            Updated Animal instance, or None if not found
+            Yangilangan Animal instance yoki None (topilmasa)
 
         Raises:
-            DatabaseError: On DB failure
+            DatabaseError: DB xatosida
         """
         try:
             animal = await self.get_by_id(animal_id)
             if not animal:
                 return None
 
-            # Apply only fields that were explicitly set
             update_fields = update_data.model_dump(exclude_none=True)
             for field, value in update_fields.items():
                 setattr(animal, field, value)
@@ -259,16 +365,16 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # DELETE
-    # -------------------------------------------------------------------------
+    # =========================================================================
 
     async def delete(self, animal_id: int) -> bool:
         """
-        Hard-delete animal by PK.
+        Jonivorni to'liq o'chiradi (hard delete).
 
         Returns:
-            True if deleted, False if not found
+            True — o'chirildi, False — topilmadi
         """
         try:
             animal = await self.get_by_id(animal_id)
@@ -277,7 +383,6 @@ class AnimalRepository:
 
             await self.db.delete(animal)
             await self.db.flush()
-
             logger.debug(f"[repo] Deleted animal pk={animal_id}")
             return True
 
@@ -290,16 +395,16 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    # -------------------------------------------------------------------------
-    # HELPERS (used by pipeline / detection)
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # PIPELINE YORDAMCHILARI
+    # =========================================================================
 
     async def get_first_active(self) -> Optional[Animal]:
         """
-        Return the first active animal.
+        Birinchi aktiv jonivorni qaytaradi.
 
-        Used by the detection pipeline when animal matching is not yet
-        implemented (MVP fallback).
+        Deteksiya pipeline si jonivorni moslashtira olmasa,
+        MVP fallback sifatida ishlatiladi.
         """
         try:
             result = await self.db.execute(
@@ -315,49 +420,34 @@ class AnimalRepository:
                 details={"error": str(exc)},
             ) from exc
 
-    async def increment_detection_count(
-        self,
-        animal_id: int,
-    ) -> None:
+    async def increment_detection_count(self, animal_id: int) -> None:
         """
-        Atomically increment total_detections and update last_detected_at.
+        total_detections ni oshiradi va last_detected_at ni yangilaydi.
 
-        Called by the detection pipeline after each confirmed detection.
+        Deteksiya pipeline tomonidan har muvaffaqiyatli deteksiyadan keyin chaqiriladi.
+        Kritik emas — xato bo'lsa log ga yoziladi, istisno ko'tarilmaydi.
 
         Args:
-            animal_id: PK of the detected animal
+            animal_id: Aniqlangan jonivor PK si
         """
-        from datetime import datetime
-
         try:
             animal = await self.get_by_id(animal_id)
             if not animal:
                 logger.warning(
-                    f"[repo] increment_detection_count: animal {animal_id} not found"
+                    f"[repo] increment_detection_count: animal {animal_id} topilmadi"
                 )
                 return
-
-            animal.mark_detected()   # uses the model helper method
+            animal.mark_detected()  # Model helper metodi
             await self.db.flush()
-
         except Exception as exc:
             logger.error(
                 f"[repo] increment_detection_count({animal_id}) failed: {exc}"
             )
-            # Non-critical — don't raise, just log
-    # ============================================================================
-    # ADVANCED SEARCH METHODS - ADD TO ANIMAL REPOSITORY
-    # ============================================================================
-    #
-    # Location: backend/app/repositories/animal.py
-    # Action: ADD these methods to the AnimalRepository class
-    #
-    # Add at the end of the class (before the final closing)
-    # ============================================================================
+            # Kritik emas — istisno ko'tarmayiz
 
-    # -------------------------------------------------------------------------
-    # ADVANCED SEARCH
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # KENGAYTIRILGAN QIDIRUV
+    # =========================================================================
 
     async def advanced_search(
         self,
@@ -371,167 +461,135 @@ class AnimalRepository:
         sort_by: str = "tag_id",
         sort_order: str = "asc",
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> tuple[Sequence[Animal], int]:
         """
-        Advanced multi-field search with filtering and sorting.
-        
+        Ko'p maydonli qidirish: filtrlar, saralash, sahifalash.
+
         Args:
-            tag_id: Filter by tag ID (partial match, case-insensitive)
-            species: Filter by species
-            gender: Filter by gender
-            status: Filter by status
-            breed: Filter by breed (partial match, case-insensitive)
-            min_detections: Minimum number of detections
-            search_text: Full-text search across tag_id, breed, notes
-            sort_by: Field to sort by (tag_id, species, status, total_detections, last_detected_at)
-            sort_order: Sort order (asc or desc)
-            skip: Pagination offset
-            limit: Maximum results
-        
+            tag_id:         Tag ID bo'yicha qisman mos (case-insensitive)
+            species:        Tur filtri
+            gender:         Jins filtri
+            status:         Holat filtri
+            breed:          Zot bo'yicha qisman mos
+            min_detections: Minimal deteksiya soni
+            search_text:    Matn qidirish (tag_id, breed, notes)
+            sort_by:        Saralash maydoni
+            sort_order:     asc | desc
+            skip:           Sahifalash ofset
+            limit:          Maksimal natijalar soni
+
         Returns:
-            Tuple of (animals list, total count)
-        
-        Example:
-            >>> animals, total = await repo.advanced_search(
-            ...     species=AnimalSpecies.CATTLE,
-            ...     status=AnimalStatus.ACTIVE,
-            ...     min_detections=10,
-            ...     sort_by="total_detections",
-            ...     sort_order="desc"
-            ... )
+            (jonivorlar ro'yxati, jami son) — ikkilik
         """
-        from sqlalchemy import or_, desc, asc
-        
         try:
-            logger.info(f"[repo] Advanced search: species={species}, status={status}, search_text={search_text}")
-            
-            # Build base query
             conditions = []
-            
-            # Tag ID filter (partial match)
+
             if tag_id:
                 conditions.append(Animal.tag_id.ilike(f"%{tag_id}%"))
-            
-            # Species filter
+
             if species:
                 conditions.append(Animal.species == species)
-            
-            # Gender filter
+
             if gender:
                 conditions.append(Animal.gender == gender)
-            
-            # Status filter
+
             if status:
                 conditions.append(Animal.status == status)
-            
-            # Breed filter (partial match)
+
             if breed:
                 conditions.append(Animal.breed.ilike(f"%{breed}%"))
-            
-            # Minimum detections filter
+
             if min_detections is not None:
                 conditions.append(Animal.total_detections >= min_detections)
-            
-            # Full-text search across multiple fields
+
             if search_text:
-                search_pattern = f"%{search_text}%"
-                text_conditions = [
-                    Animal.tag_id.ilike(search_pattern),
-                    Animal.breed.ilike(search_pattern),
-                    Animal.notes.ilike(search_pattern)
-                ]
-                conditions.append(or_(*text_conditions))
-            
-            # Build WHERE clause
+                pat = f"%{search_text}%"
+                conditions.append(
+                    or_(
+                        Animal.tag_id.ilike(pat),
+                        Animal.breed.ilike(pat),
+                        Animal.notes.ilike(pat),
+                    )
+                )
+
             where_clause = and_(*conditions) if conditions else True
-            
-            # Count total (without pagination)
-            count_query = select(func.count(Animal.id)).where(where_clause)
-            count_result = await self.db.execute(count_query)
+
+            # Jami son (sahifalashsiz)
+            count_result = await self.db.execute(
+                select(func.count(Animal.id)).where(where_clause)
+            )
             total = count_result.scalar() or 0
-            
-            # Build data query with sorting
-            query = select(Animal).where(where_clause)
-            
-            # Apply sorting
-            sort_column = getattr(Animal, sort_by, Animal.tag_id)
-            if sort_order.lower() == "desc":
-                query = query.order_by(desc(sort_column))
-            else:
-                query = query.order_by(asc(sort_column))
-            
-            # Apply pagination
-            query = query.offset(skip).limit(limit)
-            
-            # Execute
-            result = await self.db.execute(query)
-            animals = result.scalars().all()
-            
-            logger.info(f"[repo] Advanced search found {len(animals)} animals (total: {total})")
+
+            # Ma'lumotlar + saralash
+            sort_col = getattr(Animal, sort_by, Animal.tag_id)
+            order_fn = desc if sort_order.lower() == "desc" else asc
+
+            data_result = await self.db.execute(
+                select(Animal)
+                .where(where_clause)
+                .order_by(order_fn(sort_col))
+                .offset(skip)
+                .limit(limit)
+            )
+            animals = data_result.scalars().all()
+
+            logger.debug(
+                f"[repo] advanced_search: {len(animals)} ta topildi (jami: {total})"
+            )
             return animals, total
-            
+
         except Exception as exc:
             logger.error(f"[repo] advanced_search failed: {exc}", exc_info=True)
             raise DatabaseError(
-                message="Failed to perform advanced search",
+                message="Kengaytirilgan qidiruvda xato",
                 details={"error": str(exc)},
             ) from exc
-    
+
     async def search_by_text(
         self,
         search_text: str,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> tuple[Sequence[Animal], int]:
         """
-        Simple full-text search across tag_id, breed, and notes.
-        
+        tag_id, breed, notes bo'yicha oddiy matn qidirish.
+
         Args:
-            search_text: Text to search for (case-insensitive)
-            skip: Pagination offset
-            limit: Maximum results
-        
+            search_text: Qidiruv matni (katta/kichik harfga sezgir emas)
+            skip:        Sahifalash ofset
+            limit:       Maksimal natijalar soni
+
         Returns:
-            Tuple of (animals list, total count)
-        
-        Example:
-            >>> animals, total = await repo.search_by_text("JNV")
+            (jonivorlar ro'yxati, jami son)
         """
-        from sqlalchemy import or_
-        
         try:
-            logger.info(f"[repo] Text search: '{search_text}'")
-            
-            search_pattern = f"%{search_text}%"
-            conditions = [
-                Animal.tag_id.ilike(search_pattern),
-                Animal.breed.ilike(search_pattern),
-                Animal.notes.ilike(search_pattern)
-            ]
-            
-            where_clause = or_(*conditions)
-            
-            # Count
-            count_query = select(func.count(Animal.id)).where(where_clause)
-            count_result = await self.db.execute(count_query)
+            pat = f"%{search_text}%"
+            where_clause = or_(
+                Animal.tag_id.ilike(pat),
+                Animal.breed.ilike(pat),
+                Animal.notes.ilike(pat),
+            )
+
+            count_result = await self.db.execute(
+                select(func.count(Animal.id)).where(where_clause)
+            )
             total = count_result.scalar() or 0
-            
-            # Data
-            query = select(Animal).where(where_clause).order_by(Animal.tag_id).offset(skip).limit(limit)
-            result = await self.db.execute(query)
-            animals = result.scalars().all()
-            
-            logger.info(f"[repo] Text search found {len(animals)} animals (total: {total})")
+
+            data_result = await self.db.execute(
+                select(Animal)
+                .where(where_clause)
+                .order_by(asc(Animal.tag_id))
+                .offset(skip)
+                .limit(limit)
+            )
+            animals = data_result.scalars().all()
+
             return animals, total
-            
+
         except Exception as exc:
             logger.error(f"[repo] search_by_text failed: {exc}", exc_info=True)
             raise DatabaseError(
-                message="Failed to perform text search",
+                message="Matn qidiruvida xato",
                 details={"error": str(exc)},
             ) from exc
-
-    # ============================================================================
-    # END OF ADVANCED SEARCH METHODS
-    # ============================================================================
