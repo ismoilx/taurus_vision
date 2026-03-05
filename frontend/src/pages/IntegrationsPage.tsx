@@ -60,6 +60,13 @@ interface Meta {
   events: { value: string; label: string; icon: string }[];
 }
 
+interface WebhookTestResult {
+  success:     boolean;
+  status_code: number | null;
+  latency_ms:  number | null;
+  error:       string | null;
+}
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -124,8 +131,8 @@ function APIKeyModal({
   const [expires, setExpires] = useState('');
   const [err,     setErr]     = useState<string | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: () => apiFetch('/api/v1/integrations/api-keys', {
+  const mutation = useMutation<APIKeyCreated, Error>({
+    mutationFn: () => apiFetch<APIKeyCreated>('/api/v1/integrations/api-keys', {
       method: 'POST',
       body: JSON.stringify({
         name,
@@ -134,8 +141,8 @@ function APIKeyModal({
         expires_at: expires || null,
       }),
     }),
-    onSuccess: (data: APIKeyCreated) => onCreated(data),
-    onError:   (e: Error) => setErr(e.message),
+    onSuccess: (data) => onCreated(data),
+    onError:   (e) => setErr(e.message),
   });
 
   const toggleScope = (s: string) => {
@@ -458,7 +465,7 @@ export default function IntegrationsPage() {
   const [whModal,   setWhModal]   = useState<{ open: boolean; wh: WebhookResponse | null }>({ open: false, wh: null });
   const [deleteId,  setDeleteId]  = useState<{ type: 'key' | 'wh'; id: number } | null>(null);
   const [testId,    setTestId]    = useState<number | null>(null);
-  const [testResult, setTestResult] = useState<{ success: boolean; status_code: number | null; latency_ms: number | null; error: string | null } | null>(null);
+  const [testResult, setTestResult] = useState<WebhookTestResult | null>(null);
 
   const qc = useQueryClient();
 
@@ -490,10 +497,10 @@ export default function IntegrationsPage() {
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['integrations'] }); setDeleteId(null); },
   });
 
-  const testMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/v1/integrations/webhooks/${id}/test`, { method: 'POST' }),
+  const testMutation = useMutation<WebhookTestResult, Error, number>({
+    mutationFn: (id) => apiFetch<WebhookTestResult>(`/api/v1/integrations/webhooks/${id}/test`, { method: 'POST' }),
     onSuccess:  (data) => { setTestResult(data); setTestId(null); },
-    onError:    (e: Error) => setTestResult({ success: false, status_code: null, latency_ms: null, error: e.message }),
+    onError:    (e)    => setTestResult({ success: false, status_code: null, latency_ms: null, error: e.message }),
   });
 
   const tabBtn = (t: Tab): React.CSSProperties => ({

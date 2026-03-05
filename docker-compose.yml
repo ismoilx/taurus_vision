@@ -90,11 +90,11 @@ services:
     # Host mashinadagi /dev/video* qurilmalar container ichiga ko'rinadi.
     # Faqat mavjud qurilmalar ko'rsatiladi — bo'lmasa compose ishlamaydi.
     # Agar boshqa index kerak bo'lsa (masalan /dev/video2) qo'shing.
-    devices:
-      - /dev/video0:/dev/video0
+    # devices:
+    #   - /dev/video0:/dev/video0
     # "video" guruhi OpenCV uchun /dev/video* ga kirish huquqini beradi
-    group_add:
-      - video
+    # group_add:
+    #   - video
     ports:
       - "8000:8000"
     volumes:
@@ -119,7 +119,7 @@ services:
     networks:
       - taurus-network
     command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade heads && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     mem_limit: 2g
     memswap_limit: 2g
 

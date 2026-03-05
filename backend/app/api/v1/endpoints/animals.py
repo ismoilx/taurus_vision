@@ -666,3 +666,242 @@ async def get_animal_detections(
         }
         for d in rows
     ]
+
+# =============================================================================
+# PHOTO MANAGEMENT — Rasm galereya endpointlari
+# =============================================================================
+
+@router.post(
+    "/{animal_id}/photos",
+    summary="Jonivorga rasm yuklash",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_manager)],
+)
+async def upload_animal_photo(
+    animal_id: int,
+    file: UploadFile = File(..., description="Rasm fayli (jpg/png/webp, max 10MB)"),
+    set_as_profile: bool = Query(default=False, description="Profil rasmi sifatida belgilash"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Jonivorga rasm yuklaydi.
+
+    - Rasm fayli serverga saqlanadi (data/images/animals/)
+    - set_as_profile=True bo'lsa — profil rasmi sifatida tanlanadi
+    """
+    import os, uuid
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.animal import Animal
+    from app.models.animal_photo import AnimalPhoto
+
+    # Jonivorni tekshirish
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(status_code=404, detail=f"ID {animal_id} li jonivor topilmadi")
+
+    # Fayl validatsiyasi
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Fayl nomi bo'sh")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(status_code=400, detail="Faqat jpg, png, webp formatlari qabul qilinadi")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Fayl hajmi 10MB dan oshmasligi kerak")
+
+    # Saqlash papkasini tayyorlash
+    save_dir = os.path.join("data", "images", "animals", str(animal_id))
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Noyob fayl nomi
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    file_path   = os.path.join(save_dir, unique_name)
+
+    with open(file_path, "wb") as f_out:
+        f_out.write(content)
+
+    # DB ga yozish
+    photo = AnimalPhoto(
+        animal_id=animal_id,
+        file_path=file_path,
+        file_name=file.filename,
+        file_size=len(content),
+    )
+    db.add(photo)
+
+    if set_as_profile:
+        animal.profile_image = file_path
+
+    await db.commit()
+    await db.refresh(photo)
+
+    return {
+        "id":          photo.id,
+        "animal_id":   animal_id,
+        "file_name":   photo.file_name,
+        "file_size":   photo.file_size,
+        "url":         f"/api/v1/animals/photos/file/{photo.id}",
+        "is_profile":  set_as_profile,
+        "created_at":  photo.created_at.isoformat(),
+    }
+
+
+@router.get(
+    "/{animal_id}/photos",
+    summary="Jonivor rasmlari ro'yxati",
+)
+async def list_animal_photos(
+    animal_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Jonivorning barcha rasmlari va profil rasmi ma'lumotini qaytaradi."""
+    from sqlalchemy import select
+    from app.models.animal import Animal
+    from app.models.animal_photo import AnimalPhoto
+
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(status_code=404, detail=f"ID {animal_id} li jonivor topilmadi")
+
+    result = await db.execute(
+        select(AnimalPhoto)
+        .where(AnimalPhoto.animal_id == animal_id)
+        .order_by(AnimalPhoto.created_at.desc())
+    )
+    photos = result.scalars().all()
+
+    return {
+        "animal_id":    animal_id,
+        "profile_image": f"/api/v1/animals/photos/file/profile/{animal_id}" if animal.profile_image else None,
+        "photos": [
+            {
+                "id":         p.id,
+                "file_name":  p.file_name,
+                "file_size":  p.file_size,
+                "url":        f"/api/v1/animals/photos/file/{p.id}",
+                "is_profile": animal.profile_image == p.file_path,
+                "created_at": p.created_at.isoformat(),
+            }
+            for p in photos
+        ],
+    }
+
+
+@router.patch(
+    "/{animal_id}/photos/{photo_id}/set-profile",
+    summary="Profil rasmini tanlash",
+    dependencies=[Depends(require_manager)],
+)
+async def set_profile_photo(
+    animal_id: int,
+    photo_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Ko'rsatilgan rasmni jonivorning profil rasmi sifatida belgilaydi."""
+    from sqlalchemy import select
+    from app.models.animal import Animal
+    from app.models.animal_photo import AnimalPhoto
+
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(status_code=404, detail=f"ID {animal_id} li jonivor topilmadi")
+
+    photo = await db.scalar(
+        select(AnimalPhoto).where(AnimalPhoto.id == photo_id, AnimalPhoto.animal_id == animal_id)
+    )
+    if not photo:
+        raise HTTPException(status_code=404, detail="Rasm topilmadi")
+
+    animal.profile_image = photo.file_path
+    await db.commit()
+
+    return {"success": True, "profile_url": f"/api/v1/animals/photos/file/{photo_id}"}
+
+
+@router.delete(
+    "/{animal_id}/photos/{photo_id}",
+    summary="Rasmni o'chirish",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_manager)],
+)
+async def delete_animal_photo(
+    animal_id: int,
+    photo_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Rasmni diskdan va DB dan o'chiradi. Profil rasmi bo'lsa — tozalanadi."""
+    import os
+    from sqlalchemy import select
+    from app.models.animal import Animal
+    from app.models.animal_photo import AnimalPhoto
+
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(status_code=404, detail=f"Jonivor topilmadi")
+
+    photo = await db.scalar(
+        select(AnimalPhoto).where(AnimalPhoto.id == photo_id, AnimalPhoto.animal_id == animal_id)
+    )
+    if not photo:
+        raise HTTPException(status_code=404, detail="Rasm topilmadi")
+
+    # Profil rasmi bo'lsa — tozalash
+    if animal.profile_image == photo.file_path:
+        animal.profile_image = None
+
+    # Diskdan o'chirish
+    try:
+        if os.path.exists(photo.file_path):
+            os.remove(photo.file_path)
+    except OSError as exc:
+        logger.warning(f"Faylni o'chirishda xato: {exc}")
+
+    await db.delete(photo)
+    await db.commit()
+
+
+@router.get(
+    "/photos/file/{photo_id}",
+    summary="Rasmni ko'rsatish (binary)",
+    include_in_schema=False,
+)
+async def serve_animal_photo(
+    photo_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Rasm faylini binary sifatida qaytaradi (img src uchun)."""
+    import os
+    from fastapi.responses import FileResponse
+    from sqlalchemy import select
+    from app.models.animal_photo import AnimalPhoto
+
+    photo = await db.scalar(select(AnimalPhoto).where(AnimalPhoto.id == photo_id))
+    if not photo or not os.path.exists(photo.file_path):
+        raise HTTPException(status_code=404, detail="Rasm topilmadi")
+
+    return FileResponse(photo.file_path)
+
+
+@router.get(
+    "/photos/file/profile/{animal_id}",
+    summary="Profil rasmini ko'rsatish",
+    include_in_schema=False,
+)
+async def serve_profile_photo(
+    animal_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Jonivorning profil rasmini qaytaradi."""
+    import os
+    from fastapi.responses import FileResponse
+    from sqlalchemy import select
+    from app.models.animal import Animal
+
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal or not animal.profile_image or not os.path.exists(animal.profile_image):
+        raise HTTPException(status_code=404, detail="Profil rasmi topilmadi")
+
+    return FileResponse(animal.profile_image)

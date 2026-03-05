@@ -11,6 +11,7 @@ from app.models.base             import BaseModel
 from app.models.user             import User, UserRole
 from app.models.camera           import Camera, CameraType
 from app.models.animal           import Animal, AnimalSpecies, AnimalGender, AnimalStatus
+from app.models.animal_photo     import AnimalPhoto
 from app.models.detection        import Detection
 from app.models.animal_embedding import AnimalEmbedding
 from app.models.weight_measurement import WeightMeasurement
@@ -51,6 +52,7 @@ __all__ = [
     "AnimalSpecies",
     "AnimalGender",
     "AnimalStatus",
+    "AnimalPhoto",
     # Monitoring
     "Detection",
     "AnimalEmbedding",

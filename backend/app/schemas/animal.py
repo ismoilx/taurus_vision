@@ -69,6 +69,7 @@ class AnimalBase(BaseModel):
     )
     status: AnimalStatus = Field(default=AnimalStatus.ACTIVE, description="Joriy holat")
     notes: Optional[str] = Field(None, max_length=1000, description="Qo'shimcha izoh")
+    profile_image: Optional[str] = Field(None, description="Profil rasmi URL")
 
     # ------------------------------------------------------------------
     # VALIDATORS
@@ -89,10 +90,29 @@ class AnimalBase(BaseModel):
 
     @field_validator("birth_date", "acquisition_date", mode="before")
     @classmethod
-    def validate_dates(cls, v: Optional[datetime]) -> Optional[datetime]:
-        """Kelajakdagi sanani rad etadi va naive UTC ga keltiradi."""
-        if v is None:
-            return v
+    def validate_dates(cls, v: Any) -> Optional[datetime]:
+        """Kelajakdagi sanani rad etadi va naive UTC ga keltiradi.
+
+        mode="before" — Pydantic parse qilishdan OLDIN chaqiriladi,
+        shuning uchun v string yoki datetime bo'lishi mumkin.
+        """
+        if v is None or v == "":
+            return None
+        # String kelsa — datetime ga parse qilamiz
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                try:
+                    v = datetime.strptime(v, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                raise ValueError(f"Sana formati noto'g'ri: '{v}'. To'g'ri format: YYYY-MM-DD")
+        if not isinstance(v, datetime):
+            raise ValueError(f"Sana datetime yoki string bo'lishi kerak, {type(v).__name__} emas")
         v_naive = _ensure_naive_utc(v)
         now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
         if v_naive > now_naive:
@@ -140,6 +160,22 @@ class AnimalUpdate(BaseModel):
 # RESPONSE
 # =============================================================================
 
+class AnimalPhotoResponse(BaseModel):
+    """Rasm galereyasi uchun schema."""
+    id:         int
+    file_name:  str
+    file_size:  Optional[int] = None
+    url:        str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _norm(cls, v: Any) -> Any:
+        return _ensure_naive_utc(v)
+
+
 class AnimalResponse(AnimalBase):
     """
     API javobi uchun sxema.
@@ -149,6 +185,8 @@ class AnimalResponse(AnimalBase):
     """
 
     id: int
+    profile_image: Optional[str] = None
+    photos: list[AnimalPhotoResponse] = []
     first_detected_at: Optional[datetime] = None
     last_detected_at: Optional[datetime] = None
     total_detections: int = 0

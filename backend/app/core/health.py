@@ -220,64 +220,71 @@ class HealthCheck:
     async def _check_ai_models(self) -> Dict[str, Any]:
         """
         Check AI model availability.
-        
-        Tests:
-        - Model files exist
-        - Model is loaded in memory
+
+        Global singleton orqali tekshiriladi — yangi instance yaratilmaydi,
+        chunki yangi instance hech qachon initialized bo'lmaydi.
         """
         try:
-            from app.services.ai.yolo_service import YoloService
-            
-            yolo = YoloService()
-            is_loaded = yolo._initialized
-            
-            # Check model file exists
+            # Global singleton dan foydalanamiz
+            from app.services.ai import yolo_service as _yolo_module
+            instance = getattr(_yolo_module, '_yolo_service_instance', None)
+            is_loaded = instance is not None and getattr(instance, '_initialized', False)
+
             model_path = Path(settings.ML_MODEL_PATH) / settings.YOLO_MODEL
             file_exists = model_path.exists()
-            
+
             if is_loaded and file_exists:
-                status = HealthStatus.HEALTHY
+                status  = HealthStatus.HEALTHY
                 message = "AI models loaded and ready"
             elif file_exists:
-                status = HealthStatus.DEGRADED
-                message = "Model file exists but not loaded"
+                status  = HealthStatus.DEGRADED
+                message = "Model file exists but not yet initialized"
             else:
-                status = HealthStatus.UNHEALTHY
-                message = "Model file not found"
-            
+                # Fayl yo'q — DEGRADED, UNHEALTHY emas (readiness bloklanmasin)
+                status  = HealthStatus.DEGRADED
+                message = f"Model file not found: {model_path}"
+
             return {
-                "status": status,
-                "message": message,
-                "model_loaded": is_loaded,
+                "status":            status,
+                "message":           message,
+                "model_loaded":      is_loaded,
                 "model_file_exists": file_exists,
-                "model_name": settings.YOLO_MODEL,
+                "model_name":        settings.YOLO_MODEL,
             }
-            
+
         except Exception as e:
             logger.error(f"AI model check failed: {e}")
             return {
-                "status": HealthStatus.DEGRADED,
-                "message": f"Could not verify AI models: {str(e)}",
+                "status":       HealthStatus.DEGRADED,
+                "message":      f"Could not verify AI models: {str(e)}",
                 "model_loaded": False,
             }
     
     def _determine_overall_status(self, checks: Dict[str, Dict[str, Any]]) -> str:
         """
         Determine overall system status from individual checks.
-        
-        Logic:
-        - Any UNHEALTHY → overall UNHEALTHY
+
+        Yangilangan logika:
+        - Database UNHEALTHY → overall UNHEALTHY  (faqat DB kritik)
+        - Boshqa komponent UNHEALTHY → overall DEGRADED (xizmat ishlayveradi)
         - Any DEGRADED → overall DEGRADED
         - All HEALTHY → overall HEALTHY
         """
-        statuses = [check.get("status") for check in checks.values()]
-        
-        if HealthStatus.UNHEALTHY in statuses:
+        # Faqat database UNHEALTHY bo'lsa butun tizim UNHEALTHY hisoblanadi
+        db_status = checks.get("database", {}).get("status")
+        if db_status == HealthStatus.UNHEALTHY:
             return HealthStatus.UNHEALTHY
-        elif HealthStatus.DEGRADED in statuses:
+
+        # Disk, memory, AI uchun UNHEALTHY → DEGRADED ga tushiriladi
+        non_db_statuses = [
+            check.get("status")
+            for key, check in checks.items()
+            if key != "database"
+        ]
+        if HealthStatus.DEGRADED in non_db_statuses or HealthStatus.UNHEALTHY in non_db_statuses:
             return HealthStatus.DEGRADED
-        else:
-            return HealthStatus.HEALTHY
+
+        return HealthStatus.HEALTHY
     
     def _error_result(self, error: str) -> Dict[str, Any]:
         """Create error result."""

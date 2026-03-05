@@ -410,7 +410,9 @@ class AlertRepository:
             }
         """
         now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # PostgreSQL TIMESTAMP WITHOUT TIME ZONE kolonnasi uchun naive datetime kerak
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+        now_naive   = now.replace(tzinfo=None)
 
         try:
             # Ochiq alertlar severity bo'yicha
@@ -445,7 +447,7 @@ class AlertRepository:
                 ).where(
                     and_(
                         Alert.status == AlertStatus.RESOLVED,
-                        Alert.resolved_at >= now - timedelta(days=7),
+                        Alert.resolved_at >= now_naive - timedelta(days=7),
                     )
                 )
             )

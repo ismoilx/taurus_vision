@@ -24,7 +24,7 @@ import {
   AlertCircle, ChevronDown, ChevronLeft, ChevronRight,
   ChevronUp, ChevronsUpDown, Download, Edit2, Eye,
   FileText, Plus, RefreshCw, Search, Trash2, Upload,
-  Users, X, CheckCircle, XCircle, SkipForward,
+  Users, X, CheckCircle, XCircle, SkipForward, ImagePlus, Image,
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
@@ -201,11 +201,34 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
       : new Date().toISOString().slice(0, 10),
     notes:            initial?.notes            ?? '',
   });
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [error, setError]         = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  // Saqlangandan keyin profil rasmi haqida so'rov
+  const [pendingAnimalId, setPendingAnimalId] = useState<number | null>(null);
+  const photoRef = useRef<HTMLInputElement>(null);
 
   const set = (field: string, value: string) =>
     setForm(prev => ({ ...prev, [field]: value }));
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const uploadPhoto = async (animalId: number, asProfile: boolean) => {
+    if (!photoFile) return;
+    const fd = new FormData();
+    fd.append('file', photoFile);
+    await fetch(`/api/v1/animals/${animalId}/photos?set_as_profile=${asProfile}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('tv_access_token') ?? ''}` },
+      body: fd,
+    });
+  };
 
   const handleSubmit = async () => {
     setError('');
@@ -224,23 +247,42 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
         notes:            form.notes.trim() || null,
       };
 
+      let animalId: number;
       if (isEdit && initial) {
         await apiFetch(`/api/v1/animals/${initial.id}`, {
           method: 'PATCH',
           body: JSON.stringify(body),
         });
+        animalId = initial.id;
       } else {
-        await apiFetch('/api/v1/animals/', {
+        const created = await apiFetch<{ id: number }>('/api/v1/animals/', {
           method: 'POST',
           body: JSON.stringify(body),
         });
+        animalId = created.id;
       }
+
+      // Rasm tanlangan bo'lsa — profil haqida so'rab olamiz
+      if (photoFile) {
+        setPendingAnimalId(animalId);
+        return; // dialog ochiladi
+      }
+
       onSaved();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Xato yuz berdi');
     } finally {
       setSaving(false);
     }
+  };
+
+  // "Ha" — profil rasmi sifatida saqlash
+  const handleConfirmProfile = async (asProfile: boolean) => {
+    if (!pendingAnimalId) return;
+    try {
+      await uploadPhoto(pendingAnimalId, asProfile);
+    } catch { /* rasm yuklanmasa ham davom etamiz */ }
+    onSaved();
   };
 
   return (
@@ -328,6 +370,61 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
               className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
 
+          {/* Rasm tanlash */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">
+              Rasm (ixtiyoriy)
+            </label>
+            <div className="flex items-center gap-3">
+              {photoPreview ? (
+                <div className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-blue-200 shrink-0">
+                  <img src={photoPreview} alt="preview" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                    <X className="w-2.5 h-2.5 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <div className="w-14 h-14 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center bg-gray-50 shrink-0">
+                  <Image className="w-5 h-5 text-gray-300" />
+                </div>
+              )}
+              <button
+                onClick={() => photoRef.current?.click()}
+                className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+                <ImagePlus className="w-4 h-4" />
+                {photoPreview ? 'Almashtirish' : 'Rasm tanlash'}
+              </button>
+              <input ref={photoRef} type="file" accept="image/*"
+                className="hidden" onChange={handlePhotoChange} />
+            </div>
+          </div>
+
+          {/* Profil rasmi so'rovi dialogi */}
+          {pendingAnimalId && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-blue-900 mb-1">
+                Rasm saqlandi ✅
+              </p>
+              <p className="text-sm text-blue-700 mb-3">
+                Bu rasmni <b>profil rasmi</b> sifatida ham saqlashmi?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleConfirmProfile(true)}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
+                  Ha, saqlash
+                </button>
+                <button
+                  onClick={() => handleConfirmProfile(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors">
+                  Yo'q
+                </button>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-xl text-sm">
               <AlertCircle className="w-4 h-4 shrink-0" /> {error}
@@ -340,11 +437,13 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
             className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">
             Bekor qilish
           </button>
-          <button onClick={handleSubmit} disabled={saving}
-            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl disabled:opacity-50 transition-colors flex items-center gap-2">
-            {saving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-            {isEdit ? 'Saqlash' : "Qo'shish"}
-          </button>
+          {!pendingAnimalId && (
+            <button onClick={handleSubmit} disabled={saving}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl disabled:opacity-50 transition-colors flex items-center gap-2">
+              {saving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              {isEdit ? 'Saqlash' : "Qo'shish"}
+            </button>
+          )}
         </div>
       </div>
     </div>

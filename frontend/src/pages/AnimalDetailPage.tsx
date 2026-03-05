@@ -16,6 +16,8 @@ import {
   ArrowLeft, Scale, Activity, TrendingUp, TrendingDown,
   Minus, AlertTriangle, CheckCircle, Camera, Upload,
   Download, RefreshCw, Heart, Plus,
+  Images, ImagePlus, Trash2, Star, Clock, Stethoscope,
+  Syringe, Bandage, Pill, ClipboardList, Layers,
 } from 'lucide-react';
 import {
   AreaChart, Area, LineChart, Line,
@@ -28,10 +30,20 @@ import config from '../config';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface AnimalPhoto {
+  id: number; file_name: string; file_size?: number;
+  url: string; is_profile: boolean; created_at: string;
+}
+interface AnimalPhotosResp {
+  animal_id: number;
+  profile_image: string | null;
+  photos: AnimalPhoto[];
+}
 interface Animal {
   id: number; tag_id: string; species: string; gender: string;
   status: string; breed?: string; notes?: string;
   acquisition_date?: string; birth_date?: string;
+  profile_image?: string | null;
   total_detections: number; last_detected_at: string | null;
   created_at: string;
 }
@@ -187,6 +199,8 @@ export default function AnimalDetailPage() {
 
   // UI state (o'zgarmas — bular keshlanmaydi)
   const [tab,           setTab]           = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const [regFile,       setRegFile]       = useState<File | null>(null);
   const [regPreview,    setRegPreview]    = useState<string>('');
   const [regMsg,        setRegMsg]        = useState('');
@@ -198,6 +212,38 @@ export default function AnimalDetailPage() {
   });
   const [healthFormMsg, setHealthFormMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      await fetch(`/api/v1/animals/${id}/photos`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('tv_access_token') ?? ''}` },
+        body: fd,
+      });
+      await refetchPhotos();
+      qClient.invalidateQueries({ queryKey: ['animals', numId] });
+    } finally {
+      setUploadingPhoto(false);
+      if (galleryRef.current) galleryRef.current.value = '';
+    }
+  };
+
+  const handleSetProfile = async (photoId: number) => {
+    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}/set-profile`, { method: 'PATCH' });
+    await refetchPhotos();
+    qClient.invalidateQueries({ queryKey: ['animals', numId] });
+  };
+
+  const handleDeletePhoto = async (photoId: number) => {
+    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}`, { method: 'DELETE' });
+    await refetchPhotos();
+    qClient.invalidateQueries({ queryKey: ['animals', numId] });
+  };
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
@@ -235,6 +281,12 @@ export default function AnimalDetailPage() {
   });
   const healthRecords = healthResp?.records ?? [];
   const healthTotal   = healthResp?.total ?? 0;
+
+  const { data: photosData, refetch: refetchPhotos } = useQuery<AnimalPhotosResp>({
+    queryKey: ['animal-photos', numId],
+    queryFn:  () => apiFetch<AnimalPhotosResp>(`/api/v1/animals/${id}/photos`),
+    enabled:  !!id,
+  });
 
   // Derived ADI values
   const adiDetailed = adiTrend?.current ?? null;
@@ -423,6 +475,33 @@ export default function AnimalDetailPage() {
           }}>
             <ArrowLeft size={16} color="#6B7280" />
           </button>
+
+          {/* Profil avatar */}
+          <div
+            onClick={() => setTab('register')}
+            title="Identifikatsiya va rasmlar"
+            style={{ cursor: 'pointer', position: 'relative', flexShrink: 0 }}>
+            {photosData?.profile_image ? (
+              <img
+                src={photosData.profile_image}
+                alt={animal.tag_id}
+                style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover',
+                  border: '2px solid #E4E7ED', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+              />
+            ) : (
+              <div style={{ width: 56, height: 56, borderRadius: 14,
+                background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)',
+                border: '2px solid #BFDBFE', display: 'grid', placeItems: 'center' }}>
+                <Camera size={22} color="#93C5FD" />
+              </div>
+            )}
+            <div style={{ position: 'absolute', bottom: -3, right: -3,
+              width: 18, height: 18, borderRadius: '50%', background: '#1E3EB4',
+              display: 'grid', placeItems: 'center', border: '2px solid #fff' }}>
+              <Camera size={8} color="#fff" />
+            </div>
+          </div>
+
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0D1117', margin: 0,
@@ -445,7 +524,7 @@ export default function AnimalDetailPage() {
                   background: '#EFF6FF', color: '#1E3EB4',
                   border: '1px solid #BFDBFE',
                 }}>
-                  📷 {embedCount} rasm
+                  {embedCount} rasm
                 </span>
               )}
             </div>
@@ -551,11 +630,11 @@ export default function AnimalDetailPage() {
         background: '#F7F8FA', borderRadius: 10, padding: 4, width: 'fit-content' }}>
         {(['overview', 'adi', 'weight', 'health', 'register'] as const).map(t => (
           <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>
-            {t === 'overview'  ? '📋 Umumiy'
-           : t === 'adi'       ? '🎯 ADI'
-           : t === 'weight'    ? '⚖️ Vazn'
-           : t === 'health'    ? '🏥 Sog\'liq'
-           :                     '📷 Identifikatsiya'}
+            {t === 'overview'  ? 'Umumiy'
+           : t === 'adi'       ? 'ADI'
+           : t === 'weight'    ? 'Vazn'
+           : t === 'health'    ? "Sog'liq"
+           :                     'Identifikatsiya'}
           </button>
         ))}
       </div>
@@ -767,7 +846,7 @@ export default function AnimalDetailPage() {
             {adiChart.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#9CA3AF' }}>
                 <Activity size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                Ma'lumot yo'q — simulatsiya scriptini ishga tushiring
+                Ma'lumot yo'q
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={260}>
@@ -846,7 +925,7 @@ export default function AnimalDetailPage() {
                   background: '#F9FAFB', border: '1px solid #E4E7ED',
                   fontSize: 12, color: '#6B7280',
                 }}>
-                  💬 {adiDetailed.notes}
+                  {adiDetailed.notes}
                 </div>
               )}
             </div>
@@ -1151,9 +1230,9 @@ export default function AnimalDetailPage() {
                             : rec.severity === 'warning'  ? '#FFFBEB'
                             :                               '#F0FDF4';
                 const typeLabel: Record<string, string> = {
-                  checkup: '🩺 Tekshiruv', treatment: '💊 Davolash',
-                  vaccination: '💉 Emlash', injury: '🤕 Shikast',
-                  surgery: '🔪 Operatsiya', illness: '🤒 Kasallik', other: '📝 Boshqa',
+                  checkup: 'Tekshiruv', treatment: 'Davolash',
+                  vaccination: 'Emlash', injury: 'Shikast',
+                  surgery: 'Operatsiya', illness: 'Kasallik', other: 'Boshqa',
                 };
                 return (
                   <div key={rec.id} style={{
@@ -1180,7 +1259,7 @@ export default function AnimalDetailPage() {
                               fontSize: 11, padding: '2px 8px', borderRadius: 99,
                               background: '#F0FDF4', color: '#16A34A', border: '1px solid #BBF7D0',
                             }}>
-                              ✓ Hal etilgan
+                              Hal etilgan
                             </span>
                           )}
                         </div>
@@ -1207,21 +1286,21 @@ export default function AnimalDetailPage() {
 
                         <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
                           <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                            📅 {format(new Date(rec.recorded_at), 'dd.MM.yyyy HH:mm')}
+                            {format(new Date(rec.recorded_at), 'dd.MM.yyyy HH:mm')}
                           </span>
                           {rec.veterinarian && (
                             <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              👨‍⚕️ {rec.veterinarian}
+                              {rec.veterinarian}
                             </span>
                           )}
                           {rec.cost != null && (
                             <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              💰 {rec.cost.toLocaleString()} UZS
+                              {rec.cost?.toLocaleString()} UZS
                             </span>
                           )}
                           {rec.next_checkup_date && (
                             <span style={{ fontSize: 11, color: '#3B82F6' }}>
-                              📆 Keyingi: {format(new Date(rec.next_checkup_date), 'dd.MM.yyyy')}
+                              Keyingi: {format(new Date(rec.next_checkup_date), 'dd.MM.yyyy')}
                             </span>
                           )}
                         </div>
@@ -1252,8 +1331,8 @@ export default function AnimalDetailPage() {
         </div>
       )}
 
-      {/* ══════════════════════ REGISTER TAB ══════════════════════ */}
       {tab === 'register' && (
+        <>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
           <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
@@ -1360,11 +1439,83 @@ export default function AnimalDetailPage() {
             <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8,
               background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
               <div style={{ fontSize: 12, color: '#16A34A', fontWeight: 500 }}>
-                ✅ Saqlangan rasmlar: <b>{embedCount} ta</b>
+                Saqlangan rasmlar: <b>{embedCount} ta</b>
               </div>
             </div>
           </div>
         </div>
+
+        {/* ── Rasm Galereyasi ── */}
+        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24, marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', margin: 0 }}>
+               {photosData?.photos.length ? <span style={{ fontSize: 13, color: '#6B7280', fontWeight: 400 }}>({photosData.photos.length} ta)</span> : null}
+            </h3>
+            <button
+              onClick={() => galleryRef.current?.click()}
+              disabled={uploadingPhoto}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                borderRadius: 8, border: 'none', background: '#1E3EB4', color: '#fff',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: uploadingPhoto ? 0.6 : 1 }}>
+              {uploadingPhoto ? '⏳ Yuklanmoqda...' : "+ Rasm qo'shish"}
+            </button>
+            <input ref={galleryRef} type="file" accept="image/*"
+              style={{ display: 'none' }} onChange={handleGalleryUpload} />
+          </div>
+
+          {!photosData?.photos.length ? (
+            <div style={{ textAlign: 'center', padding: '32px 20px', color: '#9CA3AF',
+              border: '1px dashed #E4E7ED', borderRadius: 10 }}>
+              <div style={{ marginBottom: 12 }}><Images size={36} color="#D1D5DB" /></div>
+              <p style={{ fontSize: 13, marginBottom: 12 }}>Hali rasm yuklanmagan</p>
+              <button onClick={() => galleryRef.current?.click()}
+                style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid #D1D5DB',
+                  background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 12 }}>
+                Birinchi rasmni yuklash
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+              {photosData.photos.map(photo => (
+                <div key={photo.id} style={{ borderRadius: 10, overflow: 'hidden',
+                  border: photo.is_profile ? '2px solid #1E3EB4' : '1px solid #E4E7ED',
+                  background: '#F8FAFC', position: 'relative' }}>
+                  <img
+                    src={`/api/v1/animals/photos/file/${photo.id}`}
+                    alt={photo.file_name}
+                    style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }}
+                  />
+                  {photo.is_profile && (
+                    <div style={{ position: 'absolute', top: 5, left: 5,
+                      background: '#1E3EB4', color: '#fff', fontSize: 10, fontWeight: 700,
+                      padding: '2px 7px', borderRadius: 99 }}>
+                      Profil
+                    </div>
+                  )}
+                  <div style={{ padding: '7px 8px', display: 'flex', gap: 5 }}>
+                    {!photo.is_profile && (
+                      <button
+                        onClick={() => handleSetProfile(photo.id)}
+                        style={{ flex: 1, fontSize: 10, padding: '3px 0', borderRadius: 6,
+                          border: '1px solid #BFDBFE', background: '#EFF6FF',
+                          color: '#1E3EB4', cursor: 'pointer', fontWeight: 600 }}>
+                        Profil qil
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeletePhoto(photo.id)}
+                      style={{ padding: '3px 7px', borderRadius: 6,
+                        border: '1px solid #FCA5A5', background: '#FEF2F2',
+                        color: '#EF4444', cursor: 'pointer', fontSize: 12 }}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        </>
       )}
     </div>
   );

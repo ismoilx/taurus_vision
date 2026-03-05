@@ -130,6 +130,12 @@ class Animal(BaseModel):
         nullable=True,
     )
 
+    profile_image: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Profil rasmi fayl yo'li (data/images/animals/ ichida)",
+    )
+
     # ------------------------------------------------------------------ #
     # Relationships                                                        #
     # ------------------------------------------------------------------ #
@@ -190,6 +196,14 @@ class Animal(BaseModel):
         cascade="all, delete-orphan",
         lazy="dynamic",
         order_by="HealthPrediction.prediction_date.desc()",
+    )
+
+    photos: Mapped[list["AnimalPhoto"]] = relationship(  # type: ignore[name-defined]
+        "AnimalPhoto",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="AnimalPhoto.created_at.desc()",
     )
 
     # ------------------------------------------------------------------ #
