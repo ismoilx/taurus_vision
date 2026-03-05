@@ -41,6 +41,7 @@ router = APIRouter(prefix="/v1")
 router.include_router(auth.router)
 
 # --- Core Farm Data ---
+router.include_router(animals.public_router)   # Auth yo'q — rasmlar uchun
 router.include_router(animals.router)
 router.include_router(weights.router)
 router.include_router(detection.router)

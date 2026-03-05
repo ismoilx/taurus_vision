@@ -136,6 +136,12 @@ class Animal(BaseModel):
         comment="Profil rasmi fayl yo'li (data/images/animals/ ichida)",
     )
 
+    muzzle_image: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Tumshuq (muzzle) rasmi fayl yo'li — identifikatsiya uchun asosiy",
+    )
+
     # ------------------------------------------------------------------ #
     # Relationships                                                        #
     # ------------------------------------------------------------------ #

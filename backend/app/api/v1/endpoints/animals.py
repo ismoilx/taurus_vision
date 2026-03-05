@@ -783,6 +783,7 @@ async def list_animal_photos(
                 "file_size":  p.file_size,
                 "url":        f"/api/v1/animals/photos/file/{p.id}",
                 "is_profile": animal.profile_image == p.file_path,
+                "is_muzzle":  animal.muzzle_image  == p.file_path if animal.muzzle_image else False,
                 "created_at": p.created_at.isoformat(),
             }
             for p in photos
@@ -819,6 +820,37 @@ async def set_profile_photo(
     await db.commit()
 
     return {"success": True, "profile_url": f"/api/v1/animals/photos/file/{photo_id}"}
+
+
+@router.patch(
+    "/{animal_id}/photos/{photo_id}/set-muzzle",
+    summary="Tumshuq rasmini tanlash",
+    dependencies=[Depends(require_manager)],
+)
+async def set_muzzle_photo(
+    animal_id: int,
+    photo_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Ko'rsatilgan rasmni jonivorning tumshuq (muzzle) rasmi sifatida belgilaydi."""
+    from sqlalchemy import select
+    from app.models.animal import Animal
+    from app.models.animal_photo import AnimalPhoto
+
+    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
+    if not animal:
+        raise HTTPException(status_code=404, detail=f"ID {animal_id} li jonivor topilmadi")
+
+    photo = await db.scalar(
+        select(AnimalPhoto).where(AnimalPhoto.id == photo_id, AnimalPhoto.animal_id == animal_id)
+    )
+    if not photo:
+        raise HTTPException(status_code=404, detail="Rasm topilmadi")
+
+    animal.muzzle_image = photo.file_path
+    await db.commit()
+
+    return {"success": True, "muzzle_url": f"/api/v1/animals/photos/file/{photo_id}"}
 
 
 @router.delete(
@@ -863,45 +895,53 @@ async def delete_animal_photo(
     await db.commit()
 
 
-@router.get(
+# =============================================================================
+# PUBLIC ROUTER — Auth talab qilmaydi (img src uchun)
+# =============================================================================
+
+public_router = APIRouter(
+    prefix="/animals",
+    tags=["Animals"],
+    redirect_slashes=False,
+    # Intentionally NO auth dependency — browser img src token yubora olmaydi
+)
+
+
+@public_router.get(
     "/photos/file/{photo_id}",
-    summary="Rasmni ko'rsatish (binary)",
+    summary="Rasmni ko'rsatish (public, auth yo'q)",
     include_in_schema=False,
 )
 async def serve_animal_photo(
     photo_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Rasm faylini binary sifatida qaytaradi (img src uchun)."""
+    """Rasm faylini binary sifatida qaytaradi. Auth talab qilmaydi — img src uchun."""
     import os
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
     from sqlalchemy import select
     from app.models.animal_photo import AnimalPhoto
 
     photo = await db.scalar(select(AnimalPhoto).where(AnimalPhoto.id == photo_id))
-    if not photo or not os.path.exists(photo.file_path):
+    if not photo:
         raise HTTPException(status_code=404, detail="Rasm topilmadi")
 
-    return FileResponse(photo.file_path)
+    # Absolute path — Docker working dir /app
+    abs_path = photo.file_path if os.path.isabs(photo.file_path) else os.path.join("/app", photo.file_path)
 
+    if not os.path.exists(abs_path):
+        # Try relative path as fallback
+        if os.path.exists(photo.file_path):
+            abs_path = photo.file_path
+        else:
+            raise HTTPException(status_code=404, detail=f"Fayl topilmadi: {photo.file_path}")
 
-@router.get(
-    "/photos/file/profile/{animal_id}",
-    summary="Profil rasmini ko'rsatish",
-    include_in_schema=False,
-)
-async def serve_profile_photo(
-    animal_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Jonivorning profil rasmini qaytaradi."""
-    import os
-    from fastapi.responses import FileResponse
-    from sqlalchemy import select
-    from app.models.animal import Animal
+    ext = os.path.splitext(abs_path)[1].lower()
+    media_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    media_type = media_map.get(ext, "image/jpeg")
 
-    animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
-    if not animal or not animal.profile_image or not os.path.exists(animal.profile_image):
-        raise HTTPException(status_code=404, detail="Profil rasmi topilmadi")
-
-    return FileResponse(animal.profile_image)
+    return FileResponse(
+        abs_path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

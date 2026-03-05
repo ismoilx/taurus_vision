@@ -1,1002 +1,1189 @@
-/**
- * AnimalDetailPage — Jonivor shaxsiy sahifasi
- *
- * Tuzatilgan buglar:
- *   ✅ ADI komponentlar: adi.scores.feeding_score (oldin: adi.feeding_score)
- *   ✅ data_quality (oldin: data_completeness)
- *   ✅ adiDetailed state — trend.current dan olinadi
- *   ✅ (adiToday as any) hack olib tashlandi
- *   ✅ Barcha 8 komponent ko'rsatiladi (mavjud bo'lganda)
- */
-
-import { useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState, useRef, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Scale, Activity, TrendingUp, TrendingDown,
-  Minus, AlertTriangle, CheckCircle, Camera, Upload,
-  Download, RefreshCw, Heart, Plus,
-  Images, ImagePlus, Trash2, Star, Clock, Stethoscope,
-  Syringe, Bandage, Pill, ClipboardList, Layers,
-} from 'lucide-react';
+  ArrowLeft, Camera, Upload, Star, Scan, Trash2,
+  ZoomIn, X, RefreshCw, CheckCircle, AlertTriangle,
+  TrendingUp, TrendingDown, Minus, Scale, Activity,
+  Heart, Plus, Download, ChevronRight,
+} from "lucide-react";
 import {
-  AreaChart, Area, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, RadialBarChart, RadialBar,
-} from 'recharts';
-import { format, parseISO } from 'date-fns';
-import { apiFetch } from '../utils/apiFetch';
-import config from '../config';
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
+} from "recharts";
+import { format, parseISO } from "date-fns";
+import { apiFetch } from "../utils/apiFetch";
+import config from "../config";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-interface AnimalPhoto {
-  id: number; file_name: string; file_size?: number;
-  url: string; is_profile: boolean; created_at: string;
+interface Photo {
+  id: number;
+  file_name: string;
+  file_size?: number;
+  url: string;
+  is_profile: boolean;
+  is_muzzle: boolean;
+  created_at: string;
 }
-interface AnimalPhotosResp {
+
+interface PhotosResp {
   animal_id: number;
-  profile_image: string | null;
-  photos: AnimalPhoto[];
+  photos: Photo[];
 }
+
 interface Animal {
   id: number; tag_id: string; species: string; gender: string;
   status: string; breed?: string; notes?: string;
   acquisition_date?: string; birth_date?: string;
-  profile_image?: string | null;
+  profile_image?: string | null; muzzle_image?: string | null;
   total_detections: number; last_detected_at: string | null;
   created_at: string;
 }
 
 interface WeightMeasurement {
-  id: number; animal_id: number; estimated_weight_kg: number;
+  id: number; estimated_weight_kg: number;
   confidence_score: number; camera_id: string; timestamp: string;
 }
 
-// Backend ADILogResponse.scores ichidagi komponentlar
-interface ADIComponentScores {
-  activity_score?:   number;
-  feeding_score?:    number;
-  drinking_score?:   number;
-  movement_score?:   number;
-  growth_score?:     number;
-  social_score?:     number;
-  sensor_score?:     number;
-  veterinary_score?: number;
-}
-
-// Backend ADILogResponse — to'liq (komponentlar bilan)
-interface ADILogDetailed {
-  id:               number;
-  animal_id:        number;
-  calculation_date: string;
-  calculated_at:    string;
-  adi_score:        number;
-  category:         string;
-  scores:           ADIComponentScores;
-  data_quality:     number;
-  notes?:           string;
-}
-
-// Grafik uchun soddalashtirilgan yozuv
 interface ADILog {
-  id: number; animal_id: number; calculation_date: string;
+  id: number; calculation_date: string;
   adi_score: number; category: string;
+  scores?: {
+    activity_score?: number; feeding_score?: number;
+    drinking_score?: number; movement_score?: number;
+    growth_score?: number;
+  };
 }
 
-// Backend ADITrendResponse
 interface ADITrend {
-  trend:      { date: string; score: number; category: string }[];
-  avg_score?: number;
-  min_score?: number;
-  max_score?: number;
-  current?:   ADILogDetailed;   // ← eng so'nggi kunning to'liq ADI (komponentlar bilan)
+  trend: { date: string; score: number; category: string }[];
+  current?: ADILog;
 }
 
 interface HealthRecord {
-  id: number;
-  animal_id: number;
-  record_type: string;
-  severity: string;
-  diagnosis: string;
-  symptoms?: string;
-  treatment?: string;
-  medication?: string;
-  veterinarian?: string;
-  cost?: number;
-  recorded_at: string;
-  next_checkup_date?: string;
-  is_resolved: boolean;
-  resolved_at?: string;
+  id: number; record_type: string; severity: string;
+  diagnosis: string; symptoms?: string; treatment?: string;
+  medication?: string; veterinarian?: string; cost?: number;
+  recorded_at: string; is_resolved: boolean;
 }
 
-interface HealthRecordListResponse {
-  records: HealthRecord[];
-  total: number;
-  skip: number;
-  limit: number;
+interface HealthResp { records: HealthRecord[]; total: number; }
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const CAT_STYLE = {
+  healthy:  { label: "Sog'lom",  color: "#16A34A", bg: "#F0FDF4", ring: "#22C55E" },
+  average:  { label: "O'rtacha", color: "#D97706", bg: "#FFFBEB", ring: "#FBBF24" },
+  warning:  { label: "Diqqat",    color: "#EA580C", bg: "#FFF7ED", ring: "#FB923C" },
+  critical: { label: "Kritik",    color: "#DC2626", bg: "#FEF2F2", ring: "#F87171" },
+} as const;
+
+const RECORD_TYPE_LABELS: Record<string, string> = {
+  checkup: "Tekshiruv", treatment: "Davolash", vaccination: "Emlash",
+  injury: "Shikast", surgery: "Operatsiya", illness: "Kasallik", other: "Boshqa",
+};
+
+// ─── Image URL helper ─────────────────────────────────────────────────────────
+// config.apiUrl is "" (empty) → relative URL works with Vite proxy
+const photoUrl = (id: number) =>
+  `${config.apiUrl || ""}/api/v1/animals/photos/file/${id}`;
+
+// ─── Spinner ──────────────────────────────────────────────────────────────────
+
+function Spinner({ size = 20, color = "#2563EB" }: { size?: number; color?: string }) {
+  return (
+    <span style={{
+      display: "inline-block", width: size, height: size, borderRadius: "50%",
+      border: `2.5px solid ${color}22`, borderTopColor: color,
+      animation: "spin .65s linear infinite", flexShrink: 0,
+    }} />
+  );
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── AvatarSlot — profil/muzzle rasm slotu ────────────────────────────────────
 
-const CATEGORY_CONFIG = {
-  healthy:  { label: 'Sog\'lom',    color: '#22C55E', bg: '#F0FDF4', border: '#BBF7D0' },
-  average:  { label: 'O\'rtacha',   color: '#F59E0B', bg: '#FFFBEB', border: '#FDE68A' },
-  warning:  { label: 'Diqqat',      color: '#F97316', bg: '#FFF7ED', border: '#FED7AA' },
-  critical: { label: 'Kritik',      color: '#EF4444', bg: '#FEF2F2', border: '#FECACA' },
-};
-
-const TREND_CONFIG = {
-  improving:         { label: 'Yaxshilanmoqda', icon: TrendingUp,   color: '#22C55E' },
-  declining:         { label: 'Yomonlashmoqda', icon: TrendingDown,  color: '#EF4444' },
-  stable:            { label: 'Barqaror',        icon: Minus,         color: '#6B7280' },
-  insufficient_data: { label: 'Ma\'lumot yetarli emas', icon: Minus, color: '#9CA3AF' },
-};
-
-// ─── ADI Score Ring ───────────────────────────────────────────────────────────
-
-function ADIRing({ score, category }: { score: number; category: string }) {
-  const cfg = CATEGORY_CONFIG[category as keyof typeof CATEGORY_CONFIG]
-           || CATEGORY_CONFIG.average;
-
-  const data = [
-    { value: score,       fill: cfg.color },
-    { value: 100 - score, fill: '#F3F4F6' },
-  ];
+function AvatarSlot({
+  label, sublabel, photoId, accentColor, borderColor, icon: Icon,
+  onClick,
+}: {
+  label: string; sublabel: string;
+  photoId?: number | null;
+  accentColor: string; borderColor: string;
+  icon: React.ElementType;
+  onClick: () => void;
+}) {
+  const [err, setErr] = useState(false);
 
   return (
-    <div style={{ position: 'relative', width: 140, height: 140 }}>
-      <RadialBarChart
-        width={140} height={140}
-        cx={70} cy={70}
-        innerRadius={50} outerRadius={65}
-        startAngle={225} endAngle={-45}
-        data={data} barSize={12}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+      {/* Image box */}
+      <div
+        role="button"
+        onClick={onClick}
+        title={`${label} ni o'zgartirish`}
+        style={{
+          width: 120, height: 120, borderRadius: 20, overflow: "hidden",
+          border: `3px solid ${photoId && !err ? accentColor : "#D1D5DB"}`,
+          background: "#F9FAFB", cursor: "pointer", position: "relative",
+          boxShadow: photoId && !err
+            ? `0 0 0 4px ${accentColor}22, 0 4px 20px ${accentColor}33`
+            : "0 2px 8px rgba(0,0,0,0.08)",
+          transition: "box-shadow .2s, transform .2s",
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLElement).style.transform = "scale(1.04)";
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLElement).style.transform = "";
+        }}
       >
-        <RadialBar dataKey="value" cornerRadius={6} background={{ fill: '#F3F4F6' }} />
-      </RadialBarChart>
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-      }}>
-        <span style={{ fontSize: 28, fontWeight: 700, color: cfg.color, lineHeight: 1 }}>
-          {score.toFixed(0)}
-        </span>
-        <span style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>/ 100</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Component Bar ────────────────────────────────────────────────────────────
-
-function ComponentBar({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: '#6B7280' }}>{label}</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{value.toFixed(0)}</span>
-      </div>
-      <div style={{ height: 6, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+        {photoId && !err ? (
+          <img
+            src={photoUrl(photoId)}
+            alt={label}
+            onError={() => setErr(true)}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+        ) : (
+          <div style={{
+            width: "100%", height: "100%", display: "flex",
+            flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 6, background: "#F1F5F9",
+          }}>
+            <Icon size={28} color="#9CA3AF" />
+            <span style={{ fontSize: 10, color: "#9CA3AF", textAlign: "center", padding: "0 8px" }}>
+              Tanlash uchun bosing
+            </span>
+          </div>
+        )}
+        {/* Edit overlay */}
         <div style={{
-          height: '100%', width: `${value}%`,
-          background: color, borderRadius: 3,
-          transition: 'width 0.5s ease',
-        }} />
+          position: "absolute", inset: 0,
+          background: "linear-gradient(to top, rgba(0,0,0,.5) 0%, transparent 55%)",
+          display: "flex", alignItems: "flex-end", justifyContent: "center",
+          paddingBottom: 8, opacity: 0, transition: "opacity .2s",
+        }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = "1"}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = "0"}
+        >
+          <Camera size={16} color="#fff" />
+        </div>
+      </div>
+
+      {/* Labels */}
+      <div style={{ textAlign: "center" }}>
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+          background: photoId && !err ? `${accentColor}18` : "#F1F5F9",
+          color: photoId && !err ? accentColor : "#6B7280",
+          border: `1px solid ${photoId && !err ? `${accentColor}44` : "#E5E7EB"}`,
+          cursor: "pointer",
+        }} onClick={onClick}>
+          <Icon size={10} />
+          {photoId && !err ? "Almashtirish" : "Tanlash"}
+        </div>
+        <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 4 }}>{label}</div>
+        <div style={{ fontSize: 9, color: "#C4C9D4" }}>{sublabel}</div>
       </div>
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Lightbox ─────────────────────────────────────────────────────────────────
+
+function Lightbox({ photoId, onClose }: { photoId: number; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,.88)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        animation: "fadein .15s ease",
+      }}
+    >
+      <button
+        onClick={onClose}
+        style={{
+          position: "absolute", top: 20, right: 20, width: 40, height: 40,
+          borderRadius: "50%", border: "2px solid rgba(255,255,255,.25)",
+          background: "rgba(255,255,255,.1)", color: "#fff",
+          cursor: "pointer", display: "grid", placeItems: "center",
+        }}
+      >
+        <X size={18} />
+      </button>
+      <img
+        src={photoUrl(photoId)}
+        alt=""
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "92vw", maxHeight: "92vh", borderRadius: 12,
+          objectFit: "contain", boxShadow: "0 32px 80px rgba(0,0,0,.6)",
+          animation: "fadein .2s ease",
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── Picker Modal ─────────────────────────────────────────────────────────────
+
+function PickerModal({
+  mode, photos, onSelect, onClose,
+}: {
+  mode: "profile" | "muzzle";
+  photos: Photo[];
+  onSelect: (p: Photo) => void;
+  onClose: () => void;
+}) {
+  const isProfile = mode === "profile";
+  const accentColor = isProfile ? "#2563EB" : "#7C3AED";
+  const currentId = photos.find(p => isProfile ? p.is_profile : p.is_muzzle)?.id;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 8000,
+        background: "rgba(15,23,42,.72)", backdropFilter: "blur(8px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 20, animation: "fadein .15s ease",
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: 20, width: "100%", maxWidth: 640,
+          maxHeight: "82vh", display: "flex", flexDirection: "column",
+          boxShadow: "0 32px 80px rgba(0,0,0,.28)",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: "20px 24px 16px", borderBottom: "1px solid #F1F5F9",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          flexShrink: 0,
+        }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#0F172A" }}>
+              {isProfile ? "📸 Profil rasmini tanlang" : "🔬 Tumshuq (Muzzle) rasmini tanlang"}
+            </h2>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: "#94A3B8" }}>
+              {isProfile
+                ? "Jonivorning asosiy ko'rinish rasmi — ro'yxat, hisobotlarda ko'rinadi"
+                : "AI identifikatsiya uchun ishlatiladigan tumshuq rasmi"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32, height: 32, borderRadius: "50%", border: "none",
+              background: "#F1F5F9", cursor: "pointer", display: "grid", placeItems: "center",
+            }}
+          >
+            <X size={15} color="#64748B" />
+          </button>
+        </div>
+
+        {/* Grid */}
+        <div style={{ overflowY: "auto", padding: 20, flex: 1 }}>
+          {photos.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "48px 0" }}>
+              <Camera size={40} color="#CBD5E1" style={{ margin: "0 auto 12px", display: "block" }} />
+              <p style={{ color: "#94A3B8", fontSize: 14 }}>
+                Hali rasm yuklanmagan. Avval rasm yuklang.
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(148px, 1fr))",
+              gap: 12,
+            }}>
+              {photos.map(p => {
+                const isCurrent = p.id === currentId;
+                const [imgErr, setImgErr] = useState(false);
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => onSelect(p)}
+                    style={{
+                      borderRadius: 14, overflow: "hidden", cursor: "pointer",
+                      border: `${isCurrent ? 3 : 2}px solid ${isCurrent ? accentColor : "#E2E8F0"}`,
+                      boxShadow: isCurrent ? `0 0 0 3px ${accentColor}33` : "none",
+                      transition: "all .15s", background: "#F8FAFC",
+                    }}
+                    onMouseEnter={e => {
+                      if (!isCurrent) {
+                        (e.currentTarget as HTMLElement).style.borderColor = `${accentColor}88`;
+                        (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)";
+                        (e.currentTarget as HTMLElement).style.boxShadow = "0 6px 20px rgba(0,0,0,.1)";
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (!isCurrent) {
+                        (e.currentTarget as HTMLElement).style.borderColor = "#E2E8F0";
+                        (e.currentTarget as HTMLElement).style.transform = "";
+                        (e.currentTarget as HTMLElement).style.boxShadow = "none";
+                      }
+                    }}
+                  >
+                    <div style={{ position: "relative", height: 128 }}>
+                      {!imgErr ? (
+                        <img
+                          src={photoUrl(p.id)}
+                          alt={p.file_name}
+                          onError={() => setImgErr(true)}
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: "100%", height: "100%", background: "#F1F5F9",
+                          display: "grid", placeItems: "center",
+                        }}>
+                          <Camera size={24} color="#CBD5E1" />
+                        </div>
+                      )}
+                      {isCurrent && (
+                        <div style={{
+                          position: "absolute", top: 6, right: 6, width: 22, height: 22,
+                          borderRadius: "50%", background: accentColor,
+                          display: "grid", placeItems: "center",
+                          border: "2px solid #fff",
+                        }}>
+                          <CheckCircle size={13} color="#fff" />
+                        </div>
+                      )}
+                    </div>
+                    <div style={{
+                      padding: "6px 8px", background: "#fff",
+                      borderTop: "1px solid #F1F5F9",
+                      fontSize: 10, color: "#94A3B8", textAlign: "center",
+                    }}>
+                      {format(new Date(p.created_at), "dd.MM.yy HH:mm")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div style={{
+          padding: "10px 24px 14px", borderTop: "1px solid #F1F5F9",
+          flexShrink: 0, background: "#FAFAFA", borderRadius: "0 0 20px 20px",
+        }}>
+          <p style={{ margin: 0, fontSize: 11, color: "#94A3B8", textAlign: "center" }}>
+            Kerakli rasmga bosing. Yangi rasm yuklash uchun "Rasmlar" tabiga o'ting.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Photo Card ───────────────────────────────────────────────────────────────
+
+function PhotoCard({
+  photo, onSetProfile, onSetMuzzle, onDelete, onZoom,
+}: {
+  photo: Photo;
+  onSetProfile: () => void;
+  onSetMuzzle: () => void;
+  onDelete: () => void;
+  onZoom: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [imgErr, setImgErr] = useState(false);
+
+  const borderColor = photo.is_profile ? "#2563EB" : photo.is_muzzle ? "#7C3AED" : "#E2E8F0";
+  const borderW = photo.is_profile || photo.is_muzzle ? "2.5px" : "1.5px";
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        borderRadius: 14, overflow: "hidden", background: "#fff",
+        border: `${borderW} solid ${borderColor}`,
+        boxShadow: hovered ? "0 10px 28px rgba(0,0,0,.12)" : "0 1px 4px rgba(0,0,0,.06)",
+        transform: hovered ? "translateY(-3px)" : "none",
+        transition: "all .2s",
+      }}
+    >
+      {/* Image area */}
+      <div style={{ position: "relative", height: 190, overflow: "hidden", background: "#F8FAFC" }}>
+        {!imgErr ? (
+          <img
+            src={photoUrl(photo.id)}
+            alt={photo.file_name}
+            onError={() => setImgErr(true)}
+            style={{
+              width: "100%", height: "100%", objectFit: "cover", display: "block",
+              transition: "transform .3s",
+              transform: hovered ? "scale(1.06)" : "scale(1)",
+            }}
+          />
+        ) : (
+          <div style={{
+            width: "100%", height: "100%", display: "flex",
+            flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 8, background: "#F1F5F9",
+          }}>
+            <Camera size={32} color="#CBD5E1" />
+            <span style={{ fontSize: 10, color: "#94A3B8", textAlign: "center",
+              padding: "0 12px", wordBreak: "break-word" }}>
+              {photo.file_name}
+            </span>
+          </div>
+        )}
+
+        {/* Status badges */}
+        <div style={{
+          position: "absolute", top: 8, left: 8,
+          display: "flex", flexDirection: "column", gap: 4,
+        }}>
+          {photo.is_profile && (
+            <span style={{
+              background: "#2563EB", color: "#fff", fontSize: 10, fontWeight: 700,
+              padding: "2px 8px", borderRadius: 6,
+              boxShadow: "0 2px 6px rgba(37,99,235,.4)",
+            }}>
+              ★ Profil
+            </span>
+          )}
+          {photo.is_muzzle && (
+            <span style={{
+              background: "#7C3AED", color: "#fff", fontSize: 10, fontWeight: 700,
+              padding: "2px 8px", borderRadius: 6,
+              boxShadow: "0 2px 6px rgba(124,58,237,.4)",
+            }}>
+              ⬡ Muzzle
+            </span>
+          )}
+        </div>
+
+        {/* Hover dark overlay + zoom */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "linear-gradient(to top, rgba(0,0,0,.55) 0%, transparent 55%)",
+          opacity: hovered ? 1 : 0, transition: "opacity .2s",
+          display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+          padding: "0 10px 10px",
+        }}>
+          <button
+            onClick={onZoom}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "5px 10px", borderRadius: 7, border: "1.5px solid rgba(255,255,255,.7)",
+              background: "rgba(255,255,255,.15)", backdropFilter: "blur(4px)",
+              color: "#fff", fontSize: 11, fontWeight: 500, cursor: "pointer",
+            }}
+          >
+            <ZoomIn size={13} /> Ko'rish
+          </button>
+          <button
+            onClick={onDelete}
+            style={{
+              width: 30, height: 30, borderRadius: "50%",
+              border: "1.5px solid rgba(255,255,255,.7)",
+              background: "rgba(239,68,68,.7)", backdropFilter: "blur(4px)",
+              display: "grid", placeItems: "center", cursor: "pointer",
+            }}
+          >
+            <Trash2 size={13} color="#fff" />
+          </button>
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{
+        padding: "10px 10px 10px",
+        background: photo.is_profile ? "#EFF6FF" : photo.is_muzzle ? "#F5F3FF" : "#FAFAFA",
+        borderTop: `1px solid ${borderColor}44`,
+        display: "flex", gap: 6,
+      }}>
+        <button
+          onClick={onSetProfile}
+          title={photo.is_profile ? "Profil rasmi (tanlangan)" : "Profil rasmi sifatida belgilash"}
+          style={{
+            flex: 1, height: 30, borderRadius: 8, border: "none", cursor: "pointer",
+            background: photo.is_profile ? "#2563EB" : "#E0E7FF",
+            color: photo.is_profile ? "#fff" : "#2563EB",
+            fontSize: 11, fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            transition: "all .15s",
+          }}
+        >
+          <Star size={11} fill={photo.is_profile ? "#fff" : "none"} />
+          Profil
+        </button>
+        <button
+          onClick={onSetMuzzle}
+          title={photo.is_muzzle ? "Muzzle rasmi (tanlangan)" : "AI uchun muzzle rasmi"}
+          style={{
+            flex: 1, height: 30, borderRadius: 8, border: "none", cursor: "pointer",
+            background: photo.is_muzzle ? "#7C3AED" : "#EDE9FE",
+            color: photo.is_muzzle ? "#fff" : "#7C3AED",
+            fontSize: 11, fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+            transition: "all .15s",
+          }}
+        >
+          <Scan size={11} />
+          Muzzle
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AnimalDetailPage() {
   const { id }   = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const qClient  = useQueryClient();
+  const nav      = useNavigate();
+  const qc       = useQueryClient();
   const numId    = Number(id);
 
-  // UI state (o'zgarmas — bular keshlanmaydi)
-  const [tab,           setTab]           = useState<'overview'|'adi'|'weight'|'health'|'register'>('overview');
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const galleryRef = useRef<HTMLInputElement>(null);
-  const [regFile,       setRegFile]       = useState<File | null>(null);
-  const [regPreview,    setRegPreview]    = useState<string>('');
-  const [regMsg,        setRegMsg]        = useState('');
-  const [showHealthForm, setShowHealthForm] = useState(false);
-  const [healthForm,    setHealthForm]    = useState({
-    record_type: 'checkup', severity: 'normal',
-    diagnosis: '', symptoms: '', treatment: '',
-    medication: '', veterinarian: '', cost: '',
+  const [tab, setTab]           = useState<"overview"|"adi"|"weight"|"health"|"photos">("overview");
+  const [picker, setPicker]     = useState<"profile"|"muzzle"|null>(null);
+  const [lightbox, setLightbox] = useState<number|null>(null);
+  const [uploading, setUploading] = useState(0);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  const [showHForm, setShowHForm] = useState(false);
+  const [hMsg, setHMsg]           = useState("");
+  const [hForm, setHForm] = useState({
+    record_type: "checkup", severity: "normal", diagnosis: "",
+    symptoms: "", treatment: "", medication: "", veterinarian: "", cost: "",
   });
-  const [healthFormMsg, setHealthFormMsg] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !id) return;
-    setUploadingPhoto(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await fetch(`/api/v1/animals/${id}/photos`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('tv_access_token') ?? ''}` },
-        body: fd,
-      });
-      await refetchPhotos();
-      qClient.invalidateQueries({ queryKey: ['animals', numId] });
-    } finally {
-      setUploadingPhoto(false);
-      if (galleryRef.current) galleryRef.current.value = '';
-    }
-  };
+  // ── Queries ────────────────────────────────────────────────────────────────
 
-  const handleSetProfile = async (photoId: number) => {
-    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}/set-profile`, { method: 'PATCH' });
-    await refetchPhotos();
-    qClient.invalidateQueries({ queryKey: ['animals', numId] });
-  };
-
-  const handleDeletePhoto = async (photoId: number) => {
-    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}`, { method: 'DELETE' });
-    await refetchPhotos();
-    qClient.invalidateQueries({ queryKey: ['animals', numId] });
-  };
-
-  // ── Queries ───────────────────────────────────────────────────────────────
-
-  const { data: animal, isLoading: loading, isError, error } = useQuery({
-    queryKey: ['animals', numId],
+  const { data: animal, isLoading, isError, error } = useQuery({
+    queryKey: ["animals", numId],
     queryFn:  () => apiFetch<Animal>(`/api/v1/animals/${id}`),
     enabled:  !!id,
   });
 
+  const { data: photosData, refetch: refetchPhotos } = useQuery<PhotosResp>({
+    queryKey: ["animal-photos", numId],
+    queryFn:  () => apiFetch<PhotosResp>(`/api/v1/animals/${id}/photos`),
+    enabled:  !!id,
+  });
+
   const { data: weightsRaw } = useQuery({
-    queryKey: ['weights', numId],
+    queryKey: ["weights", numId],
     queryFn:  () => apiFetch<any>(`/api/v1/weights/animal/${id}`),
     enabled:  !!id,
   });
-  const weights: WeightMeasurement[] = Array.isArray(weightsRaw)
-    ? weightsRaw : (weightsRaw?.items ?? []);
 
   const { data: adiTrend } = useQuery({
-    queryKey: ['adi', 'trend', numId],
+    queryKey: ["adi", "trend", numId],
     queryFn:  () => apiFetch<ADITrend>(`/api/v1/adi/animal/${id}/trend?days=30`),
     enabled:  !!id,
   });
 
   const { data: embsRaw } = useQuery({
-    queryKey: ['embeddings', numId],
+    queryKey: ["embeddings", numId],
     queryFn:  () => apiFetch<any[]>(`/api/v1/identification/${id}/embeddings`),
     enabled:  !!id,
   });
+
+  const { data: healthResp, isFetching: healthFetching } = useQuery({
+    queryKey: ["health", "records", numId],
+    queryFn:  () => apiFetch<HealthResp>(`/api/v1/health/animals/${id}/records?skip=0&limit=50`),
+    enabled:  !!id && tab === "health",
+  });
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const photos = photosData?.photos ?? [];
+  const profilePhoto = photos.find(p => p.is_profile);
+  const muzzlePhoto  = photos.find(p => p.is_muzzle);
+
+  const weights: WeightMeasurement[] = Array.isArray(weightsRaw)
+    ? weightsRaw : (weightsRaw?.items ?? []);
+
   const embedCount = embsRaw?.length ?? 0;
-
-  const { data: healthResp, isFetching: healthLoading } = useQuery({
-    queryKey: ['health', 'records', numId],
-    queryFn:  () => apiFetch<HealthRecordListResponse>(`/api/v1/health/animals/${id}/records?skip=0&limit=50`),
-    enabled:  !!id && tab === 'health',
-  });
   const healthRecords = healthResp?.records ?? [];
-  const healthTotal   = healthResp?.total ?? 0;
 
-  const { data: photosData, refetch: refetchPhotos } = useQuery<AnimalPhotosResp>({
-    queryKey: ['animal-photos', numId],
-    queryFn:  () => apiFetch<AnimalPhotosResp>(`/api/v1/animals/${id}/photos`),
-    enabled:  !!id,
-  });
-
-  // Derived ADI values
-  const adiDetailed = adiTrend?.current ?? null;
-  const adiToday = adiDetailed
-    ? { id: adiDetailed.id, animal_id: adiDetailed.animal_id,
-        calculation_date: adiDetailed.calculation_date,
-        adi_score: adiDetailed.adi_score, category: adiDetailed.category }
-    : adiTrend?.trend?.length
-    ? (() => { const last = adiTrend.trend[adiTrend.trend.length-1];
-        return { id: 0, animal_id: numId,
-          calculation_date: last.date, adi_score: last.score, category: last.category }; })()
+  const adiNow = adiTrend?.current ?? null;
+  const adiCfg = adiNow
+    ? (CAT_STYLE[adiNow.category as keyof typeof CAT_STYLE] ?? CAT_STYLE.average)
     : null;
-  const adiLogs: ADILog[] = (adiTrend?.trend ?? []).map((p, i) => ({
-    id: i, animal_id: numId,
-    calculation_date: p.date, adi_score: p.score, category: p.category,
-  }));
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  const adiChartData = [...(adiTrend?.trend ?? [])]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30)
+    .map(a => ({ date: format(parseISO(a.date), "dd/MM"), score: +a.score.toFixed(1) }));
 
-  const createHealthMutation = useMutation({
+  const weightsSorted = [...weights]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  const weightChartData = weightsSorted.slice(-30)
+    .map(w => ({ date: format(new Date(w.timestamp), "dd/MM"), weight: +w.estimated_weight_kg.toFixed(1) }));
+
+  const latestW = weightsSorted.length ? weightsSorted[weightsSorted.length - 1]?.estimated_weight_kg : null;
+  const prev7W  = weightsSorted.length > 7 ? weightsSorted[weightsSorted.length - 8]?.estimated_weight_kg : null;
+  const wChange = latestW != null && prev7W != null ? latestW - prev7W : null;
+
+  const trend = (() => {
+    const arr = adiTrend?.trend ?? [];
+    if (arr.length < 3) return "stable";
+    const d = arr[arr.length - 1].score - arr[0].score;
+    return d > 5 ? "improving" : d < -5 ? "declining" : "stable";
+  })();
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !id) return;
+    setUploading(files.length);
+    try {
+      await Promise.all(files.map(f => {
+        const fd = new FormData();
+        fd.append("file", f);
+        return fetch(`${config.apiUrl || ""}/api/v1/animals/${id}/photos`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("tv_access_token") ?? ""}`,
+          },
+          body: fd,
+        });
+      }));
+      await refetchPhotos();
+      qc.invalidateQueries({ queryKey: ["animals", numId] });
+    } finally {
+      setUploading(0);
+      if (uploadRef.current) uploadRef.current.value = "";
+    }
+  }, [id, numId, refetchPhotos, qc]);
+
+  const handlePickerSelect = async (photo: Photo) => {
+    if (!picker) return;
+    const endpoint = picker === "profile"
+      ? `/api/v1/animals/${id}/photos/${photo.id}/set-profile`
+      : `/api/v1/animals/${id}/photos/${photo.id}/set-muzzle`;
+    await apiFetch(endpoint, { method: "PATCH" });
+    await refetchPhotos();
+    qc.invalidateQueries({ queryKey: ["animals", numId] });
+    setPicker(null);
+  };
+
+  const setProfilePhoto = async (photoId: number) => {
+    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}/set-profile`, { method: "PATCH" });
+    await refetchPhotos(); qc.invalidateQueries({ queryKey: ["animals", numId] });
+  };
+  const setMuzzlePhoto = async (photoId: number) => {
+    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}/set-muzzle`, { method: "PATCH" });
+    await refetchPhotos(); qc.invalidateQueries({ queryKey: ["animals", numId] });
+  };
+  const deletePhoto = async (photoId: number) => {
+    await apiFetch(`/api/v1/animals/${id}/photos/${photoId}`, { method: "DELETE" });
+    await refetchPhotos(); qc.invalidateQueries({ queryKey: ["animals", numId] });
+  };
+
+  const createHealthMut = useMutation({
     mutationFn: () => apiFetch(`/api/v1/health/animals/${id}/records`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({
-        record_type:  healthForm.record_type,
-        severity:     healthForm.severity,
-        diagnosis:    healthForm.diagnosis,
-        symptoms:     healthForm.symptoms    || undefined,
-        treatment:    healthForm.treatment   || undefined,
-        medication:   healthForm.medication  || undefined,
-        veterinarian: healthForm.veterinarian || undefined,
-        cost:         healthForm.cost ? parseFloat(healthForm.cost) : undefined,
+        record_type: hForm.record_type, severity: hForm.severity,
+        diagnosis:   hForm.diagnosis,
+        symptoms:     hForm.symptoms     || undefined,
+        treatment:    hForm.treatment    || undefined,
+        medication:   hForm.medication   || undefined,
+        veterinarian: hForm.veterinarian || undefined,
+        cost: hForm.cost ? parseFloat(hForm.cost) : undefined,
       }),
     }),
     onSuccess: () => {
-      setHealthFormMsg("✅ Yozuv muvaffaqiyatli qo'shildi!");
-      setHealthForm({ record_type: 'checkup', severity: 'normal',
-        diagnosis: '', symptoms: '', treatment: '', medication: '', veterinarian: '', cost: '' });
-      setShowHealthForm(false);
-      qClient.invalidateQueries({ queryKey: ['health', 'records', numId] });
+      setHMsg("✅ Saqlandi!");
+      setShowHForm(false);
+      setHForm({ record_type: "checkup", severity: "normal", diagnosis: "",
+        symptoms: "", treatment: "", medication: "", veterinarian: "", cost: "" });
+      qc.invalidateQueries({ queryKey: ["health", "records", numId] });
     },
-    onError: (e: Error) => setHealthFormMsg(`❌ ${e.message}`),
+    onError: (e: Error) => setHMsg(`❌ ${e.message}`),
   });
 
-  const resolveHealthMutation = useMutation({
-    mutationFn: (recordId: number) => apiFetch(`/api/v1/health/records/${recordId}/resolve`, { method: 'POST' }),
-    onSuccess: () => qClient.invalidateQueries({ queryKey: ['health', 'records', numId] }),
+  const resolveHealthMut = useMutation({
+    mutationFn: (rid: number) =>
+      apiFetch(`/api/v1/health/records/${rid}/resolve`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["health", "records", numId] }),
   });
 
-  async function handleHealthCreate() {
-    if (!id || !healthForm.diagnosis.trim()) return;
-    setHealthFormMsg('');
-    createHealthMutation.mutate();
-  }
-  const handleHealthResolve = (recordId: number) => resolveHealthMutation.mutate(recordId);
+  // ── Styles ─────────────────────────────────────────────────────────────────
 
+  const card: React.CSSProperties = {
+    background: "#fff", border: "1px solid #E2E8F0",
+    borderRadius: 16, padding: "20px 22px",
+  };
 
-  // ── Registration ──────────────────────────────────────────────────────────
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "9px 12px", borderRadius: 9, fontSize: 13,
+    border: "1.5px solid #E2E8F0", outline: "none", fontFamily: "inherit",
+    transition: "border-color .15s",
+  };
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setRegFile(f);
-    const reader = new FileReader();
-    reader.onload = ev => setRegPreview(ev.target?.result as string);
-    reader.readAsDataURL(f);
-    setRegMsg('');
-  }
+  // ── Loading / Error ────────────────────────────────────────────────────────
 
-  const registerMutation = useMutation({
-    mutationFn: async () => {
-      if (!regFile || !id) throw new Error('Fayl tanlanmagan');
-      const form = new FormData();
-      form.append('photo', regFile);
-      const token = localStorage.getItem('tv_access_token');
-      const res = await fetch(`${config.apiUrl}/api/v1/identification/register/${id}`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: form,
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.detail || `HTTP ${res.status}`);
-      }
-      return res.json();
-    },
-    onSuccess: (data) => {
-      setRegMsg(`✅ Muvaffaqiyatli! Similarity: ${(data.similarity_score * 100).toFixed(1)}%`);
-      setRegFile(null); setRegPreview('');
-      qClient.invalidateQueries({ queryKey: ['embeddings', numId] });
-    },
-    onError: (e: Error) => setRegMsg(`❌ ${e.message}`),
-  });
-
-  const regLoading = registerMutation.isPending;
-  function handleRegister() { registerMutation.mutate(); }
-
-  // ── Derived data ──────────────────────────────────────────────────────────
-
-  const weightChart = [...weights]
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    .slice(-30)
-    .map(w => ({
-      date:   format(new Date(w.timestamp), 'dd/MM'),
-      weight: +w.estimated_weight_kg.toFixed(1),
-      conf:   +(w.confidence_score * 100).toFixed(0),
-    }));
-
-  const adiChart = [...adiLogs]
-    .sort((a, b) => a.calculation_date.localeCompare(b.calculation_date))
-    .map(a => ({
-      date:     format(parseISO(a.calculation_date), 'dd/MM'),
-      score:    +a.adi_score.toFixed(1),
-      category: a.category,
-    }));
-
-  const latestWeight = weightChart.length ? weightChart[weightChart.length - 1].weight : null;
-  const prevWeight   = weightChart.length > 7 ? weightChart[weightChart.length - 7]?.weight : null;
-  const weightChange = latestWeight && prevWeight ? latestWeight - prevWeight : null;
-
-  const adiCfg = adiToday
-    ? (CATEGORY_CONFIG[adiToday.category as keyof typeof CATEGORY_CONFIG] || CATEGORY_CONFIG.average)
-    : null;
-
-  const trendDirection = (() => {
-    if (!adiTrend?.trend?.length || adiTrend.trend.length < 3) return 'insufficient_data';
-    const arr   = adiTrend.trend;
-    const first = arr[0].score;
-    const last  = arr[arr.length - 1].score;
-    if (last - first > 5)  return 'improving';
-    if (last - first < -5) return 'declining';
-    return 'stable';
-  })();
-  const trendCfg = TREND_CONFIG[trendDirection as keyof typeof TREND_CONFIG] || TREND_CONFIG.stable;
-
-  // ── Render helpers ────────────────────────────────────────────────────────
-
-  const tabStyle = (t: string) => ({
-    padding: '8px 18px', borderRadius: 8,
-    fontSize: 13, fontWeight: 500, cursor: 'pointer',
-    border: 'none',
-    background: tab === t ? '#1E3EB4' : 'transparent',
-    color: tab === t ? '#fff' : '#6B7280',
-    transition: 'all .15s',
-  });
-
-  if (loading) return (
-    <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
-      <div style={{ textAlign: 'center', color: '#6B7280' }}>
-        <div style={{
-          width: 32, height: 32, border: '2px solid #E4E7ED',
-          borderTopColor: '#1E3EB4', borderRadius: '50%',
-          animation: 'spin .65s linear infinite', margin: '0 auto 12px',
-        }} />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-        Yuklanmoqda...
-      </div>
+  if (isLoading) return (
+    <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}`}</style>
+      <Spinner size={36} />
     </div>
   );
 
-  if (error || !animal) return (
-    <div style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
-      <div style={{ textAlign: 'center' }}>
-        <AlertTriangle size={40} color="#EF4444" style={{ margin: '0 auto 12px' }} />
-        <p style={{ color: '#EF4444', marginBottom: 16 }}>{error?.message || 'Jonivor topilmadi'}</p>
-        <button onClick={() => navigate('/animals')}
-          style={{ color: '#1E3EB4', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14 }}>
-          ← Orqaga
+  if (isError || !animal) return (
+    <div style={{ minHeight: "60vh", display: "grid", placeItems: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <AlertTriangle size={40} color="#DC2626" style={{ margin: "0 auto 12px", display: "block" }} />
+        <p style={{ color: "#64748B" }}>{(error as Error)?.message ?? "Jonivor topilmadi"}</p>
+        <button onClick={() => nav("/animals")} style={{
+          color: "#2563EB", background: "none", border: "none", cursor: "pointer",
+          fontSize: 14, display: "inline-flex", alignItems: "center", gap: 6,
+        }}>
+          <ArrowLeft size={14} /> Orqaga
         </button>
       </div>
     </div>
   );
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 20px', fontFamily: 'Outfit, sans-serif' }}>
+    <div style={{
+      maxWidth: 1120, margin: "0 auto", padding: "28px 20px 72px",
+      fontFamily: "'Outfit', system-ui, sans-serif", color: "#0F172A",
+    }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap');
-        @keyframes spin { to { transform: rotate(360deg); } }
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+        @keyframes spin    { to { transform: rotate(360deg); } }
+        @keyframes fadein  { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+        * { box-sizing: border-box; }
+        button:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+        input:focus, select:focus { border-color: #2563EB !important; }
       `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => navigate('/animals')} style={{
-            width: 36, height: 36, borderRadius: 8, border: '1px solid #E4E7ED',
-            background: '#fff', cursor: 'pointer', display: 'grid', placeItems: 'center',
-          }}>
-            <ArrowLeft size={16} color="#6B7280" />
-          </button>
+      {/* Modals */}
+      {lightbox !== null && <Lightbox photoId={lightbox} onClose={() => setLightbox(null)} />}
+      {picker && (
+        <PickerModal
+          mode={picker}
+          photos={photos}
+          onSelect={handlePickerSelect}
+          onClose={() => setPicker(null)}
+        />
+      )}
 
-          {/* Profil avatar */}
-          <div
-            onClick={() => setTab('register')}
-            title="Identifikatsiya va rasmlar"
-            style={{ cursor: 'pointer', position: 'relative', flexShrink: 0 }}>
-            {photosData?.profile_image ? (
-              <img
-                src={photosData.profile_image}
-                alt={animal.tag_id}
-                style={{ width: 56, height: 56, borderRadius: 14, objectFit: 'cover',
-                  border: '2px solid #E4E7ED', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
-              />
-            ) : (
-              <div style={{ width: 56, height: 56, borderRadius: 14,
-                background: 'linear-gradient(135deg, #EFF6FF, #DBEAFE)',
-                border: '2px solid #BFDBFE', display: 'grid', placeItems: 'center' }}>
-                <Camera size={22} color="#93C5FD" />
-              </div>
-            )}
-            <div style={{ position: 'absolute', bottom: -3, right: -3,
-              width: 18, height: 18, borderRadius: '50%', background: '#1E3EB4',
-              display: 'grid', placeItems: 'center', border: '2px solid #fff' }}>
-              <Camera size={8} color="#fff" />
-            </div>
-          </div>
+      {/* Back button */}
+      <button onClick={() => nav("/animals")} style={{
+        display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 20,
+        background: "none", border: "none", cursor: "pointer", fontSize: 13,
+        color: "#64748B", padding: 0, fontFamily: "inherit",
+      }}>
+        <ArrowLeft size={14} />
+        Jonivorlar ro'yxati
+      </button>
 
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0D1117', margin: 0,
-                fontFamily: "'JetBrains Mono', monospace" }}>
+      {/* ═══════════════════ HEADER ═══════════════════ */}
+      <div style={{
+        ...card, marginBottom: 18, animation: "fadein .3s ease",
+        background: "linear-gradient(135deg, #F8FAFF 0%, #FFFFFF 100%)",
+      }}>
+        <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "flex-start" }}>
+
+          {/* Profile avatar */}
+          <AvatarSlot
+            label="Profil rasmi"
+            sublabel="Asosiy ko'rinish"
+            photoId={profilePhoto?.id}
+            accentColor="#2563EB"
+            borderColor="#BFDBFE"
+            icon={Camera}
+            onClick={() => setPicker("profile")}
+          />
+
+          {/* Muzzle avatar */}
+          <AvatarSlot
+            label="Tumshuq rasmi"
+            sublabel="AI identifikatsiya"
+            photoId={muzzlePhoto?.id}
+            accentColor="#7C3AED"
+            borderColor="#DDD6FE"
+            icon={Scan}
+            onClick={() => setPicker("muzzle")}
+          />
+
+          {/* Info block */}
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+              <h1 style={{
+                margin: 0, fontSize: 28, fontWeight: 700, color: "#0F172A",
+                fontFamily: "'JetBrains Mono', monospace", letterSpacing: ".02em",
+              }}>
                 {animal.tag_id}
               </h1>
               <span style={{
-                padding: '2px 10px', borderRadius: 99,
-                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-                background: animal.status === 'active' ? '#F0FDF4' : '#F3F4F6',
-                color: animal.status === 'active' ? '#16A34A' : '#6B7280',
-                border: `1px solid ${animal.status === 'active' ? '#BBF7D0' : '#E5E7EB'}`,
+                padding: "3px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600,
+                background: animal.status === "active" ? "#F0FDF4" : "#F3F4F6",
+                color:      animal.status === "active" ? "#16A34A" : "#6B7280",
+                border: `1px solid ${animal.status === "active" ? "#BBF7D0" : "#E5E7EB"}`,
               }}>
-                {animal.status === 'active' ? 'Faol' : animal.status}
+                {animal.status === "active" ? "Faol" : animal.status}
               </span>
               {embedCount > 0 && (
                 <span style={{
-                  padding: '2px 10px', borderRadius: 99,
-                  fontSize: 11, fontWeight: 600,
-                  background: '#EFF6FF', color: '#1E3EB4',
-                  border: '1px solid #BFDBFE',
+                  padding: "3px 12px", borderRadius: 99, fontSize: 12, fontWeight: 600,
+                  background: "#F0FDF4", color: "#16A34A", border: "1px solid #BBF7D0",
                 }}>
-                  {embedCount} rasm
+                  {embedCount} embedding
                 </span>
               )}
             </div>
-            <p style={{ fontSize: 13, color: '#6B7280', margin: '4px 0 0', textTransform: 'capitalize' }}>
-              {animal.species} · {animal.gender} · {animal.breed || 'Zot noma\'lum'}
-            </p>
-          </div>
-        </div>
 
-        <button onClick={() => qClient.invalidateQueries({ queryKey: ["animals", numId] })} style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '7px 14px', borderRadius: 8,
-          border: '1px solid #E4E7ED', background: '#fff',
-          fontSize: 13, color: '#6B7280', cursor: 'pointer',
-        }}>
-          <RefreshCw size={14} /> Yangilash
-        </button>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#64748B", textTransform: "capitalize" }}>
+              {animal.species}
+              {" · "}
+              {animal.gender === "male" ? "Erkak" : animal.gender === "female" ? "Urg'oqi" : "Noma'lum"}
+              {animal.breed ? ` · ${animal.breed}` : ""}
+            </p>
+
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              {[
+                ["Aniqlashlar",     `${animal.total_detections} ta`],
+                ["Oxirgi ko'rinish", animal.last_detected_at
+                  ? format(new Date(animal.last_detected_at), "dd.MM.yyyy")
+                  : "—"],
+                ["Qo'shilgan",      format(new Date(animal.created_at), "dd.MM.yyyy")],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 10, color: "#94A3B8", marginBottom: 3, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600 }}>
+                    {label}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Refresh */}
+          <button
+            onClick={() => { qc.invalidateQueries({ queryKey: ["animals", numId] }); refetchPhotos(); }}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "7px 14px", borderRadius: 9,
+              border: "1.5px solid #E2E8F0", background: "#F8FAFC",
+              fontSize: 13, color: "#64748B", cursor: "pointer", fontFamily: "inherit",
+              alignSelf: "flex-start",
+            }}
+          >
+            <RefreshCw size={13} /> Yangilash
+          </button>
+        </div>
       </div>
 
-      {/* ── Top Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
-
-        {/* ADI Card */}
+      {/* ═══════════════════ KPI Cards ═══════════════════ */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: 12, marginBottom: 18,
+      }}>
+        {/* ADI */}
         <div style={{
-          background: adiCfg?.bg || '#F9FAFB',
-          border: `1px solid ${adiCfg?.border || '#E5E7EB'}`,
-          borderRadius: 12, padding: '16px 20px',
+          ...card, padding: "16px 18px",
+          background: adiCfg?.bg ?? "#F9FAFB",
+          border: `1px solid ${adiNow ? adiCfg?.ring + "44" : "#E5E7EB"}`,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
-            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>ADI Ball</div>
-          {adiToday ? (
+          <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>
+            ADI Ball
+          </div>
+          {adiNow ? (
             <>
-              <div style={{ fontSize: 32, fontWeight: 700, color: adiCfg?.color, lineHeight: 1 }}>
-                {adiToday.adi_score.toFixed(0)}
+              <div style={{ fontSize: 30, fontWeight: 700, color: adiCfg?.color, lineHeight: 1 }}>
+                {adiNow.adi_score.toFixed(0)}
               </div>
-              <div style={{ fontSize: 12, color: adiCfg?.color, marginTop: 4, fontWeight: 500 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: adiCfg?.color, marginTop: 4 }}>
                 {adiCfg?.label}
               </div>
             </>
-          ) : (
-            <div style={{ fontSize: 14, color: '#9CA3AF' }}>—</div>
-          )}
+          ) : <div style={{ fontSize: 14, color: "#94A3B8" }}>—</div>}
         </div>
 
-        {/* Joriy vazn */}
-        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
-            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Joriy vazn</div>
-          {latestWeight ? (
-            <>
-              <div style={{ fontSize: 32, fontWeight: 700, color: '#0D1117', lineHeight: 1 }}>
-                {latestWeight}
-              </div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>kg</div>
-            </>
-          ) : (
-            <div style={{ fontSize: 14, color: '#9CA3AF' }}>—</div>
-          )}
+        {/* Weight */}
+        <div style={{ ...card, padding: "16px 18px" }}>
+          <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Joriy vazn</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#0F172A", lineHeight: 1 }}>
+            {latestW != null ? `${latestW.toFixed(1)} kg` : "—"}
+          </div>
         </div>
 
-        {/* 7 kunlik o'zgarish */}
-        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
-            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>7 kun o'zgarish</div>
-          {weightChange !== null ? (
-            <>
-              <div style={{ fontSize: 32, fontWeight: 700, lineHeight: 1,
-                color: weightChange > 0 ? '#22C55E' : weightChange < 0 ? '#EF4444' : '#6B7280' }}>
-                {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1)}
-              </div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>kg</div>
-            </>
-          ) : (
-            <div style={{ fontSize: 14, color: '#9CA3AF' }}>—</div>
-          )}
+        {/* 7-day weight change */}
+        <div style={{ ...card, padding: "16px 18px" }}>
+          <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>7 kun o'zgarish</div>
+          {wChange != null ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {wChange > 0
+                ? <TrendingUp size={20} color="#16A34A" />
+                : wChange < 0
+                ? <TrendingDown size={20} color="#DC2626" />
+                : <Minus size={20} color="#6B7280" />}
+              <span style={{ fontSize: 22, fontWeight: 700, color: wChange > 0 ? "#16A34A" : wChange < 0 ? "#DC2626" : "#6B7280" }}>
+                {wChange > 0 ? "+" : ""}{wChange.toFixed(1)} kg
+              </span>
+            </div>
+          ) : <div style={{ fontSize: 14, color: "#94A3B8" }}>—</div>}
         </div>
 
         {/* Trend */}
-        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
-            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>ADI Trendi</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            <trendCfg.icon size={24} color={trendCfg.color} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: trendCfg.color }}>
-              {trendCfg.label}
-            </span>
+        <div style={{ ...card, padding: "16px 18px" }}>
+          <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>ADI Trend</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {trend === "improving"
+              ? <><TrendingUp size={20} color="#16A34A" /><span style={{ fontSize: 13, fontWeight: 600, color: "#16A34A" }}>O'smoqda</span></>
+              : trend === "declining"
+              ? <><TrendingDown size={20} color="#DC2626" /><span style={{ fontSize: 13, fontWeight: 600, color: "#DC2626" }}>Tushmoqda</span></>
+              : <><Minus size={20} color="#6B7280" /><span style={{ fontSize: 13, fontWeight: 600, color: "#6B7280" }}>Barqaror</span></>}
           </div>
         </div>
 
-        {/* Aniqlashlar */}
-        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: '16px 20px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280',
-            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Aniqlashlar</div>
-          <div style={{ fontSize: 32, fontWeight: 700, color: '#0D1117', lineHeight: 1 }}>
-            {animal.total_detections}
-          </div>
-          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>ta</div>
+        {/* Photos */}
+        <div style={{ ...card, padding: "16px 18px" }}>
+          <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Rasmlar</div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#0F172A", lineHeight: 1 }}>{photos.length}</div>
+          <button
+            onClick={() => setTab("photos")}
+            style={{
+              marginTop: 6, fontSize: 11, color: "#2563EB", background: "none",
+              border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit",
+              display: "inline-flex", alignItems: "center", gap: 3,
+            }}
+          >
+            Ko'rish <ChevronRight size={11} />
+          </button>
         </div>
       </div>
 
-      {/* ── Tabs ── */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20,
-        background: '#F7F8FA', borderRadius: 10, padding: 4, width: 'fit-content' }}>
-        {(['overview', 'adi', 'weight', 'health', 'register'] as const).map(t => (
-          <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>
-            {t === 'overview'  ? 'Umumiy'
-           : t === 'adi'       ? 'ADI'
-           : t === 'weight'    ? 'Vazn'
-           : t === 'health'    ? "Sog'liq"
-           :                     'Identifikatsiya'}
+      {/* ═══════════════════ Tabs ═══════════════════ */}
+      <div style={{
+        display: "flex", gap: 2, marginBottom: 18,
+        background: "#F1F5F9", borderRadius: 12, padding: 4, width: "fit-content",
+      }}>
+        {(["overview", "adi", "weight", "health", "photos"] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              padding: "7px 16px", borderRadius: 9, fontSize: 13, fontWeight: 500,
+              cursor: "pointer", border: "none", transition: "all .15s", fontFamily: "inherit",
+              background: tab === t ? "#fff" : "transparent",
+              color:      tab === t ? "#2563EB" : "#64748B",
+              boxShadow:  tab === t ? "0 1px 6px rgba(0,0,0,.08)" : "none",
+            }}
+          >
+            {t === "overview" ? "Umumiy" : t === "adi" ? "ADI" : t === "weight" ? "Vazn" : t === "health" ? "Sog'liq" : "📸 Rasmlar"}
           </button>
         ))}
       </div>
 
-      {/* ══════════════════════ OVERVIEW TAB ══════════════════════ */}
-      {tab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
-          {/* Asosiy ma'lumotlar */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 16 }}>
-              Asosiy Ma'lumotlar
-            </h3>
-            {[
-              ['Tag ID',        animal.tag_id],
-              ['Tur',           animal.species],
-              ['Jins',          animal.gender === 'male' ? 'Erkak' : 'Urg\'oqi'],
-              ['Zot',           animal.breed || '—'],
-              ['Holat',         animal.status === 'active' ? 'Faol' : animal.status],
-              ['Olingan sana',  animal.acquisition_date
-                ? format(new Date(animal.acquisition_date), 'dd.MM.yyyy') : '—'],
-              ['Tug\'ilgan',    animal.birth_date
-                ? format(new Date(animal.birth_date), 'dd.MM.yyyy') : '—'],
-              ['Oxirgi ko\'rinish', animal.last_detected_at
-                ? format(new Date(animal.last_detected_at), 'dd.MM.yyyy HH:mm') : '—'],
-            ].map(([label, value]) => (
-              <div key={label} style={{
-                display: 'flex', justifyContent: 'space-between',
-                padding: '8px 0', borderBottom: '1px solid #F3F4F6',
-                fontSize: 13,
+      {/* ═══════════════════ OVERVIEW ═══════════════════ */}
+      {tab === "overview" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, animation: "fadein .25s" }}>
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px" }}>Asosiy Ma'lumotlar</h3>
+            {([
+              ["Tag ID", animal.tag_id],
+              ["Tur", animal.species],
+              ["Jins", animal.gender === "male" ? "Erkak" : "Urg'oqi"],
+              ["Zot", animal.breed ?? "—"],
+              ["Holat", animal.status === "active" ? "Faol" : animal.status],
+              ["Olingan", animal.acquisition_date ? format(new Date(animal.acquisition_date), "dd.MM.yyyy") : "—"],
+              ["Tug'ilgan", animal.birth_date ? format(new Date(animal.birth_date), "dd.MM.yyyy") : "—"],
+            ] as [string, string][]).map(([l, v]) => (
+              <div key={l} style={{
+                display: "flex", justifyContent: "space-between", padding: "8px 0",
+                borderBottom: "1px solid #F8FAFC", fontSize: 13,
               }}>
-                <span style={{ color: '#6B7280' }}>{label}</span>
-                <span style={{ fontWeight: 500, color: '#0D1117', textTransform: 'capitalize' }}>
-                  {value as string}
-                </span>
+                <span style={{ color: "#64748B" }}>{l}</span>
+                <span style={{ fontWeight: 500, textTransform: "capitalize" }}>{v}</span>
               </div>
             ))}
-            {animal.notes && (
-              <div style={{ marginTop: 12, padding: 12, background: '#F9FAFB', borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>IZOH</div>
-                <p style={{ fontSize: 13, color: '#374151', margin: 0 }}>{animal.notes}</p>
-              </div>
-            )}
           </div>
 
-          {/* ADI bugungi holat */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
-              ADI Bugungi Holat
-            </h3>
-            {adiToday ? (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 24 }}>
-                  <ADIRing score={adiToday.adi_score} category={adiToday.category} />
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 18px" }}>ADI Bugungi Ko'rsatkichi</h3>
+            {adiNow ? (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 18 }}>
+                  <div style={{
+                    width: 80, height: 80, borderRadius: "50%",
+                    border: `5px solid ${adiCfg?.ring}`,
+                    background: adiCfg?.bg,
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <span style={{ fontSize: 24, fontWeight: 700, color: adiCfg?.color, lineHeight: 1 }}>
+                      {adiNow.adi_score.toFixed(0)}
+                    </span>
+                    <span style={{ fontSize: 9, color: adiCfg?.color, opacity: .7 }}>/100</span>
+                  </div>
                   <div>
-                    <div style={{
-                      display: 'inline-block', padding: '4px 14px', borderRadius: 99,
-                      background: adiCfg?.bg, border: `1px solid ${adiCfg?.border}`,
-                      fontSize: 13, fontWeight: 600, color: adiCfg?.color, marginBottom: 8,
+                    <span style={{
+                      display: "inline-block", padding: "4px 14px", borderRadius: 99,
+                      background: adiCfg?.bg, color: adiCfg?.color, fontSize: 13,
+                      fontWeight: 600, border: `1px solid ${adiCfg?.ring}44`,
                     }}>
                       {adiCfg?.label}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: trendCfg.color }}>
-                      <trendCfg.icon size={16} />
-                      {trendCfg.label}
-                    </div>
-                    <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>
-                      {format(parseISO(adiToday.calculation_date), 'dd.MM.yyyy')}
+                    </span>
+                    <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 6 }}>
+                      {format(parseISO(adiNow.calculation_date), "dd.MM.yyyy")}
                     </div>
                   </div>
                 </div>
-
-                {/* Komponentlar — adiDetailed.scores dan olinadi (to'g'ri manba) */}
-                {adiDetailed?.scores && (
+                {adiNow.scores && (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#6B7280',
-                      textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-                      Komponentlar
-                    </div>
-                    {adiDetailed.scores.feeding_score != null && (
-                      <ComponentBar label="Oziqlanish" value={adiDetailed.scores.feeding_score}  color="#3B82F6" />
-                    )}
-                    {adiDetailed.scores.activity_score != null && (
-                      <ComponentBar label="Faollik"    value={adiDetailed.scores.activity_score} color="#8B5CF6" />
-                    )}
-                    {adiDetailed.scores.growth_score != null && (
-                      <ComponentBar label="O'sish"     value={adiDetailed.scores.growth_score}   color="#22C55E" />
-                    )}
-                    {adiDetailed.scores.drinking_score != null && (
-                      <ComponentBar label="Suv ichish" value={adiDetailed.scores.drinking_score} color="#06B6D4" />
-                    )}
-                    {adiDetailed.scores.movement_score != null && (
-                      <ComponentBar label="Harakat"    value={adiDetailed.scores.movement_score} color="#F59E0B" />
-                    )}
-                    {adiDetailed.scores.social_score != null && (
-                      <ComponentBar label="Ijtimoiy"   value={adiDetailed.scores.social_score}   color="#EC4899" />
-                    )}
-                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 8 }}>
-                      Ma'lumot sifati: {((adiDetailed.data_quality ?? 0) * 100).toFixed(0)}%
-                    </div>
+                    {Object.entries({
+                      "Oziqlanish": adiNow.scores.feeding_score,
+                      "Faollik":    adiNow.scores.activity_score,
+                      "O'sish":    adiNow.scores.growth_score,
+                      "Harakat":    adiNow.scores.movement_score,
+                    }).filter(([, v]) => v != null).map(([label, val]) => (
+                      <div key={label} style={{ marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                          <span style={{ color: "#64748B" }}>{label}</span>
+                          <span style={{ fontWeight: 600, color: "#374151" }}>{(val as number).toFixed(0)}</span>
+                        </div>
+                        <div style={{ height: 5, background: "#F1F5F9", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{
+                            height: "100%", borderRadius: 3,
+                            width: `${val}%`, background: adiCfg?.ring,
+                            transition: "width .5s",
+                          }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
-              </>
+              </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF' }}>
-                <Activity size={40} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#94A3B8" }}>
+                <Activity size={36} style={{ margin: "0 auto 10px", display: "block", opacity: .3 }} />
                 <p style={{ fontSize: 14 }}>ADI ma'lumoti yo'q</p>
-                <p style={{ fontSize: 12, marginTop: 4 }}>Simulate qilish uchun backend scriptni ishga tushiring</p>
-              </div>
-            )}
-          </div>
-
-          {/* Oxirgi o'lchovlar */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 16 }}>
-              Oxirgi Vazn O'lchovlari
-            </h3>
-            {weights.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '30px 0', color: '#9CA3AF', fontSize: 14 }}>
-                O'lchovlar mavjud emas
-              </div>
-            ) : (
-              <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-                {weights.slice(0, 8).map(w => (
-                  <div key={w.id} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 0', borderBottom: '1px solid #F3F4F6',
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: '#0D1117' }}>
-                        {w.estimated_weight_kg.toFixed(1)} kg
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                        {format(new Date(w.timestamp), 'dd.MM.yyyy HH:mm')}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 11, color: '#6B7280' }}>{w.camera_id}</div>
-                      <div style={{
-                        fontSize: 11, fontWeight: 600, marginTop: 2,
-                        color: w.confidence_score >= 0.85 ? '#22C55E' : '#F59E0B',
-                      }}>
-                        {(w.confidence_score * 100).toFixed(0)}%
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* ADI oxirgi yozuvlar */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 16 }}>
-              ADI Tarixi (oxirgi 7 kun)
-            </h3>
-            {adiLogs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '30px 0', color: '#9CA3AF', fontSize: 14 }}>
-                ADI yozuvlari mavjud emas
-              </div>
-            ) : (
-              <div>
-                {[...adiLogs]
-                  .sort((a, b) => b.calculation_date.localeCompare(a.calculation_date))
-                  .slice(0, 7)
-                  .map(a => {
-                    const c = CATEGORY_CONFIG[a.category as keyof typeof CATEGORY_CONFIG] || CATEGORY_CONFIG.average;
-                    return (
-                      <div key={a.calculation_date} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 0', borderBottom: '1px solid #F3F4F6',
-                      }}>
-                        <div style={{ fontSize: 13, color: '#6B7280' }}>
-                          {format(parseISO(a.calculation_date), 'dd.MM.yyyy')}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ width: 80, height: 6, background: '#F3F4F6', borderRadius: 3 }}>
-                            <div style={{ width: `${a.adi_score}%`, height: '100%',
-                              background: c.color, borderRadius: 3 }} />
-                          </div>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: c.color, minWidth: 30 }}>
-                            {a.adi_score.toFixed(0)}
-                          </span>
-                          <span style={{
-                            fontSize: 10, padding: '2px 8px', borderRadius: 99,
-                            background: c.bg, color: c.color, border: `1px solid ${c.border}`,
-                          }}>
-                            {c.label}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ══════════════════════ ADI TAB ══════════════════════ */}
-      {tab === 'adi' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          {/* ADI grafik */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
-              ADI 30 Kunlik Trend
-            </h3>
-            {adiChart.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: '#9CA3AF' }}>
-                <Activity size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                Ma'lumot yo'q
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={adiChart}>
-                  <defs>
-                    <linearGradient id="adiGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#1E3EB4" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#1E3EB4" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#E4E7ED" />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="#E4E7ED" />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 8, border: '1px solid #E4E7ED', fontSize: 12 }}
-                    formatter={(v: any) => [`${Number(v).toFixed(1)}`, 'ADI Ball']}
-                  />
-                  <Area type="monotone" dataKey="score" stroke="#1E3EB4"
-                    strokeWidth={2} fill="url(#adiGrad)" dot={{ r: 3, fill: '#1E3EB4' }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          {/* Komponentlar to'liq paneli — faqat adiDetailed mavjud bo'lganda */}
-          {adiDetailed?.scores && (
-            <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', margin: 0 }}>
-                  ADI Komponentlari — {format(parseISO(adiDetailed.calculation_date), 'dd.MM.yyyy')}
-                </h3>
-                <span style={{
-                  fontSize: 11, padding: '3px 10px', borderRadius: 99,
-                  background: '#F3F4F6', color: '#6B7280',
-                }}>
-                  Sifat: {((adiDetailed.data_quality ?? 0) * 100).toFixed(0)}%
-                </span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
-                {[
-                  { key: 'feeding_score',    label: 'Oziqlanish',  color: '#3B82F6', weight: '20%' },
-                  { key: 'activity_score',   label: 'Faollik',     color: '#8B5CF6', weight: '20%' },
-                  { key: 'growth_score',     label: "O'sish",      color: '#22C55E', weight: '20%' },
-                  { key: 'movement_score',   label: 'Harakat',     color: '#F59E0B', weight: '15%' },
-                  { key: 'drinking_score',   label: 'Suv ichish',  color: '#06B6D4', weight: '10%' },
-                  { key: 'social_score',     label: 'Ijtimoiy',    color: '#EC4899', weight: '10%' },
-                  { key: 'sensor_score',     label: 'Sensor',      color: '#64748B', weight: '5%'  },
-                  { key: 'veterinary_score', label: 'Veterinar',   color: '#DC2626', weight: '5%'  },
-                ].map(({ key, label, color, weight }) => {
-                  const val = adiDetailed.scores[key as keyof ADIComponentScores];
-                  if (val == null) return null;
-                  return (
-                    <div key={key} style={{ marginBottom: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, color: '#6B7280' }}>
-                          {label} <span style={{ fontSize: 10, color: '#D1D5DB' }}>({weight})</span>
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color }}>
-                          {val.toFixed(0)}
-                        </span>
-                      </div>
-                      <div style={{ height: 8, background: '#F3F4F6', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%', width: `${val}%`,
-                          background: color, borderRadius: 4,
-                          transition: 'width 0.6s ease',
-                        }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {adiDetailed.notes && (
-                <div style={{
-                  marginTop: 16, padding: '10px 14px', borderRadius: 8,
-                  background: '#F9FAFB', border: '1px solid #E4E7ED',
-                  fontSize: 12, color: '#6B7280',
-                }}>
-                  {adiDetailed.notes}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ══════════════════════ WEIGHT TAB ══════════════════════ */}
-      {tab === 'weight' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
-              Vazn O'zgarish Grafigi (oxirgi 30 o'lchov)
-            </h3>
-            {weightChart.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: '#9CA3AF' }}>
-                <Scale size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-                Vazn ma'lumotlari yo'q
+      {/* ═══════════════════ ADI ═══════════════════ */}
+      {tab === "adi" && (
+        <div style={{ animation: "fadein .25s" }}>
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 20px" }}>ADI 30 Kunlik Grafik</h3>
+            {adiChartData.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#94A3B8" }}>
+                <Activity size={36} style={{ margin: "0 auto 10px", display: "block", opacity: .3 }} />
+                <p>Ma'lumot yo'q</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={weightChart}>
+                <AreaChart data={adiChartData}>
                   <defs>
-                    <linearGradient id="wGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#22C55E" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#22C55E" stopOpacity={0} />
+                    <linearGradient id="adiGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#2563EB" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#2563EB" stopOpacity={0}   />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#E4E7ED" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="#E4E7ED"
-                    label={{ value: 'kg', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#E2E8F0" />
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="#E2E8F0" />
                   <Tooltip
-                    contentStyle={{ borderRadius: 8, border: '1px solid #E4E7ED', fontSize: 12 }}
-                    formatter={(v: any) => [`${Number(v).toFixed(1)} kg`, 'Vazn']}
+                    contentStyle={{ borderRadius: 10, border: "1px solid #E2E8F0", fontSize: 12 }}
+                    formatter={(v: any) => [`${Number(v).toFixed(1)}`, "ADI"]}
                   />
-                  <Area type="monotone" dataKey="weight" stroke="#22C55E"
-                    strokeWidth={2} fill="url(#wGrad)" dot={{ r: 2, fill: '#22C55E' }} />
+                  <Area
+                    type="monotone" dataKey="score"
+                    stroke="#2563EB" strokeWidth={2.5}
+                    fill="url(#adiGrad)"
+                    dot={{ r: 3, fill: "#2563EB", strokeWidth: 0 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ WEIGHT ═══════════════════ */}
+      {tab === "weight" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadein .25s" }}>
+          <div style={card}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 20px" }}>Vazn Grafigi (so'nggi 30 ta)</h3>
+            {weightChartData.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "60px 0", color: "#94A3B8" }}>
+                <Scale size={36} style={{ margin: "0 auto 10px", display: "block", opacity: .3 }} />
+                <p>Ma'lumot yo'q</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart data={weightChartData}>
+                  <defs>
+                    <linearGradient id="wGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#16A34A" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#16A34A" stopOpacity={0}   />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#E2E8F0" />
+                  <YAxis tick={{ fontSize: 11 }} stroke="#E2E8F0" />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 10, border: "1px solid #E2E8F0", fontSize: 12 }}
+                    formatter={(v: any) => [`${Number(v).toFixed(1)} kg`, "Vazn"]}
+                  />
+                  <Area
+                    type="monotone" dataKey="weight"
+                    stroke="#16A34A" strokeWidth={2.5}
+                    fill="url(#wGrad)"
+                    dot={{ r: 2, fill: "#16A34A", strokeWidth: 0 }}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
 
-          {/* Jadval */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', margin: 0 }}>
+          <div style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>
                 Barcha O'lchovlar ({weights.length} ta)
               </h3>
-              <button onClick={() => {
-                window.open(`${config.apiUrl}/api/v1/export/weights?animal_id=${id}&format=csv`, '_blank');
-              }} style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 7,
-                border: '1px solid #E4E7ED', background: '#F7F8FA',
-                fontSize: 12, color: '#6B7280', cursor: 'pointer',
-              }}>
+              <button
+                onClick={() => window.open(`${config.apiUrl || ""}/api/v1/export/weights?animal_id=${id}&format=csv`, "_blank")}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "6px 14px", borderRadius: 8,
+                  border: "1.5px solid #E2E8F0", background: "#F8FAFC",
+                  fontSize: 12, color: "#64748B", cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
                 <Download size={13} /> CSV
               </button>
             </div>
-            <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <div style={{ maxHeight: 340, overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
-                  <tr style={{ background: '#F7F8FA' }}>
-                    {['Sana', 'Vazn', 'Ishonch', 'Kamera'].map(h => (
-                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left',
-                        fontWeight: 600, color: '#6B7280', fontSize: 11,
-                        textTransform: 'uppercase', letterSpacing: '0.06em',
-                        borderBottom: '1px solid #E4E7ED' }}>
-                        {h}
-                      </th>
+                  <tr style={{ background: "#F8FAFC" }}>
+                    {["Sana", "Vazn", "Ishonch", "Kamera"].map(h => (
+                      <th key={h} style={{
+                        padding: "8px 12px", textAlign: "left", fontSize: 11,
+                        fontWeight: 600, color: "#64748B",
+                        textTransform: "uppercase", letterSpacing: ".06em",
+                        borderBottom: "1px solid #E2E8F0",
+                      }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1004,22 +1191,19 @@ export default function AnimalDetailPage() {
                   {[...weights]
                     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
                     .map(w => (
-                      <tr key={w.id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                        <td style={{ padding: '10px 12px', color: '#374151' }}>
-                          {format(new Date(w.timestamp), 'dd.MM.yyyy HH:mm')}
+                      <tr key={w.id} style={{ borderBottom: "1px solid #F8FAFC" }}>
+                        <td style={{ padding: "9px 12px", color: "#374151" }}>
+                          {format(new Date(w.timestamp), "dd.MM.yyyy HH:mm")}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0D1117' }}>
+                        <td style={{ padding: "9px 12px", fontWeight: 600 }}>
                           {w.estimated_weight_kg.toFixed(1)} kg
                         </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{
-                            color: w.confidence_score >= 0.85 ? '#22C55E' : '#F59E0B',
-                            fontWeight: 500,
-                          }}>
+                        <td style={{ padding: "9px 12px" }}>
+                          <span style={{ fontWeight: 500, color: w.confidence_score >= .85 ? "#16A34A" : "#D97706" }}>
                             {(w.confidence_score * 100).toFixed(0)}%
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#6B7280', fontSize: 12 }}>
+                        <td style={{ padding: "9px 12px", color: "#64748B", fontSize: 12 }}>
                           {w.camera_id}
                         </td>
                       </tr>
@@ -1031,295 +1215,160 @@ export default function AnimalDetailPage() {
         </div>
       )}
 
-      {/* ══════════════════════ HEALTH TAB ══════════════════════ */}
-      {tab === 'health' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 14, color: '#6B7280' }}>
-              Jami <span style={{ fontWeight: 700, color: '#0D1117' }}>{healthTotal}</span> ta sog'liq yozuvi
-            </div>
+      {/* ═══════════════════ HEALTH ═══════════════════ */}
+      {tab === "health" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "fadein .25s" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: "#64748B" }}>
+              Jami <b style={{ color: "#0F172A" }}>{healthResp?.total ?? 0}</b> ta yozuv
+            </span>
             <button
-              onClick={() => { setShowHealthForm(v => !v); setHealthFormMsg(''); }}
+              onClick={() => { setShowHForm(v => !v); setHMsg(""); }}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 16px', borderRadius: 8,
-                background: showHealthForm ? '#F3F4F6' : '#1E3EB4',
-                color: showHealthForm ? '#374151' : '#fff',
-                border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "8px 18px", borderRadius: 10, border: "none",
+                background: showHForm ? "#F1F5F9" : "#2563EB",
+                color: showHForm ? "#374151" : "#fff",
+                fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
               }}
             >
-              <Plus size={14} />
-              {showHealthForm ? 'Bekor qilish' : 'Yangi yozuv'}
+              {showHForm ? <X size={14} /> : <Plus size={14} />}
+              {showHForm ? "Bekor qilish" : "Yangi yozuv"}
             </button>
           </div>
 
-          {/* ── Yangi yozuv formasi ── */}
-          {showHealthForm && (
-            <div style={{
-              background: '#fff', border: '1px solid #E4E7ED',
-              borderRadius: 12, padding: 24,
-            }}>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 20 }}>
-                Yangi Sog'liq Yozuvi
-              </h3>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          {showHForm && (
+            <div style={{ ...card, animation: "fadein .2s" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 18px" }}>Yangi Sog'liq Yozuvi</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Tur *
-                  </label>
-                  <select
-                    value={healthForm.record_type}
-                    onChange={e => setHealthForm(f => ({ ...f, record_type: e.target.value }))}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, color: '#374151',
-                      background: '#F9FAFB',
-                    }}
-                  >
-                    <option value="checkup">Tekshiruv</option>
-                    <option value="treatment">Davolash</option>
-                    <option value="vaccination">Emlash</option>
-                    <option value="injury">Shikast</option>
-                    <option value="surgery">Operatsiya</option>
-                    <option value="illness">Kasallik</option>
-                    <option value="other">Boshqa</option>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 5 }}>Tur *</label>
+                  <select value={hForm.record_type} onChange={e => setHForm(p => ({ ...p, record_type: e.target.value }))} style={inputStyle}>
+                    {[["checkup","Tekshiruv"],["treatment","Davolash"],["vaccination","Emlash"],
+                      ["injury","Shikast"],["surgery","Operatsiya"],["illness","Kasallik"],["other","Boshqa"]
+                    ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                 </div>
-
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Jiddiylik *
-                  </label>
-                  <select
-                    value={healthForm.severity}
-                    onChange={e => setHealthForm(f => ({ ...f, severity: e.target.value }))}
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, color: '#374151',
-                      background: '#F9FAFB',
-                    }}
-                  >
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 5 }}>Jiddiylik *</label>
+                  <select value={hForm.severity} onChange={e => setHForm(p => ({ ...p, severity: e.target.value }))} style={inputStyle}>
                     <option value="normal">Normal</option>
                     <option value="warning">Ogohlantirish</option>
                     <option value="critical">Kritik</option>
                   </select>
                 </div>
-
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Diagnoz *
-                  </label>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 5 }}>Diagnoz *</label>
                   <input
-                    type="text"
-                    value={healthForm.diagnosis}
-                    onChange={e => setHealthForm(f => ({ ...f, diagnosis: e.target.value }))}
-                    placeholder="Masalan: Oddiy tekshiruv, Sog'lik holati normal"
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: `1px solid ${healthForm.diagnosis ? '#E4E7ED' : '#FCA5A5'}`,
-                      fontSize: 13, boxSizing: 'border-box',
-                    }}
+                    type="text" value={hForm.diagnosis} placeholder="Masalan: Tekshiruv o'tkazildi, sog'liq normal"
+                    onChange={e => setHForm(p => ({ ...p, diagnosis: e.target.value }))}
+                    style={{ ...inputStyle, borderColor: hForm.diagnosis ? "#E2E8F0" : "#FCA5A5" }}
                   />
                 </div>
-
-                {[
-                  ['symptoms',    'Belgilar',    'Kuzatilgan alomatlar...'],
-                  ['treatment',   'Davolash',    'Qilingan davolash...'],
-                  ['medication',  'Dori-darmon', 'Berilgan dorilar...'],
-                  ['veterinarian','Veterinar',   'Veterinar ismi...'],
-                ].map(([field, label, placeholder]) => (
-                  <div key={field}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                      {label}
-                    </label>
-                    <input
-                      type="text"
-                      value={healthForm[field as keyof typeof healthForm]}
-                      onChange={e => setHealthForm(f => ({ ...f, [field]: e.target.value }))}
-                      placeholder={placeholder}
-                      style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8,
-                        border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                      }}
-                    />
+                {[["symptoms","Belgilar"],["treatment","Davolash usuli"],["medication","Dori-darmon"],["veterinarian","Veterinar"]].map(([f, l]) => (
+                  <div key={f}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 5 }}>{l}</label>
+                    <input type="text" value={hForm[f as keyof typeof hForm]}
+                      onChange={e => setHForm(p => ({ ...p, [f]: e.target.value }))}
+                      style={inputStyle} />
                   </div>
                 ))}
-
                 <div>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 6 }}>
-                    Narx (UZS)
-                  </label>
-                  <input
-                    type="number"
-                    value={healthForm.cost}
-                    onChange={e => setHealthForm(f => ({ ...f, cost: e.target.value }))}
-                    placeholder="0"
-                    min="0"
-                    style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8,
-                      border: '1px solid #E4E7ED', fontSize: 13, boxSizing: 'border-box',
-                    }}
-                  />
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 5 }}>Narx (UZS)</label>
+                  <input type="number" value={hForm.cost} min="0" placeholder="0"
+                    onChange={e => setHForm(p => ({ ...p, cost: e.target.value }))}
+                    style={inputStyle} />
                 </div>
               </div>
-
-              {healthFormMsg && (
+              {hMsg && (
                 <div style={{
-                  marginTop: 14, padding: '10px 14px', borderRadius: 8,
-                  background: healthFormMsg.startsWith('✅') ? '#F0FDF4' : '#FEF2F2',
-                  color: healthFormMsg.startsWith('✅') ? '#16A34A' : '#DC2626',
-                  fontSize: 13, border: `1px solid ${healthFormMsg.startsWith('✅') ? '#BBF7D0' : '#FECACA'}`,
-                }}>
-                  {healthFormMsg}
-                </div>
+                  marginTop: 14, padding: "10px 14px", borderRadius: 9, fontSize: 13,
+                  background: hMsg.startsWith("✅") ? "#F0FDF4" : "#FEF2F2",
+                  color:      hMsg.startsWith("✅") ? "#16A34A" : "#DC2626",
+                  border: `1px solid ${hMsg.startsWith("✅") ? "#BBF7D0" : "#FECACA"}`,
+                }}>{hMsg}</div>
               )}
-
               <button
-                onClick={handleHealthCreate}
-                disabled={!healthForm.diagnosis.trim() || createHealthMutation.isPending}
+                onClick={() => { if (!hForm.diagnosis.trim()) return; createHealthMut.mutate(); }}
+                disabled={!hForm.diagnosis.trim() || createHealthMut.isPending}
                 style={{
-                  marginTop: 16, width: '100%', padding: '12px', borderRadius: 8,
-                  background: healthForm.diagnosis ? '#1E3EB4' : '#E4E7ED',
-                  color: healthForm.diagnosis ? '#fff' : '#9CA3AF',
-                  border: 'none', cursor: healthForm.diagnosis ? 'pointer' : 'not-allowed',
-                  fontSize: 14, fontWeight: 600, display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', gap: 8,
+                  marginTop: 16, width: "100%", padding: "11px 0", borderRadius: 10,
+                  border: "none", cursor: hForm.diagnosis.trim() ? "pointer" : "not-allowed",
+                  background: hForm.diagnosis.trim() ? "#2563EB" : "#E2E8F0",
+                  color: hForm.diagnosis.trim() ? "#fff" : "#94A3B8",
+                  fontSize: 14, fontWeight: 600,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  fontFamily: "inherit",
                 }}
               >
-                {createHealthMutation.isPending ? (
-                  <>
-                    <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)',
-                      borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .6s linear infinite' }} />
-                    Saqlanmoqda...
-                  </>
-                ) : (
-                  <><Heart size={16} /> Saqlash</>
-                )}
+                {createHealthMut.isPending ? <><Spinner size={16} color="#fff" /> Saqlanmoqda...</> : <><Heart size={15} /> Saqlash</>}
               </button>
             </div>
           )}
 
-          {/* ── Yozuvlar ro'yxati ── */}
-          {healthLoading ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9CA3AF' }}>
-              <div style={{ width: 28, height: 28, border: '2px solid #E4E7ED',
-                borderTopColor: '#1E3EB4', borderRadius: '50%',
-                animation: 'spin .65s linear infinite', margin: '0 auto 10px' }} />
-              Yuklanmoqda...
-            </div>
+          {healthFetching ? (
+            <div style={{ textAlign: "center", padding: "40px 0" }}><Spinner /></div>
           ) : healthRecords.length === 0 ? (
-            <div style={{
-              background: '#fff', border: '1px solid #E4E7ED',
-              borderRadius: 12, padding: '48px 24px', textAlign: 'center',
-            }}>
-              <Heart size={40} color="#D1D5DB" style={{ margin: '0 auto 12px' }} />
-              <p style={{ color: '#9CA3AF', fontSize: 14 }}>Sog'liq yozuvlari yo'q</p>
-              <p style={{ color: '#D1D5DB', fontSize: 12, marginTop: 4 }}>
-                Yuqoridagi "Yangi yozuv" tugmasini bosing
-              </p>
+            <div style={{ ...card, textAlign: "center", padding: "56px 24px" }}>
+              <Heart size={40} color="#E2E8F0" style={{ margin: "0 auto 12px", display: "block" }} />
+              <p style={{ color: "#94A3B8", fontSize: 14 }}>Sog'liq yozuvlari yo'q</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {healthRecords.map(rec => {
-                const sevColor = rec.severity === 'critical' ? '#EF4444'
-                               : rec.severity === 'warning'  ? '#F59E0B'
-                               :                               '#22C55E';
-                const sevBg = rec.severity === 'critical' ? '#FEF2F2'
-                            : rec.severity === 'warning'  ? '#FFFBEB'
-                            :                               '#F0FDF4';
-                const typeLabel: Record<string, string> = {
-                  checkup: 'Tekshiruv', treatment: 'Davolash',
-                  vaccination: 'Emlash', injury: 'Shikast',
-                  surgery: 'Operatsiya', illness: 'Kasallik', other: 'Boshqa',
-                };
+                const sc = rec.severity === "critical" ? "#DC2626" : rec.severity === "warning" ? "#D97706" : "#16A34A";
                 return (
                   <div key={rec.id} style={{
-                    background: '#fff', border: '1px solid #E4E7ED',
-                    borderRadius: 12, padding: '16px 20px',
-                    borderLeft: `4px solid ${sevColor}`,
-                    opacity: rec.is_resolved ? 0.7 : 1,
+                    background: "#fff", border: "1px solid #E2E8F0", borderRadius: 12,
+                    padding: "16px 20px", borderLeft: `4px solid ${sc}`,
+                    opacity: rec.is_resolved ? .7 : 1,
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: '#0D1117' }}>
-                            {typeLabel[rec.record_type] ?? rec.record_type}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>
+                            {RECORD_TYPE_LABELS[rec.record_type] ?? rec.record_type}
                           </span>
                           <span style={{
-                            fontSize: 11, fontWeight: 600, padding: '2px 8px',
-                            borderRadius: 99, background: sevBg, color: sevColor,
-                            border: `1px solid ${sevColor}22`,
-                          }}>
-                            {rec.severity}
-                          </span>
+                            fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6,
+                            background: rec.severity === "critical" ? "#FEF2F2" : rec.severity === "warning" ? "#FFFBEB" : "#F0FDF4",
+                            color: sc,
+                          }}>{rec.severity}</span>
                           {rec.is_resolved && (
-                            <span style={{
-                              fontSize: 11, padding: '2px 8px', borderRadius: 99,
-                              background: '#F0FDF4', color: '#16A34A', border: '1px solid #BBF7D0',
-                            }}>
-                              Hal etilgan
+                            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6,
+                              background: "#F0FDF4", color: "#16A34A" }}>
+                              ✓ Hal etilgan
                             </span>
                           )}
                         </div>
-
-                        <p style={{ fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
+                        <p style={{ fontSize: 13, fontWeight: 500, color: "#374151", margin: "0 0 4px" }}>
                           {rec.diagnosis}
                         </p>
-
-                        {rec.symptoms && (
-                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
-                            <span style={{ fontWeight: 600 }}>Belgilar:</span> {rec.symptoms}
-                          </p>
-                        )}
                         {rec.treatment && (
-                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
-                            <span style={{ fontWeight: 600 }}>Davolash:</span> {rec.treatment}
+                          <p style={{ fontSize: 12, color: "#64748B", margin: "0 0 2px" }}>
+                            <b>Davolash:</b> {rec.treatment}
                           </p>
                         )}
-                        {rec.medication && (
-                          <p style={{ fontSize: 12, color: '#6B7280', marginBottom: 2 }}>
-                            <span style={{ fontWeight: 600 }}>Dori:</span> {rec.medication}
-                          </p>
-                        )}
-
-                        <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                            {format(new Date(rec.recorded_at), 'dd.MM.yyyy HH:mm')}
+                        <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, color: "#94A3B8" }}>
+                            {format(new Date(rec.recorded_at), "dd.MM.yyyy HH:mm")}
                           </span>
-                          {rec.veterinarian && (
-                            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              {rec.veterinarian}
-                            </span>
-                          )}
-                          {rec.cost != null && (
-                            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              {rec.cost?.toLocaleString()} UZS
-                            </span>
-                          )}
-                          {rec.next_checkup_date && (
-                            <span style={{ fontSize: 11, color: '#3B82F6' }}>
-                              Keyingi: {format(new Date(rec.next_checkup_date), 'dd.MM.yyyy')}
-                            </span>
-                          )}
+                          {rec.veterinarian && <span style={{ fontSize: 11, color: "#94A3B8" }}>{rec.veterinarian}</span>}
+                          {rec.cost != null && <span style={{ fontSize: 11, color: "#94A3B8" }}>{rec.cost.toLocaleString()} UZS</span>}
                         </div>
                       </div>
-
                       {!rec.is_resolved && (
                         <button
-                          onClick={() => handleHealthResolve(rec.id)}
-                          title="Hal etilgan deb belgilash"
+                          onClick={() => resolveHealthMut.mutate(rec.id)}
                           style={{
-                            marginLeft: 12, flexShrink: 0,
-                            display: 'flex', alignItems: 'center', gap: 5,
-                            padding: '6px 12px', borderRadius: 7,
-                            background: '#F0FDF4', color: '#16A34A',
-                            border: '1px solid #BBF7D0', cursor: 'pointer',
-                            fontSize: 12, fontWeight: 500,
+                            display: "inline-flex", alignItems: "center", gap: 5,
+                            padding: "6px 12px", borderRadius: 8,
+                            background: "#F0FDF4", color: "#16A34A",
+                            border: "1px solid #BBF7D0", cursor: "pointer",
+                            fontSize: 12, fontWeight: 500, fontFamily: "inherit", flexShrink: 0,
                           }}
                         >
-                          <CheckCircle size={13} /> Hal etildi
+                          <CheckCircle size={12} /> Hal etildi
                         </button>
                       )}
                     </div>
@@ -1331,191 +1380,165 @@ export default function AnimalDetailPage() {
         </div>
       )}
 
-      {tab === 'register' && (
-        <>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {/* ═══════════════════ PHOTOS ═══════════════════ */}
+      {tab === "photos" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20, animation: "fadein .25s" }}>
 
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 6 }}>
-              Identifikatsiya Rasmi Yuklash
-            </h3>
-            <p style={{ fontSize: 13, color: '#6B7280', marginBottom: 20 }}>
-              Sigirning yuz yoki tana rasmini yuklab, tizimga o'rgating.
-              Bir necha burchakdan rasm yuklash aniqlikni oshiradi.
-            </p>
-
-            <div
-              onClick={() => fileRef.current?.click()}
-              style={{
-                border: `2px dashed ${regPreview ? '#1E3EB4' : '#E4E7ED'}`,
-                borderRadius: 10, padding: 24,
-                textAlign: 'center', cursor: 'pointer',
-                background: regPreview ? '#EFF6FF' : '#F9FAFB',
-                transition: 'all .2s', marginBottom: 16,
-              }}
-            >
-              {regPreview ? (
-                <img src={regPreview} alt="preview" style={{
-                  maxHeight: 200, maxWidth: '100%', borderRadius: 8, margin: '0 auto',
-                }} />
-              ) : (
-                <>
-                  <Upload size={32} color="#9CA3AF" style={{ margin: '0 auto 10px' }} />
-                  <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>
-                    Rasm yuklash uchun bosing
-                  </p>
-                  <p style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>
-                    JPG, PNG — max 10MB
-                  </p>
-                </>
-              )}
-              <input ref={fileRef} type="file" accept="image/*"
-                onChange={onFileChange} style={{ display: 'none' }} />
-            </div>
-
-            {regMsg && (
-              <div style={{
-                padding: '10px 14px', borderRadius: 8, marginBottom: 14,
-                background: regMsg.startsWith('✅') ? '#F0FDF4' : '#FEF2F2',
-                color: regMsg.startsWith('✅') ? '#16A34A' : '#DC2626',
-                fontSize: 13, fontWeight: 500,
-                border: `1px solid ${regMsg.startsWith('✅') ? '#BBF7D0' : '#FECACA'}`,
-              }}>
-                {regMsg}
-              </div>
-            )}
-
-            <button
-              onClick={handleRegister}
-              disabled={!regFile || regLoading}
-              style={{
-                width: '100%', padding: '12px', borderRadius: 8,
-                background: regFile ? '#1E3EB4' : '#E4E7ED',
-                color: regFile ? '#fff' : '#9CA3AF',
-                border: 'none', cursor: regFile ? 'pointer' : 'not-allowed',
-                fontSize: 14, fontWeight: 600, display: 'flex',
-                alignItems: 'center', justifyContent: 'center', gap: 8,
-                transition: 'background .15s',
-              }}
-            >
-              {regLoading ? (
-                <>
-                  <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.3)',
-                    borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .6s linear infinite' }} />
-                  Yuklanmoqda...
-                </>
-              ) : (
-                <><Camera size={16} /> Ro'yxatdan o'tkazish</>
-              )}
-            </button>
-          </div>
-
-          <div style={{ background: '#F7F8FA', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', marginBottom: 16 }}>
-              Qanday ishlaydi?
-            </h3>
-            {[
-              ['1', '#1E3EB4', "Rasmni yuklang", "Sigirning yuz (burun) yoki tana rasmi. Aniq, yorqin rasm tavsiya etiladi."],
-              ['2', '#8B5CF6', "MobileNetV2 tahlil qiladi", "1280-o'lchamli embedding vektori chiqariladi va bazaga saqlanadi."],
-              ['3', '#22C55E', "Kamera aniqlaganida", "Cosine similarity ≥ 0.80 bo'lsa jonivor tanilgan hisoblanadi."],
-              ['4', '#F59E0B', "ADI va vazn", "Tanilgan jonivor uchun avtomatik hisoblanib, bazaga saqlanadi."],
-            ].map(([num, color, title, desc]) => (
-              <div key={num} style={{ display: 'flex', gap: 14, marginBottom: 18 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: '50%',
-                  background: color, color: '#fff',
-                  display: 'grid', placeItems: 'center',
-                  fontSize: 13, fontWeight: 700, flexShrink: 0,
-                }}>
-                  {num}
+          {/* Upload bar */}
+          <div style={{ ...card, padding: "18px 22px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+              {/* Stats */}
+              <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Jami rasmlar</div>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: "#0F172A" }}>{photos.length}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0D1117', marginBottom: 3 }}>{title}</div>
-                  <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>{desc}</div>
+                  <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>AI Embedding</div>
+                  <div style={{ fontSize: 26, fontWeight: 700, color: embedCount > 0 ? "#16A34A" : "#94A3B8" }}>{embedCount}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: profilePhoto ? "#2563EB" : "#E2E8F0" }} />
+                    <span style={{ fontSize: 12, color: profilePhoto ? "#2563EB" : "#9CA3AF" }}>
+                      Profil: {profilePhoto ? "✓ Belgilangan" : "Belgilanmagan"}
+                    </span>
+                    <button onClick={() => setPicker("profile")} style={{
+                      fontSize: 11, color: "#2563EB", background: "none", border: "none",
+                      cursor: "pointer", padding: 0, fontFamily: "inherit",
+                    }}>
+                      Tanlash →
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: muzzlePhoto ? "#7C3AED" : "#E2E8F0" }} />
+                    <span style={{ fontSize: 12, color: muzzlePhoto ? "#7C3AED" : "#9CA3AF" }}>
+                      Muzzle: {muzzlePhoto ? "✓ Belgilangan" : "Belgilanmagan"}
+                    </span>
+                    <button onClick={() => setPicker("muzzle")} style={{
+                      fontSize: 11, color: "#7C3AED", background: "none", border: "none",
+                      cursor: "pointer", padding: 0, fontFamily: "inherit",
+                    }}>
+                      Tanlash →
+                    </button>
+                  </div>
                 </div>
               </div>
-            ))}
 
-            <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8,
-              background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
-              <div style={{ fontSize: 12, color: '#16A34A', fontWeight: 500 }}>
-                Saqlangan rasmlar: <b>{embedCount} ta</b>
+              {/* Upload button */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                <button
+                  onClick={() => uploadRef.current?.click()}
+                  disabled={uploading > 0}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 8,
+                    padding: "10px 22px", borderRadius: 10, border: "none",
+                    background: "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600,
+                    cursor: uploading > 0 ? "not-allowed" : "pointer",
+                    opacity: uploading > 0 ? .7 : 1, fontFamily: "inherit",
+                  }}
+                >
+                  {uploading > 0
+                    ? <><Spinner size={16} color="#fff" /> {uploading} ta yuklanmoqda...</>
+                    : <><Upload size={15} /> Rasm yuklash</>}
+                </button>
+                <span style={{ fontSize: 11, color: "#94A3B8" }}>
+                  💡 Ctrl+Click — bir vaqtda ko'p rasm tanlash
+                </span>
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* ── Rasm Galereyasi ── */}
-        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 24, marginTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, color: '#0D1117', margin: 0 }}>
-               {photosData?.photos.length ? <span style={{ fontSize: 13, color: '#6B7280', fontWeight: 400 }}>({photosData.photos.length} ta)</span> : null}
-            </h3>
-            <button
-              onClick={() => galleryRef.current?.click()}
-              disabled={uploadingPhoto}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
-                borderRadius: 8, border: 'none', background: '#1E3EB4', color: '#fff',
-                fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: uploadingPhoto ? 0.6 : 1 }}>
-              {uploadingPhoto ? '⏳ Yuklanmoqda...' : "+ Rasm qo'shish"}
-            </button>
-            <input ref={galleryRef} type="file" accept="image/*"
-              style={{ display: 'none' }} onChange={handleGalleryUpload} />
+            <input ref={uploadRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleUpload} />
           </div>
 
-          {!photosData?.photos.length ? (
-            <div style={{ textAlign: 'center', padding: '32px 20px', color: '#9CA3AF',
-              border: '1px dashed #E4E7ED', borderRadius: 10 }}>
-              <div style={{ marginBottom: 12 }}><Images size={36} color="#D1D5DB" /></div>
-              <p style={{ fontSize: 13, marginBottom: 12 }}>Hali rasm yuklanmagan</p>
-              <button onClick={() => galleryRef.current?.click()}
-                style={{ padding: '6px 16px', borderRadius: 8, border: '1px solid #D1D5DB',
-                  background: 'transparent', color: '#6B7280', cursor: 'pointer', fontSize: 12 }}>
-                Birinchi rasmni yuklash
+          {/* Gallery */}
+          {photos.length === 0 ? (
+            <div style={{
+              background: "#fff", border: "2px dashed #E2E8F0", borderRadius: 18,
+              padding: "72px 24px", textAlign: "center",
+            }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: 20, background: "#F1F5F9",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 18px",
+              }}>
+                <Camera size={32} color="#CBD5E1" />
+              </div>
+              <p style={{ fontSize: 16, fontWeight: 500, color: "#374151", marginBottom: 8 }}>
+                Hali rasm yuklanmagan
+              </p>
+              <p style={{ fontSize: 13, color: "#94A3B8", marginBottom: 20 }}>
+                Yuqoridagi tugmani bosib rasmlarni yuklang
+              </p>
+              <button
+                onClick={() => uploadRef.current?.click()}
+                style={{
+                  padding: "9px 22px", borderRadius: 10, border: "1.5px solid #E2E8F0",
+                  background: "#fff", color: "#64748B", cursor: "pointer",
+                  fontSize: 13, fontFamily: "inherit",
+                }}
+              >
+                Rasm yuklash
               </button>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-              {photosData.photos.map(photo => (
-                <div key={photo.id} style={{ borderRadius: 10, overflow: 'hidden',
-                  border: photo.is_profile ? '2px solid #1E3EB4' : '1px solid #E4E7ED',
-                  background: '#F8FAFC', position: 'relative' }}>
-                  <img
-                    src={`/api/v1/animals/photos/file/${photo.id}`}
-                    alt={photo.file_name}
-                    style={{ width: '100%', height: 130, objectFit: 'cover', display: 'block' }}
-                  />
-                  {photo.is_profile && (
-                    <div style={{ position: 'absolute', top: 5, left: 5,
-                      background: '#1E3EB4', color: '#fff', fontSize: 10, fontWeight: 700,
-                      padding: '2px 7px', borderRadius: 99 }}>
-                      Profil
-                    </div>
-                  )}
-                  <div style={{ padding: '7px 8px', display: 'flex', gap: 5 }}>
-                    {!photo.is_profile && (
-                      <button
-                        onClick={() => handleSetProfile(photo.id)}
-                        style={{ flex: 1, fontSize: 10, padding: '3px 0', borderRadius: 6,
-                          border: '1px solid #BFDBFE', background: '#EFF6FF',
-                          color: '#1E3EB4', cursor: 'pointer', fontWeight: 600 }}>
-                        Profil qil
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeletePhoto(photo.id)}
-                      style={{ padding: '3px 7px', borderRadius: 6,
-                        border: '1px solid #FCA5A5', background: '#FEF2F2',
-                        color: '#EF4444', cursor: 'pointer', fontSize: 12 }}>
-                      <Trash2 size={12} />
-                    </button>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
+              gap: 16,
+            }}>
+              {photos.map(photo => (
+                <PhotoCard
+                  key={photo.id}
+                  photo={photo}
+                  onSetProfile={() => setProfilePhoto(photo.id)}
+                  onSetMuzzle={() => setMuzzlePhoto(photo.id)}
+                  onDelete={() => deletePhoto(photo.id)}
+                  onZoom={() => setLightbox(photo.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* AI info card */}
+          <div style={{
+            ...card,
+            background: "linear-gradient(135deg, #F0F7FF 0%, #F5F3FF 100%)",
+            border: "1px solid #DBEAFE",
+          }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px", color: "#1E40AF" }}>
+              AI Identifikatsiya qanday ishlaydi?
+            </h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
+              {[
+                { n: "1", c: "#2563EB", t: "Rasm yuklang",     d: "Tumshuq rasmi — aniq, yaxshi yoritilgan. Kamida 5 ta." },
+                { n: "2", c: "#7C3AED", t: "Embedding",        d: "MobileNetV2 128-o'lchamli vektor yaratadi." },
+                { n: "3", c: "#16A34A", t: "Taqqoslash",       d: "Cosine o'xshashlik ≥ 0.85 bo'lsa — jonivor tanildi." },
+                { n: "4", c: "#D97706", t: "ADI & Vazn",       d: "Tanilgan jonivorda avtomatik hisoblanadi." },
+              ].map(({ n, c, t, d }) => (
+                <div key={n} style={{ display: "flex", gap: 10 }}>
+                  <div style={{
+                    width: 26, height: 26, borderRadius: 8, background: c,
+                    color: "#fff", display: "grid", placeItems: "center",
+                    fontSize: 12, fontWeight: 700, flexShrink: 0,
+                  }}>{n}</div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2, color: "#0F172A" }}>{t}</div>
+                    <div style={{ fontSize: 11, color: "#64748B", lineHeight: 1.5 }}>{d}</div>
                   </div>
                 </div>
               ))}
             </div>
-          )}
+            {embedCount < 5 && (
+              <div style={{
+                marginTop: 14, padding: "8px 14px", borderRadius: 8,
+                background: "#FFFBEB", border: "1px solid #FDE68A",
+                fontSize: 12, color: "#D97706", fontWeight: 500,
+              }}>
+                ⚠ Hozirda {embedCount} ta embedding bor. Kamida 5 ta rasm kerak — yana {5 - embedCount} ta qo'shing.
+              </div>
+            )}
+          </div>
         </div>
-        </>
       )}
     </div>
   );

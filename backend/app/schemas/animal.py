@@ -186,6 +186,7 @@ class AnimalResponse(AnimalBase):
 
     id: int
     profile_image: Optional[str] = None
+    muzzle_image: Optional[str] = None
     photos: list[AnimalPhotoResponse] = []
     first_detected_at: Optional[datetime] = None
     last_detected_at: Optional[datetime] = None
