@@ -1120,8 +1120,171 @@ export default function AnimalDetailPage() {
       )}
 
       {/* ═══════════════════ WEIGHT ═══════════════════ */}
-      {tab === "weight" && (
+            {tab === "weight" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadein .25s" }}>
+
+          {/* ── E5: Tur standarti vs haqiqiy vazn ── */}
+          {(() => {
+            // Tur bo'yicha standart vaznlar (qoramol zootexnikasi normasi)
+            const WEIGHT_STANDARDS: Record<string, {
+              label: string;
+              stages: { name: string; minAge: number; maxAge: number; minKg: number; maxKg: number; }[];
+            }> = {
+              cattle: {
+                label: "Qoramol",
+                stages: [
+                  { name: "Buzoq (0-6 oy)",      minAge: 0,   maxAge: 6,   minKg: 40,  maxKg: 180  },
+                  { name: "Yosh (6-18 oy)",       minAge: 6,   maxAge: 18,  minKg: 180, maxKg: 380  },
+                  { name: "O'smir (18-30 oy)",    minAge: 18,  maxAge: 30,  minKg: 380, maxKg: 520  },
+                  { name: "Yetuk (30+ oy)",       minAge: 30,  maxAge: 999, minKg: 450, maxKg: 750  },
+                ],
+              },
+              sheep: {
+                label: "Qo'y",
+                stages: [
+                  { name: "Qo'zi (0-4 oy)",      minAge: 0,  maxAge: 4,  minKg: 5,  maxKg: 35  },
+                  { name: "Yosh (4-12 oy)",       minAge: 4,  maxAge: 12, minKg: 35, maxKg: 60  },
+                  { name: "Yetuk (12+ oy)",       minAge: 12, maxAge: 999, minKg: 45, maxKg: 90  },
+                ],
+              },
+              goat: {
+                label: "Echki",
+                stages: [
+                  { name: "Bolasi (0-4 oy)",     minAge: 0,  maxAge: 4,  minKg: 3,  maxKg: 20  },
+                  { name: "Yosh (4-12 oy)",       minAge: 4,  maxAge: 12, minKg: 20, maxKg: 35  },
+                  { name: "Yetuk (12+ oy)",       minAge: 12, maxAge: 999, minKg: 30, maxKg: 60  },
+                ],
+              },
+              horse: {
+                label: "Ot",
+                stages: [
+                  { name: "Toy (0-12 oy)",        minAge: 0,  maxAge: 12, minKg: 50,  maxKg: 220  },
+                  { name: "Yosh (12-36 oy)",       minAge: 12, maxAge: 36, minKg: 220, maxKg: 400  },
+                  { name: "Yetuk (36+ oy)",        minAge: 36, maxAge: 999, minKg: 380, maxKg: 600 },
+                ],
+              },
+            };
+
+            const std = WEIGHT_STANDARDS[animal.species];
+            if (!std) return null;
+
+            // Yoshni hisoblash
+            const ageMonths = animal.birth_date
+              ? Math.floor((Date.now() - new Date(animal.birth_date).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
+              : null;
+
+            // Mos bosqichni topish
+            const stage = ageMonths != null
+              ? std.stages.find(s => ageMonths >= s.minAge && ageMonths < s.maxAge) ?? std.stages[std.stages.length - 1]
+              : std.stages[std.stages.length - 1];
+
+            // Haqiqiy so'nggi vazn
+            const lastW = weights.length > 0
+              ? [...weights].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]?.estimated_weight_kg
+              : null;
+
+            // Holat hisoblash
+            let status: "normal" | "low" | "high" | "unknown" = "unknown";
+            let pct = 50;
+            if (lastW != null) {
+              const mid = (stage.minKg + stage.maxKg) / 2;
+              const range = stage.maxKg - stage.minKg;
+              pct = Math.min(100, Math.max(0, ((lastW - stage.minKg) / range) * 100));
+              if (lastW < stage.minKg * 0.9)      status = "low";
+              else if (lastW > stage.maxKg * 1.1) status = "high";
+              else                                 status = "normal";
+            }
+
+            const statusCfg = {
+              normal:  { label: "Normada ✓",    color: "#059669", bg: "#ECFDF5", border: "#A7F3D0", bar: "#059669" },
+              low:     { label: "Pastroq ↓",    color: "#DC2626", bg: "#FEF2F2", border: "#FECACA", bar: "#DC2626" },
+              high:    { label: "Yuqoriroq ↑",  color: "#D97706", bg: "#FFFBEB", border: "#FDE68A", bar: "#D97706" },
+              unknown: { label: "Ma'lumot yo'q", color: "#6B7280", bg: "#F9FAFB", border: "#E5E7EB", bar: "#D1D5DB" },
+            };
+            const sc = statusCfg[status];
+
+            return (
+              <div style={{
+                background: "#fff", border: "1px solid #E2E8F0",
+                borderRadius: 14, padding: "18px 20px",
+                borderLeft: `4px solid ${sc.bar}`,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+                  <div>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 2px", color: "#0D1117" }}>
+                      {std.label} — Vazn Standarti
+                    </h3>
+                    <p style={{ fontSize: 12, color: "#6B7280", margin: 0 }}>
+                      {stage.name}
+                      {ageMonths != null && ` • Yoshi: ${ageMonths} oy`}
+                    </p>
+                  </div>
+                  <span style={{
+                    padding: "5px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`,
+                  }}>
+                    {sc.label}
+                  </span>
+                </div>
+
+                {/* Ko'rsatkichlar */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+                  {[
+                    { label: "Haqiqiy vazn",    value: lastW != null ? `${lastW.toFixed(1)} kg` : "—",                  color: sc.color },
+                    { label: "Norma (min–maks)", value: `${stage.minKg}–${stage.maxKg} kg`,                              color: "#374151" },
+                    { label: "Farq",             value: lastW != null ? `${(lastW - (stage.minKg + stage.maxKg) / 2).toFixed(1)} kg` : "—", color: lastW == null ? "#6B7280" : lastW < stage.minKg ? "#DC2626" : lastW > stage.maxKg ? "#D97706" : "#059669" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{
+                      background: "#F8FAFC", borderRadius: 10, padding: "10px 12px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 600, marginBottom: 3 }}>{label}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9CA3AF", marginBottom: 4 }}>
+                    <span>{stage.minKg} kg</span>
+                    <span style={{ color: "#6B7280", fontWeight: 600 }}>Ideal zona</span>
+                    <span>{stage.maxKg} kg</span>
+                  </div>
+                  <div style={{
+                    position: "relative", height: 10, borderRadius: 6,
+                    background: "#F1F5F9", overflow: "hidden",
+                  }}>
+                    {/* Ideal zone highlight */}
+                    <div style={{
+                      position: "absolute", left: "5%", right: "5%", top: 0, bottom: 0,
+                      background: "rgba(16,185,129,0.12)", borderRadius: 4,
+                    }} />
+                    {/* Current position */}
+                    {lastW != null && (
+                      <div style={{
+                        position: "absolute",
+                        left: `calc(${Math.min(97, Math.max(3, pct))}% - 6px)`,
+                        top: -2, width: 14, height: 14,
+                        borderRadius: "50%",
+                        background: sc.bar,
+                        border: "2px solid #fff",
+                        boxShadow: `0 0 0 3px ${sc.bg}`,
+                        zIndex: 2,
+                        transition: "left .4s ease",
+                      }} />
+                    )}
+                  </div>
+                </div>
+
+                {!animal.birth_date && (
+                  <p style={{ fontSize: 11, color: "#9CA3AF", margin: "8px 0 0", textAlign: "center" }}>
+                    ⚠ Tug'ilgan sana kiritilmagan — yosh bo'yicha aniq bosqich aniqlanmadi
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           <div style={card}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 20px" }}>Vazn Grafigi (so'nggi 30 ta)</h3>
             {weightChartData.length === 0 ? (

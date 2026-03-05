@@ -27,8 +27,13 @@ import {
   Thermometer, Heart, Activity, Wifi, WifiOff,
   AlertTriangle, CheckCircle, RefreshCw, Cpu,
   Zap, Radio, BarChart3, Clock, TrendingUp,
-  TrendingDown, Minus, Server,
+  TrendingDown, Minus, Server, Search,
 } from 'lucide-react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine, Legend,
+} from 'recharts';
+import { format } from 'date-fns';
 import { apiFetch } from '../utils/apiFetch';
 
 // =============================================================================
@@ -894,8 +899,288 @@ function AnomaliesTab({
 // MAIN PAGE
 // =============================================================================
 
-type ActiveTab = 'overview' | 'devices' | 'anomalies';
+type ActiveTab = 'overview' | 'devices' | 'anomalies' | 'history';
 
+// =============================================================================
+// HISTORY TAB — Sensor tarix grafiği
+// =============================================================================
+
+interface HistoryPoint {
+  hour:           string | null;
+  temperature:    number | null;
+  heart_rate:     number | null;
+  activity_level: number | null;
+  weight_kg:      number | null;
+  count:          number;
+}
+
+interface AnimalHistoryResponse {
+  animal_id:    number;
+  days:         number;
+  total_points: number;
+  points:       HistoryPoint[];
+}
+
+interface FarmHistoryPoint {
+  date:            string | null;
+  avg_temperature: number | null;
+  avg_heart_rate:  number | null;
+  avg_activity:    number | null;
+  animal_count:    number;
+  reading_count:   number;
+}
+
+interface FarmHistoryResponse {
+  days:         number;
+  total_points: number;
+  points:       FarmHistoryPoint[];
+}
+
+// Normal diapzonlar (qoramol)
+const NORMAL = {
+  temperature: { min: 38.0, max: 39.5, warn_min: 37.5, warn_max: 40.0 },
+  heart_rate:  { min: 40,   max: 80,   warn_min: 30,   warn_max: 100  },
+};
+
+function HistoryTab() {
+  const [mode, setMode]           = useState<'farm' | 'animal'>('farm');
+  const [days, setDays]           = useState(7);
+  const [animalId, setAnimalId]   = useState('');
+  const [inputId, setInputId]     = useState('');
+  const [metric, setMetric]       = useState<'temperature' | 'heart_rate' | 'activity_level'>('temperature');
+
+  const farmQ = useQuery<FarmHistoryResponse>({
+    queryKey: ['sensor-farm-history', days],
+    queryFn:  () => apiFetch(`/api/v1/sensors/farm-history?days=${days}`),
+    enabled:  mode === 'farm',
+    staleTime: 60_000,
+    retry:    false,
+  });
+
+  const animalQ = useQuery<AnimalHistoryResponse>({
+    queryKey: ['sensor-animal-history', animalId, days],
+    queryFn:  () => apiFetch(`/api/v1/sensors/history/${animalId}?days=${days}`),
+    enabled:  mode === 'animal' && !!animalId,
+    staleTime: 60_000,
+    retry:    false,
+  });
+
+  const isLoading = mode === 'farm' ? farmQ.isLoading : animalQ.isLoading;
+  const isError   = mode === 'farm' ? farmQ.isError   : animalQ.isError;
+
+  // Chart data
+  const farmData = (farmQ.data?.points ?? []).map(p => ({
+    label:       p.date ? format(new Date(p.date), 'dd.MM') : '',
+    temperature: p.avg_temperature,
+    heart_rate:  p.avg_heart_rate,
+    activity:    p.avg_activity != null ? +(p.avg_activity * 100).toFixed(1) : null,
+    animals:     p.animal_count,
+  }));
+
+  const animalData = (animalQ.data?.points ?? []).map(p => ({
+    label:       p.hour ? format(new Date(p.hour), 'dd.MM HH:mm') : '',
+    temperature: p.temperature,
+    heart_rate:  p.heart_rate,
+    activity:    p.activity_level != null ? +(p.activity_level * 100).toFixed(1) : null,
+    weight:      p.weight_kg,
+  }));
+
+  const chartData = mode === 'farm' ? farmData : animalData;
+
+  const METRIC_CFG = {
+    temperature:    { label: 'Harorat (°C)',      color: '#EF4444', unit: '°C' },
+    heart_rate:     { label: 'Yurak urishi (bpm)', color: '#3B82F6', unit: ' bpm' },
+    activity_level: { label: 'Faollik (%)',        color: '#10B981', unit: '%' },
+  };
+  const cfg = METRIC_CFG[metric];
+
+  const inp: React.CSSProperties = {
+    padding: '7px 12px', border: '1px solid #E4E7ED',
+    borderRadius: 8, fontSize: 13, color: '#374151',
+    outline: 'none', fontFamily: 'Outfit, sans-serif',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Controls */}
+      <div style={{
+        background: '#F8FAFC', border: '1px solid #E4E7ED',
+        borderRadius: 12, padding: '14px 16px',
+        display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+      }}>
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', background: '#fff', border: '1px solid #E4E7ED', borderRadius: 8, overflow: 'hidden' }}>
+          {(['farm', 'animal'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              padding: '7px 14px', border: 'none',
+              background: mode === m ? '#1E3EB4' : 'transparent',
+              color: mode === m ? '#fff' : '#6B7280',
+              fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'Outfit, sans-serif',
+            }}>
+              {m === 'farm' ? '🌾 Ferma' : '🐄 Jonivor'}
+            </button>
+          ))}
+        </div>
+
+        {/* Animal search (only for animal mode) */}
+        {mode === 'animal' && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              value={inputId}
+              onChange={e => setInputId(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && setAnimalId(inputId)}
+              placeholder="Jonivor ID (raqam)..."
+              style={{ ...inp, width: 160 }}
+              type="number"
+            />
+            <button onClick={() => setAnimalId(inputId)} style={{
+              padding: '7px 12px', border: 'none',
+              background: '#1E3EB4', borderRadius: 8,
+              color: '#fff', cursor: 'pointer',
+            }}>
+              <Search size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Metric */}
+        <select value={metric} onChange={e => setMetric(e.target.value as typeof metric)} style={inp}>
+          <option value="temperature">🌡 Harorat</option>
+          <option value="heart_rate">❤️ Yurak urishi</option>
+          <option value="activity_level">⚡ Faollik</option>
+        </select>
+
+        {/* Days */}
+        <select value={days} onChange={e => setDays(Number(e.target.value))} style={inp}>
+          <option value={1}>1 kun</option>
+          <option value={3}>3 kun</option>
+          <option value={7}>7 kun</option>
+          <option value={14}>14 kun</option>
+          <option value={30}>30 kun</option>
+        </select>
+      </div>
+
+      {/* Chart */}
+      <div style={{
+        background: '#fff', border: '1px solid #E4E7ED',
+        borderRadius: 12, padding: '20px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0D1117', margin: 0 }}>
+            {cfg.label} — So'nggi {days} kun
+          </h3>
+          {mode === 'animal' && animalId && (
+            <span style={{
+              padding: '4px 10px', background: '#EEF2FF',
+              borderRadius: 6, fontSize: 12, fontWeight: 600, color: '#1E3EB4',
+            }}>
+              Jonivor #{animalId}
+            </span>
+          )}
+        </div>
+
+        {isLoading ? (
+          <div style={{ height: 300, display: 'grid', placeItems: 'center', color: '#6B7280' }}>
+            <RefreshCw size={24} style={{ animation: 'tv-pulse 1s linear infinite' }} />
+          </div>
+        ) : isError ? (
+          <div style={{ height: 300, display: 'grid', placeItems: 'center' }}>
+            <div style={{ textAlign: 'center', color: '#DC2626' }}>
+              <AlertTriangle size={28} style={{ margin: '0 auto 8px', display: 'block' }} />
+              <p style={{ fontSize: 13 }}>
+                {mode === 'animal' && !animalId
+                  ? 'Jonivor ID kiriting'
+                  : "Ma'lumot topilmadi"}
+              </p>
+            </div>
+          </div>
+        ) : chartData.length === 0 ? (
+          <div style={{ height: 300, display: 'grid', placeItems: 'center', color: '#9CA3AF' }}>
+            <div style={{ textAlign: 'center' }}>
+              <BarChart3 size={32} style={{ margin: '0 auto 8px', display: 'block', opacity: .3 }} />
+              <p style={{ fontSize: 13 }}>
+                {mode === 'animal' && !animalId
+                  ? '⬆️ Jonivor ID kiriting'
+                  : "Bu davr uchun sensor ma'lumoti yo'q"}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={320}>
+            <LineChart data={chartData} margin={{ top: 8, right: 20, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10 }}
+                stroke="#E2E8F0"
+                interval="preserveStartEnd"
+              />
+              <YAxis tick={{ fontSize: 11 }} stroke="#E2E8F0" />
+              <Tooltip
+                contentStyle={{ borderRadius: 10, border: '1px solid #E4E7ED', fontSize: 12 }}
+                formatter={(v: number) => [`${v}${cfg.unit}`, cfg.label]}
+              />
+              {/* Normal range reference lines */}
+              {metric === 'temperature' && (
+                <>
+                  <ReferenceLine y={NORMAL.temperature.min} stroke="#10B981" strokeDasharray="4 4" label={{ value: 'Min norm', position: 'right', fontSize: 10, fill: '#10B981' }} />
+                  <ReferenceLine y={NORMAL.temperature.max} stroke="#10B981" strokeDasharray="4 4" label={{ value: 'Max norm', position: 'right', fontSize: 10, fill: '#10B981' }} />
+                  <ReferenceLine y={NORMAL.temperature.warn_max} stroke="#F59E0B" strokeDasharray="3 3" label={{ value: 'Ogohlantirish', position: 'right', fontSize: 10, fill: '#F59E0B' }} />
+                </>
+              )}
+              {metric === 'heart_rate' && (
+                <>
+                  <ReferenceLine y={NORMAL.heart_rate.min} stroke="#10B981" strokeDasharray="4 4" label={{ value: 'Min norm', position: 'right', fontSize: 10, fill: '#10B981' }} />
+                  <ReferenceLine y={NORMAL.heart_rate.max} stroke="#10B981" strokeDasharray="4 4" label={{ value: 'Max norm', position: 'right', fontSize: 10, fill: '#10B981' }} />
+                </>
+              )}
+              <Line
+                type="monotone"
+                dataKey={metric === 'activity_level' ? 'activity' : metric}
+                stroke={cfg.color}
+                strokeWidth={2}
+                dot={chartData.length < 50 ? { r: 3, fill: cfg.color, strokeWidth: 0 } : false}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+
+        {/* Stats summary */}
+        {chartData.length > 0 && (
+          <div style={{
+            display: 'flex', gap: 16, marginTop: 16, flexWrap: 'wrap',
+            borderTop: '1px solid #F3F4F6', paddingTop: 14,
+          }}>
+            {(() => {
+              const key = metric === 'activity_level' ? 'activity' : metric;
+              const vals = chartData.map((d: any) => d[key]).filter((v: any) => v != null) as number[];
+              if (vals.length === 0) return null;
+              const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+              const min = Math.min(...vals);
+              const max = Math.max(...vals);
+              return [
+                { label: "O'rtacha", value: avg.toFixed(1) + cfg.unit, color: cfg.color },
+                { label: 'Minimum', value: min.toFixed(1) + cfg.unit, color: '#6B7280' },
+                { label: 'Maksimum', value: max.toFixed(1) + cfg.unit, color: '#6B7280' },
+                { label: 'Nuqtalar', value: String(vals.length), color: '#6B7280' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 500 }}>{label}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color }}>{value}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 export default function SensorPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
 
@@ -1138,6 +1423,11 @@ export default function SensorPage() {
             onClick={() => setActiveTab('anomalies')}
             badge={anomalyCount}
           />
+          <Tab
+            label="Tarix"
+            active={activeTab === 'history'}
+            onClick={() => setActiveTab('history')}
+          />
         </div>
 
         {/* Tab content */}
@@ -1159,6 +1449,9 @@ export default function SensorPage() {
               data={anomaliesData}
               isLoading={anomaliesLoading}
             />
+          )}
+          {activeTab === 'history' && (
+            <HistoryTab />
           )}
         </div>
       </div>

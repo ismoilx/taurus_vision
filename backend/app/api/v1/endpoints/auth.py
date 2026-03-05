@@ -40,8 +40,13 @@ from app.schemas.auth import (
     UserUpdate,
     UserResponse,
     PasswordChangeRequest,
+    AdminPasswordResetRequest,
+    AuditLogResponse,
+    AuditLogListResponse,
 )
 from app.models.user import User
+from app.models.audit_log import AuditLog
+from sqlalchemy import select, func, desc
 
 logger = logging.getLogger(__name__)
 
@@ -447,4 +452,120 @@ async def activate_user(
         user_id=user_id,
         update_data=UserUpdate(is_active=True),
         updated_by=current_user,
+    )
+
+# =============================================================================
+# ADMIN PASSWORD RESET
+# =============================================================================
+
+@router.post(
+    "/users/{user_id}/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Foydalanuvchi parolini admin tomonidan tiklash (ADMIN)",
+    description=(
+        "Admin boshqa foydalanuvchi parolini joriy parolini bilmasdan tiklaydi. "
+        "Admin o'z parolini bu endpoint orqali o'zgartira olmaydi."
+    ),
+)
+async def admin_reset_password(
+    user_id: int,
+    data: AdminPasswordResetRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """
+    Admin tomonidan boshqa foydalanuvchi parolini tiklash.
+
+    Args:
+        user_id:      Paroli tiklanadigan foydalanuvchi ID
+        data:         Yangi parol ma'lumotlari
+        current_user: ADMIN tekshiruvi uchun
+        db:           DB session
+    """
+    from app.core.exceptions import (
+        EntityNotFoundError,
+        PermissionDeniedError,
+        BusinessRuleViolationError,
+    )
+    service = AuthService(db)
+    try:
+        await service.admin_reset_password(
+            user_id=user_id,
+            new_password=data.new_password,
+            admin_user=current_user,
+        )
+    except EntityNotFoundError as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=str(e))
+    except (PermissionDeniedError, BusinessRuleViolationError) as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# AUDIT LOG (ADMIN only)
+# =============================================================================
+
+@router.get(
+    "/audit-logs",
+    response_model=AuditLogListResponse,
+    summary="Xavfsizlik audit loglari (ADMIN)",
+    description=(
+        "Tizimda ro'y bergan barcha xavfsizlik voqealarini ko'rish. "
+        "Filtr: event_type, severity, user_id, sana oralig'i."
+    ),
+)
+async def get_audit_logs(
+    page: int = 1,
+    size: int = 50,
+    event_type: str | None = None,
+    severity: str | None = None,
+    username: str | None = None,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AuditLogListResponse:
+    """
+    Sahifalangan audit log ro'yxati.
+
+    Args:
+        page:       Sahifa raqami (1 dan boshlanadi)
+        size:       Sahifa hajmi (max 100)
+        event_type: Voqea turi filtri (LOGIN_SUCCESS, LOGIN_FAILED, ...)
+        severity:   Jiddiylik filtri (info, warning, critical)
+        username:   Foydalanuvchi nomi bo'yicha filtr
+        current_user: ADMIN tekshiruvi
+        db:         DB session
+
+    Returns:
+        AuditLogListResponse — sahifalangan ro'yxat
+    """
+    size = min(size, 100)
+    offset = (page - 1) * size
+
+    # Asosiy query
+    query = select(AuditLog).order_by(desc(AuditLog.occurred_at))
+
+    if event_type:
+        query = query.where(AuditLog.event_type == event_type)
+    if severity:
+        query = query.where(AuditLog.severity == severity)
+    if username:
+        query = query.where(AuditLog.username.ilike(f"%{username}%"))
+
+    # Total hisoblash
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar_one()
+
+    # Sahifalash
+    query = query.offset(offset).limit(size)
+    result = await db.execute(query)
+    items = list(result.scalars().all())
+
+    return AuditLogListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=size,
+        pages=max(1, -(-total // size)),  # ceiling division
     )

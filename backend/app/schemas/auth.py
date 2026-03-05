@@ -186,6 +186,41 @@ class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
 
+
+class AdminPasswordResetRequest(BaseModel):
+    """
+    Admin tomonidan boshqa foydalanuvchi parolini tiklash uchun schema.
+
+    Joriy parol talab qilinmaydi — ADMIN huquqi tekshiruvi yetarli.
+    """
+
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        """
+        Yangi parol kuchliligi tekshiruvi.
+
+        Args:
+            v: Yangi parol
+
+        Returns:
+            Parol (o'zgartirilmaydi)
+
+        Raises:
+            ValueError: Parol kuchsiz
+        """
+        if len(v) < 8:
+            raise ValueError("Parol kamida 8 belgidan iborat bo'lishi kerak.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Parol kamida 1 ta katta harf (A-Z) o'z ichiga olishi kerak.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Parol kamida 1 ta kichik harf (a-z) o'z ichiga olishi kerak.")
+        if not re.search(r"\d", v):
+            raise ValueError("Parol kamida 1 ta raqam (0-9) o'z ichiga olishi kerak.")
+        return v
+
     @field_validator("new_password")
     @classmethod
     def validate_new_password(cls, v: str) -> str:
@@ -210,3 +245,34 @@ class PasswordChangeRequest(BaseModel):
         if not re.search(r"\d", v):
             raise ValueError("Yangi parol kamida 1 ta raqam o'z ichiga olishi kerak.")
         return v
+
+# =============================================================================
+# AUDIT LOG SCHEMAS
+# =============================================================================
+
+class AuditLogResponse(BaseModel):
+    """Bitta audit log yozuvi response schema."""
+
+    id: int
+    event_type: str
+    severity: str
+    user_id: Optional[int]
+    username: Optional[str]
+    ip_address: str
+    user_agent: Optional[str]
+    endpoint: Optional[str]
+    http_method: Optional[str]
+    details: Optional[dict]
+    occurred_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogListResponse(BaseModel):
+    """Sahifalangan audit log ro'yxati."""
+
+    items: list[AuditLogResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

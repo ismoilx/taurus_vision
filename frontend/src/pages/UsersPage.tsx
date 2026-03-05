@@ -305,15 +305,16 @@ function ResetPasswordModal({
 
   async function handleReset() {
     if (password.length < 8) { setError("Parol kamida 8 ta belgi bo'lishi kerak"); return; }
+    if (!/[A-Z]/.test(password)) { setError("Parol kamida 1 ta katta harf (A-Z) bo'lishi kerak"); return; }
+    if (!/[a-z]/.test(password)) { setError("Parol kamida 1 ta kichik harf (a-z) bo'lishi kerak"); return; }
+    if (!/\d/.test(password)) { setError("Parol kamida 1 ta raqam bo'lishi kerak"); return; }
     if (password !== confirm) { setError("Parollar mos kelmaydi"); return; }
     setLoading(true); setError('');
     try {
-      await apiFetch(`/api/v1/auth/users/${user.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ full_name: user.full_name }),
+      await apiFetch(`/api/v1/auth/users/${user.id}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ new_password: password }),
       });
-      // Admin parol reset uchun auth/change-password endpoint ishlatamiz
-      // Yoki user update da password field bo'lsa
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Xato');

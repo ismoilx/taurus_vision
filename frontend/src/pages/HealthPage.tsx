@@ -19,7 +19,7 @@ import {
   Stethoscope, Plus, Search, AlertTriangle, CheckCircle,
   Calendar, RefreshCw, Filter, ChevronRight, Clock,
   Activity, Heart, Shield, Syringe, Scissors,
-  AlertCircle, FileText, X, XCircle,
+  AlertCircle, FileText, X, XCircle, Lock, Unlock, Info,
 } from 'lucide-react';
 import { apiFetch } from '../utils/apiFetch';
 
@@ -665,6 +665,7 @@ export default function HealthPage() {
   const [showAdd, setShowAdd]       = useState(false);
   const [detail, setDetail]         = useState<HealthRecord | null>(null);
   const [toast, setToast]           = useState('');
+  const [activeSection, setActiveSection] = useState<'records' | 'vaccination' | 'quarantine'>('records');
 
   function showToast(msg: string) {
     setToast(msg);
@@ -706,6 +707,35 @@ export default function HealthPage() {
     queryFn:  () => apiFetch<{ records: HealthRecord[] }>('/api/v1/health/upcoming-checkups?days_ahead=14'),
   });
   const upcoming = upcomingRes?.records ?? [];
+
+  // F2 — Vaksinatsiyalar: /health/unresolved + type filter (resolved ham ko'rsatish uchun ikki so'rov)
+  const { data: vaccUnresolved } = useQuery({
+    queryKey: ['health', 'vaccinations', 'unresolved'],
+    queryFn:  () => apiFetch<{ records: HealthRecord[] }>('/api/v1/health/unresolved?limit=200'),
+    enabled:  activeSection === 'vaccination',
+    retry:    false,
+  });
+  const vaccinations = (vaccUnresolved?.records ?? []).filter(r => r.record_type === 'vaccination');
+
+  // F3 — Karantindagi jonivorlar
+  const { data: quarantineAnimals } = useQuery({
+    queryKey: ['animals', 'quarantine'],
+    queryFn:  () => apiFetch<{ items: Animal[]; total: number }>('/api/v1/animals/?status=quarantine&limit=100'),
+    enabled:  activeSection === 'quarantine',
+    retry:    false,
+  });
+  const qAnimals = quarantineAnimals?.items ?? [];
+
+  // F3 — Status o'zgartirish (karantinga qo'yish / chiqarish)
+  const statusMut = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      apiFetch(`/api/v1/animals/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    onSuccess: () => {
+      load();
+      qClient.invalidateQueries({ queryKey: ['animals', 'quarantine'] });
+      showToast('✅ Jonivor holati yangilandi!');
+    },
+  });
 
   // Combine unresolved + critical (deduplicated)
   const records: HealthRecord[] = (() => {
@@ -824,7 +854,43 @@ export default function HealthPage() {
         ))}
       </div>
 
+      {/* ── F2/F3 Section Tabs ── */}
+      <div style={{
+        display: 'flex', gap: 4, marginBottom: 20,
+        background: '#F1F5F9', borderRadius: 12,
+        padding: 4, width: 'fit-content',
+      }}>
+        {([
+          { key: 'records',     label: '📋 Barcha Yozuvlar', count: null },
+          { key: 'vaccination', label: '💉 Vaksinatsiyalar',  count: vaccinations.length || null },
+          { key: 'quarantine',  label: '🔒 Karantin',        count: qAnimals.length     || null },
+        ] as const).map(({ key, label, count }) => (
+          <button key={key} onClick={() => setActiveSection(key)} style={{
+            padding: '8px 16px', borderRadius: 9, border: 'none',
+            background: activeSection === key ? '#fff' : 'transparent',
+            boxShadow: activeSection === key ? '0 1px 6px rgba(0,0,0,0.08)' : 'none',
+            color: activeSection === key ? '#1E3EB4' : '#6B7280',
+            fontWeight: activeSection === key ? 700 : 500,
+            fontSize: 13, cursor: 'pointer',
+            fontFamily: "'Outfit', sans-serif",
+            display: 'flex', alignItems: 'center', gap: 6,
+            transition: 'all .15s',
+          }}>
+            {label}
+            {count != null && count > 0 && (
+              <span style={{
+                fontSize: 10, fontWeight: 800, padding: '1px 6px',
+                borderRadius: 10,
+                background: activeSection === key ? '#EEF2FF' : '#E5E7EB',
+                color: activeSection === key ? '#1E3EB4' : '#6B7280',
+              }}>{count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Main layout: table + sidebar */}
+{activeSection === 'records' && (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
 
         {/* LEFT — Records table */}
@@ -1016,6 +1082,316 @@ export default function HealthPage() {
 
         </div>
       </div>
+      )}
+
+
+      {/* ═══════════════════ F2 — VAKSINATSIYA JADVALI ═══════════════════ */}
+      {activeSection === 'vaccination' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
+
+          {/* LEFT */}
+          <div>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <h3 style={{ fontSize:15, fontWeight:700, color:'#0D1117', margin:0 }}>
+                Vaksinatsiya Tarixi
+              </h3>
+              <button
+                onClick={() => { setActiveSection('records'); setTimeout(() => setShowAdd(true), 50); }}
+                style={{
+                  display:'flex', alignItems:'center', gap:6,
+                  padding:'8px 16px', borderRadius:10, border:'none',
+                  background:'#059669', color:'#fff',
+                  fontSize:13, fontWeight:600, cursor:'pointer',
+                  fontFamily:"'Outfit',sans-serif",
+                }}
+              >
+                <Syringe size={13}/> Yangi Emlash Qo'shish
+              </button>
+            </div>
+
+            {vaccinations.length === 0 ? (
+              <div style={{ background:'#fff', border:'1px solid #E4E7ED', borderRadius:14, padding:'56px 24px', textAlign:'center' }}>
+                <Syringe size={40} color="#D1D5DB" style={{ margin:'0 auto 12px', display:'block' }}/>
+                <p style={{ color:'#9CA3AF', fontSize:14, margin:'0 0 6px' }}>Hali emlash yozuvi yo'q</p>
+                <p style={{ color:'#C4C9D4', fontSize:12, margin:0 }}>
+                  Yozuv qo'shishda <b>"Emlash"</b> turini tanlang
+                </p>
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {vaccinations.map(rec => {
+                  const animalObj  = animals.find(a => a.id === rec.animal_id);
+                  const daysLeft   = rec.next_checkup_date
+                    ? Math.ceil((new Date(rec.next_checkup_date).getTime() - Date.now()) / 86_400_000)
+                    : null;
+                  const isOverdue  = daysLeft != null && daysLeft < 0;
+                  const isSoon     = daysLeft != null && daysLeft >= 0 && daysLeft <= 14;
+                  const borderClr  = isOverdue ? '#DC2626' : isSoon ? '#D97706' : '#059669';
+                  return (
+                    <div key={rec.id} style={{
+                      background:'#fff', border:'1px solid #E4E7ED', borderRadius:12,
+                      padding:'14px 18px', borderLeft:`4px solid ${borderClr}`,
+                      display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12,
+                    }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, flexWrap:'wrap' }}>
+                          <span style={{
+                            fontSize:12, fontWeight:700, padding:'3px 10px', borderRadius:6,
+                            background:'#F0FDF4', color:'#059669',
+                          }}>
+                            💉 {animalObj?.tag_id ?? `#${rec.animal_id}`}
+                          </span>
+                          {rec.is_resolved && (
+                            <span style={{ fontSize:11, padding:'2px 8px', borderRadius:6, background:'#F0FDF4', color:'#16A34A' }}>✓ Bajarildi</span>
+                          )}
+                          {isOverdue && !rec.is_resolved && (
+                            <span style={{ fontSize:11, padding:'2px 8px', borderRadius:6, background:'#FEF2F2', color:'#DC2626' }}>
+                              ⚠ {Math.abs(daysLeft!)} kun kechikdi
+                            </span>
+                          )}
+                          {isSoon && !isOverdue && !rec.is_resolved && (
+                            <span style={{ fontSize:11, padding:'2px 8px', borderRadius:6, background:'#FFFBEB', color:'#D97706' }}>
+                              ⏰ {daysLeft} kunda
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ fontSize:13, fontWeight:600, color:'#0D1117', margin:'0 0 3px' }}>{rec.diagnosis}</p>
+                        {rec.medication && (
+                          <p style={{ fontSize:12, color:'#6B7280', margin:'0 0 2px' }}>💊 {rec.medication}</p>
+                        )}
+                        <div style={{ display:'flex', gap:14, marginTop:6, flexWrap:'wrap' }}>
+                          <span style={{ fontSize:11, color:'#9CA3AF' }}>
+                            📅 {new Date(rec.recorded_at).toLocaleDateString('uz-UZ')}
+                          </span>
+                          {rec.next_checkup_date && (
+                            <span style={{ fontSize:11, fontWeight: isOverdue ? 600:400, color: isOverdue ? '#DC2626':'#6B7280' }}>
+                              🔄 Keyingi: {new Date(rec.next_checkup_date).toLocaleDateString('uz-UZ')}
+                            </span>
+                          )}
+                          {rec.veterinarian && (
+                            <span style={{ fontSize:11, color:'#9CA3AF' }}>👨‍⚕️ {rec.veterinarian}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT — Vaccination sidebar */}
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+            {/* Stats */}
+            <div style={{ background:'#fff', border:'1px solid #E4E7ED', borderRadius:14, padding:18 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+                <Syringe size={14} color="#059669"/>
+                <h4 style={{ fontSize:13, fontWeight:700, color:'#0D1117', margin:0 }}>Holat Xulosa</h4>
+              </div>
+              {(() => {
+                const total      = vaccinations.length;
+                const done       = vaccinations.filter(r => r.is_resolved).length;
+                const overdue    = vaccinations.filter(r => {
+                  if (!r.next_checkup_date || r.is_resolved) return false;
+                  return new Date(r.next_checkup_date) < new Date();
+                }).length;
+                const soon14     = vaccinations.filter(r => {
+                  if (!r.next_checkup_date || r.is_resolved) return false;
+                  const d = Math.ceil((new Date(r.next_checkup_date).getTime() - Date.now()) / 86_400_000);
+                  return d >= 0 && d <= 14;
+                }).length;
+                return [
+                  { label:'Jami emlash',      value:total,  color:'#1E3EB4', bg:'#EEF2FF' },
+                  { label:'Bajarildi',         value:done,   color:'#059669', bg:'#ECFDF5' },
+                  { label:"Muddati o'tgan",    value:overdue, color:'#DC2626', bg:'#FEF2F2' },
+                  { label:'14 kun ichida',     value:soon14, color:'#D97706', bg:'#FFFBEB' },
+                ].map(({ label, value, color, bg }) => (
+                  <div key={label} style={{
+                    display:'flex', justifyContent:'space-between', alignItems:'center',
+                    padding:'8px 10px', borderRadius:8,
+                    background: value > 0 ? bg : '#F9FAFB', marginBottom:6,
+                  }}>
+                    <span style={{ fontSize:12, color:'#374151' }}>{label}</span>
+                    <span style={{ fontSize:15, fontWeight:800, color: value > 0 ? color : '#9CA3AF' }}>{value}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Guide */}
+            <div style={{ background:'#EEF2FF', border:'1px solid #C7D2FE', borderRadius:12, padding:14 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                <Info size={13} color="#1E3EB4"/>
+                <span style={{ fontSize:12, fontWeight:700, color:'#1E3EB4' }}>Qo'llanma</span>
+              </div>
+              <ul style={{ margin:0, padding:'0 0 0 14px', fontSize:11, color:'#4B5563', lineHeight:1.8 }}>
+                <li>Yangi emlash: "Emlash" turini tanlang</li>
+                <li>"Keyingi tekshiruv" sanasini belgilang</li>
+                <li>Muddati o'tgan — qizil bilan ko'rsatiladi</li>
+                <li>14 kun ichida — sariq bilan ko'rsatiladi</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════ F3 — KARANTIN BOSHQARUVI ═══════════════════ */}
+      {activeSection === 'quarantine' && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 280px', gap:20 }}>
+
+          {/* LEFT */}
+          <div>
+
+            {/* Karantindagi jonivorlar */}
+            <div style={{ marginBottom:28 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+                <h3 style={{ fontSize:14, fontWeight:700, color:'#0D1117', margin:0 }}>
+                  🔒 Karantindagi Jonivorlar
+                </h3>
+                <span style={{
+                  fontSize:11, background:'#FFFBEB', color:'#D97706',
+                  border:'1px solid #FDE68A', padding:'3px 10px', borderRadius:8, fontWeight:700,
+                }}>
+                  {qAnimals.length} ta
+                </span>
+              </div>
+
+              {qAnimals.length === 0 ? (
+                <div style={{ background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:12, padding:'28px 20px', textAlign:'center' }}>
+                  <Lock size={32} color="#FDE68A" style={{ margin:'0 auto 10px', display:'block' }}/>
+                  <p style={{ color:'#92400E', fontSize:13, margin:0 }}>Hozirda karantinda jonivor yo'q</p>
+                </div>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                  {qAnimals.map(a => (
+                    <div key={a.id} style={{
+                      background:'#fff', border:'1px solid #FDE68A',
+                      borderLeft:'4px solid #D97706',
+                      borderRadius:12, padding:'12px 16px',
+                      display:'flex', justifyContent:'space-between', alignItems:'center', gap:12,
+                    }}>
+                      <div>
+                        <span style={{ fontSize:14, fontWeight:800, color:'#0D1117' }}>{a.tag_id}</span>
+                        <span style={{ fontSize:12, color:'#6B7280', marginLeft:10 }}>
+                          {a.species}{a.breed ? ` · ${a.breed}` : ''}
+                        </span>
+                        {a.notes && (
+                          <p style={{ fontSize:11, color:'#92400E', margin:'4px 0 0', fontStyle:'italic' }}>"{a.notes}"</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => statusMut.mutate({ id: a.id, status:'active' })}
+                        disabled={statusMut.isPending}
+                        style={{
+                          display:'flex', alignItems:'center', gap:5,
+                          padding:'7px 14px', borderRadius:8, border:'none',
+                          background:'#ECFDF5', color:'#059669',
+                          fontSize:12, fontWeight:600, cursor:'pointer',
+                          fontFamily:"'Outfit',sans-serif",
+                          opacity: statusMut.isPending ? 0.6 : 1,
+                          flexShrink:0,
+                        }}
+                      >
+                        <Unlock size={12}/> Chiqarish
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Faol jonivornlarni karantinga qo'yish */}
+            <div>
+              <h4 style={{ fontSize:14, fontWeight:700, color:'#0D1117', margin:'0 0 12px' }}>
+                Jonivorni Karantinga Qo'yish
+              </h4>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                {animals
+                  .filter(a => a.status === 'active' || a.status === 'sick')
+                  .slice(0, 10)
+                  .map(a => (
+                    <div key={a.id} style={{
+                      background:'#F9FAFB', border:'1px solid #E4E7ED',
+                      borderRadius:10, padding:'10px 14px',
+                      display:'flex', justifyContent:'space-between', alignItems:'center',
+                    }}>
+                      <div>
+                        <span style={{ fontSize:13, fontWeight:600, color:'#0D1117' }}>{a.tag_id}</span>
+                        <span style={{ fontSize:11, color:'#6B7280', marginLeft:8 }}>
+                          {a.species} ·{' '}
+                          {a.status === 'sick' ? (
+                            <span style={{ color:'#DC2626' }}>Kasal</span>
+                          ) : (
+                            <span style={{ color:'#059669' }}>Faol</span>
+                          )}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => statusMut.mutate({ id: a.id, status:'quarantine' })}
+                        disabled={statusMut.isPending}
+                        style={{
+                          display:'flex', alignItems:'center', gap:5,
+                          padding:'5px 12px', borderRadius:7,
+                          border:'1px solid #FDE68A', background:'#FFFBEB',
+                          color:'#92400E', fontSize:11, fontWeight:600,
+                          cursor:'pointer', fontFamily:"'Outfit',sans-serif",
+                          opacity: statusMut.isPending ? 0.6 : 1,
+                        }}
+                      >
+                        <Lock size={11}/> Karantinga
+                      </button>
+                    </div>
+                  ))}
+                {animals.filter(a => a.status === 'active' || a.status === 'sick').length > 10 && (
+                  <p style={{ fontSize:12, color:'#9CA3AF', textAlign:'center', margin:'4px 0 0' }}>
+                    Ko'proq jonivorlar uchun Jonivorlar sahifasiga o'ting →
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT — Quarantine sidebar */}
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+            <div style={{ background:'#fff', border:'1px solid #E4E7ED', borderRadius:14, padding:18 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+                <Lock size={14} color="#D97706"/>
+                <h4 style={{ fontSize:13, fontWeight:700, color:'#0D1117', margin:0 }}>Poda Holati</h4>
+              </div>
+              {[
+                { label:'Karantinda',  value: qAnimals.length,                                   color:'#D97706', bg:'#FFFBEB' },
+                { label:'Kasal',       value: animals.filter(a => a.status==='sick').length,      color:'#DC2626', bg:'#FEF2F2' },
+                { label:'Faol',        value: animals.filter(a => a.status==='active').length,    color:'#059669', bg:'#ECFDF5' },
+                { label:'Sotilgan',    value: animals.filter(a => a.status==='sold').length,      color:'#6B7280', bg:'#F9FAFB' },
+              ].map(({ label, value, color, bg }) => (
+                <div key={label} style={{
+                  display:'flex', justifyContent:'space-between', alignItems:'center',
+                  padding:'8px 10px', borderRadius:8,
+                  background: value > 0 ? bg : '#F9FAFB', marginBottom:6,
+                }}>
+                  <span style={{ fontSize:12, color:'#374151' }}>{label}</span>
+                  <span style={{ fontSize:15, fontWeight:800, color: value > 0 ? color : '#9CA3AF' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background:'#FFFBEB', border:'1px solid #FDE68A', borderRadius:12, padding:14 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                <AlertTriangle size={13} color="#D97706"/>
+                <span style={{ fontSize:12, fontWeight:700, color:'#92400E' }}>Karantin Qoidalari</span>
+              </div>
+              <ul style={{ margin:0, padding:'0 0 0 14px', fontSize:11, color:'#92400E', lineHeight:1.8 }}>
+                <li>Karantindagi jonivorni podadan ajrating</li>
+                <li>Kunlik harorat va holat kuzatuvi olib boring</li>
+                <li>Barcha dori-darmon yozuvlarini kiriting</li>
+                <li>Chiqarishdan oldin sog'liq tekshiruvini bajaring</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       {showAdd && (

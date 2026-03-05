@@ -35,9 +35,9 @@ export const queryClient = new QueryClient({
       // Fokus qaytganda refetch yo'q — WS o'zi yangilaydi
       refetchOnWindowFocus: false,
 
-      // Tarmoq xatosida 2 marta urinadi
-      retry: 2,
-      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8_000),
+      // Xato bo'lsa 1 marta urinadi (2 edi → sahifalar qotib qolardi)
+      retry: 1,
+      retryDelay: 1_500,
     },
     mutations: {
       retry: 0,

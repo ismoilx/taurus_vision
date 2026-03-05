@@ -15,13 +15,15 @@ import {
   LayoutDashboard, Activity, TrendingUp, Brain,
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
-  LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins,
+  LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WebSocketProvider } from './context/WebSocketContext';
 import { SystemLoadingScreen } from './components/SystemLoadingScreen';
+import { apiFetch } from './utils/apiFetch';
 import './App.css';
 
 // ─── Cow Icon ────────────────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ const FeedPage          = lazy(() => import('./pages/FeedPage'));
 const SensorPage        = lazy(() => import('./pages/SensorPage'));
 const FinancePage       = lazy(() => import('./pages/FinancePage'));
 const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'));
+const AuditLogPage      = lazy(() => import('./pages/AuditLogPage'));
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -147,6 +150,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/tasks',     icon:ClipboardList, label:'Vazifalar'           },
       { to:'/cameras',   icon:Camera,        label:'Kameralar'           },
       { to:'/users',     icon:Users,         label:'Foydalanuvchilar'    },
+      { to:'/audit-log', icon:Shield,         label:'Audit Log'           },
       { to:'/training',  icon:Cpu,           label:'AI Training'         },
     ],
   },
@@ -159,6 +163,79 @@ const BOTTOM_MAIN: NavItem[] = [
   NAV_GROUPS[1].items[1],
   NAV_GROUPS[2].items[0],
 ];
+
+// =============================================================================
+// ALERT BELL — real-time kritik alertlar badge
+// =============================================================================
+interface AlertStats {
+  total_open:    number;
+  critical_open: number;
+  high_open:     number;
+}
+
+function AlertBell() {
+  const navigate  = useNavigate();
+  const { user }  = useAuth();                         // faqat login bo'lganda so'rov
+
+  const { data } = useQuery<AlertStats>({
+    queryKey:        ['alert-stats-nav'],
+    queryFn:         () => apiFetch<AlertStats>('/api/v1/alerts/stats'),
+    enabled:         !!user,                           // login bo'lmasa so'rov yo'q
+    refetchInterval: 60_000,                           // 30s → 60s (yuk kamayadi)
+    staleTime:       45_000,
+    retry:           false,                            // xato bo'lsa qotib qolmasin
+    gcTime:          60_000,
+  });
+
+  const critical = data?.critical_open ?? 0;
+  const total    = data?.total_open    ?? 0;
+  const hasCrit  = critical > 0;
+  const hasAny   = total > 0;
+
+  const badgeCount = hasCrit ? critical : total > 0 ? total : 0;
+  const badgeColor = hasCrit ? '#DC2626' : '#D97706';
+
+  return (
+    <button
+      onClick={() => navigate('/alerts')}
+      title={hasCrit ? `${critical} ta kritik alert!` : total > 0 ? `${total} ta ochiq alert` : "Alertlar yo'q"}
+      style={{
+        position: 'relative',
+        display:  'flex', alignItems: 'center', justifyContent: 'center',
+        width: 34, height: 34, borderRadius: 8,
+        background: hasAny ? (hasCrit ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.08)') : 'transparent',
+        border: hasAny
+          ? `1px solid ${hasCrit ? 'rgba(220,38,38,0.2)' : 'rgba(217,119,6,0.2)'}`
+          : '1px solid var(--border)',
+        cursor:  'pointer',
+        outline: 'none',
+        flexShrink: 0,
+        transition: 'all .2s',
+        animation: hasCrit ? 'tv-bell-shake 2.5s ease infinite' : 'none',
+      }}
+    >
+      <Bell size={15} color={hasAny ? (hasCrit ? '#DC2626' : '#D97706') : 'var(--text-muted)'} />
+      {badgeCount > 0 && (
+        <span style={{
+          position:   'absolute',
+          top: -5, right: -5,
+          minWidth:   16, height: 16,
+          borderRadius: 8,
+          background: badgeColor,
+          color:      '#fff',
+          fontSize:   9, fontWeight: 800,
+          display:    'flex', alignItems: 'center', justifyContent: 'center',
+          padding:    '0 3px',
+          border:     '1.5px solid var(--surface)',
+          fontFamily: "'JetBrains Mono', monospace",
+          lineHeight: 1,
+        }}>
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
+      )}
+    </button>
+  );
+}
 
 // =============================================================================
 // USER MENU
@@ -494,8 +571,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           {/* Spacer */}
           <div style={{flex:1}}/>
 
-          {/* RIGHT: Soat + User */}
+          {/* RIGHT: Soat + AlertBell + User */}
           <LiveClock/>
+          <div style={{width:6}}/>
+          <AlertBell/>
+          <div style={{width:6}}/>
           <UserMenu/>
         </div>
       </nav>
@@ -536,6 +616,7 @@ export default function App() {
             a { text-decoration: none; }
 
             @keyframes tv-spin    { to { transform: rotate(360deg); } }
+            @keyframes tv-bell-shake { 0%,90%,100%{transform:rotate(0)} 92%{transform:rotate(-8deg)} 94%{transform:rotate(8deg)} 96%{transform:rotate(-6deg)} 98%{transform:rotate(6deg)} }
             @keyframes tv-drop    { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
             @keyframes tv-fade-in { from { opacity:0; } to { opacity:1; } }
             @keyframes tv-blink   { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
@@ -581,6 +662,7 @@ export default function App() {
                     <Route path="/notifications" element={<NotificationsPage/>}/>
                     <Route path="/cameras"       element={<CamerasPage/>}/>
                     <Route path="/users"         element={<UsersPage/>}/>
+                    <Route path="/audit-log"     element={<AuditLogPage/>}/>
                     <Route path="/training"      element={<TrainingPage/>}/>
                     <Route path="/tasks"         element={<TasksPage/>}/>
                     <Route path="/feed"          element={<FeedPage/>}/>

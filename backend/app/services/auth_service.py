@@ -483,6 +483,51 @@ class AuthService:
             raise EntityNotFoundError(entity="User", identifier=user_id)
         return user
 
+    async def admin_reset_password(
+        self,
+        user_id: int,
+        new_password: str,
+        admin_user: User,
+    ) -> None:
+        """
+        Admin tomonidan boshqa foydalanuvchi parolini tiklash.
+
+        Joriy parol talab qilinmaydi — ADMIN huquqi yetarli.
+        Admin o'z parolini bu endpoint orqali o'zgartira olmaydi
+        (buning uchun change-password ishlatiladi).
+
+        Args:
+            user_id:      Paroli tiklanadigan foydalanuvchi ID
+            new_password: Yangi parol (tekshirilgan)
+            admin_user:   Amal bajaruvchi ADMIN
+
+        Raises:
+            PermissionDeniedError:      ADMIN emas
+            BusinessRuleViolationError: O'z parolini shu endpoint orqali o'zgartirmoqchi
+            EntityNotFoundError:        Foydalanuvchi topilmadi
+        """
+        if not admin_user.is_admin:
+            raise PermissionDeniedError(
+                message="Boshqa foydalanuvchi parolini faqat ADMIN tiklaya oladi."
+            )
+
+        if admin_user.id == user_id:
+            raise BusinessRuleViolationError(
+                message="O'z parolingizni tiklash uchun 'Parolni o'zgartirish' bo'limidan foydalaning."
+            )
+
+        user = await self._repo.get_by_id(user_id)
+        if not user:
+            raise EntityNotFoundError(entity="User", identifier=user_id)
+
+        await self._repo.update_password(user_id, hash_password(new_password))
+        await self.db.commit()
+
+        logger.info(
+            f"Admin id={admin_user.id} ({admin_user.username}) "
+            f"reset password for user id={user_id} ({user.username})"
+        )
+
     async def get_all_users(
         self,
         requesting_user: User,
