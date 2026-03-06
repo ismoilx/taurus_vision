@@ -5,6 +5,8 @@
  *
  * Muammo (oldin): 14 item bir qatorda → overflow hidden → yarmi yo'qoldi
  * Yechim: 3 ta dropdown guruh → nav hech qachon to'lmaydi
+ *
+ * Sprint 25-26: BreedingPage qo'shildi — Baby ikoni lucide-react dan import qilindi
  */
 
 import {
@@ -16,6 +18,7 @@ import {
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
   LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield, Building2, Scale,
+  Baby,                                             // Sprint 25-26 — Nasl & Zotchilik
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -94,6 +97,7 @@ const IntegrationsPage  = lazy(() => import('./pages/IntegrationsPage'));
 const AuditLogPage      = lazy(() => import('./pages/AuditLogPage'));
 const FarmsPage         = lazy(() => import('./pages/FarmsPage'));
 const ScalePage         = lazy(() => import('./pages/ScalePage'));
+const BreedingPage      = lazy(() => import('./pages/BreedingPage'));   // Sprint 25-26
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -126,36 +130,37 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label:'Jonivorlar', icon:CowIcon,
     items:[
-      { to:'/animals',     icon:CowIcon,      label:'Jonivorlar',    also:['/animals/'] },
-      { to:'/behavior',    icon:Activity,      label:'Xatti-harakat' },
-      { to:'/adi',         icon:TrendingUp,    label:'ADI Monitor'   },
-      { to:'/predictions', icon:Brain,         label:'Bashorat'      },
+      { to:'/animals',     icon:CowIcon,      label:'Jonivorlar',       also:['/animals/'] },
+      { to:'/behavior',    icon:Activity,      label:'Xatti-harakat'    },
+      { to:'/adi',         icon:TrendingUp,    label:'ADI Monitor'      },
+      { to:'/predictions', icon:Brain,         label:'Bashorat'         },
+      { to:'/breeding',    icon:Baby,          label:'Nasl & Zotchilik' }, // Sprint 25-26
     ],
   },
   {
     label:'Monitoring', icon:BarChart2,
     items:[
-      { to:'/analytics', icon:BarChart2,   label:'Analitika'    },
-      { to:'/live',      icon:Video,       label:'Live Feed'    },
-      { to:'/reports',   icon:FileText,    label:'Hisobotlar'   },
-      { to:'/health',    icon:Stethoscope, label:'Veterinariya' },
-      { to:'/sensors',   icon:Radio,       label:'IoT Sensorlar'},
-      { to:'/scales',    icon:Scale,       label:'Tarozlar' },
+      { to:'/analytics', icon:BarChart2,   label:'Analitika'     },
+      { to:'/live',      icon:Video,       label:'Live Feed'     },
+      { to:'/reports',   icon:FileText,    label:'Hisobotlar'    },
+      { to:'/health',    icon:Stethoscope, label:'Veterinariya'  },
+      { to:'/sensors',   icon:Radio,       label:'IoT Sensorlar' },
+      { to:'/scales',    icon:Scale,       label:'Tarozlar'      },
     ],
   },
   {
     label:'Boshqaruv', icon:Bell,
     items:[
-      { to:'/alerts',       icon:Bell,          label:'Alertlar',           also:['/notifications'] },
-      { to:'/feed',         icon:Wheat,         label:'Ozuqa'               },
-      { to:'/finance',      icon:Coins,         label:'Moliya'              },
-      { to:'/integrations', icon:Radio,         label:'Integratsiyalar'     },
-      { to:'/tasks',        icon:ClipboardList, label:'Vazifalar'           },
-      { to:'/cameras',      icon:Camera,        label:'Kameralar'           },
-      { to:'/farms',        icon:Building2,     label:'Fermalar'            },
-      { to:'/users',        icon:Users,         label:'Foydalanuvchilar'    },
-      { to:'/audit-log',    icon:Shield,         label:'Audit Log'          },
-      { to:'/training',     icon:Cpu,           label:'AI Training'         },
+      { to:'/alerts',       icon:Bell,          label:'Alertlar',        also:['/notifications'] },
+      { to:'/feed',         icon:Wheat,         label:'Ozuqa'            },
+      { to:'/finance',      icon:Coins,         label:'Moliya'           },
+      { to:'/integrations', icon:Radio,         label:'Integratsiyalar'  },
+      { to:'/tasks',        icon:ClipboardList, label:'Vazifalar'        },
+      { to:'/cameras',      icon:Camera,        label:'Kameralar'        },
+      { to:'/farms',        icon:Building2,     label:'Fermalar'         },
+      { to:'/users',        icon:Users,         label:'Foydalanuvchilar' },
+      { to:'/audit-log',    icon:Shield,         label:'Audit Log'       },
+      { to:'/training',     icon:Cpu,           label:'AI Training'      },
     ],
   },
 ];
@@ -782,8 +787,9 @@ export default function App() {
                     <Route path="/tasks"         element={<TasksPage/>}/>
                     <Route path="/feed"          element={<FeedPage/>}/>
                     <Route path="/finance"       element={<FinancePage/>}/>
-                    <Route path="/integrations" element={<IntegrationsPage/>}/>
+                    <Route path="/integrations"  element={<IntegrationsPage/>}/>
                     <Route path="/sensors"       element={<SensorPage/>}/>
+                    <Route path="/breeding"      element={<BreedingPage/>}/>   {/* Sprint 25-26 */}
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>
                 </Layout>

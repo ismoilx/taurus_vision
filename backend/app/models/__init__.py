@@ -39,6 +39,15 @@ from app.models.finance          import (                             # Q4 Finan
     IncomeCategory,
     PaymentMethod,
 )
+from app.models.breeding         import (                             # Sprint 25-26 — Nasl va Zotchilik
+    BreedingRecord,
+    OffspringRecord,
+    MatingMethod,
+    BreedingStatus,
+    PregnancyCheckMethod,
+    OffspringOutcome,
+    GESTATION_DAYS,
+)
 
 __all__ = [
     # Base
@@ -106,4 +115,12 @@ __all__ = [
     "Webhook",
     "APIKeyScope",
     "WebhookEvent",
+    # Nasl va Zotchilik (Sprint 25-26)
+    "BreedingRecord",
+    "OffspringRecord",
+    "MatingMethod",
+    "BreedingStatus",
+    "PregnancyCheckMethod",
+    "OffspringOutcome",
+    "GESTATION_DAYS",
 ]

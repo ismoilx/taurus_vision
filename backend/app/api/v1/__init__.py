@@ -5,6 +5,7 @@ Barcha v1 endpoint router larini birlashtiradi.
 
 SPRINT 15-16 QO'SHIMCHA:
     training router qo'shildi — Custom YOLO training pipeline boshqaruvi.
+    
 """
 
 from fastapi import APIRouter
@@ -28,13 +29,14 @@ from app.api.v1.endpoints import (
     notifications,
     behavior,
     predictions,
-    training,          # Sprint 15-16
-    tasks,             # Sprint 19-20
-    feed,              # Sprint 20
-    finance,           # Q4 — Moliyaviy modul
-    integrations,      # Q5 — Tashqi integratsiya
-    farms,             # Q3 — Multi-farm
-    scales,            # Q7 — Tarozi integratsiyasi
+    training,          
+    tasks,             
+    feed,             
+    finance,          
+    integrations,     
+    farms,             
+    scales,           
+    breeding,          
 )
 
 router = APIRouter(prefix="/v1")
@@ -78,10 +80,7 @@ router.include_router(predictions.router)
 # --- Custom YOLO Training (Sprint 15-16) ---
 router.include_router(training.router)
 
-# --- IoT Sensors (Sprint 17-18) ---
-router.include_router(sensors.router)
-
-# --- Farm Task Management (Sprint 19-20) ---
+# --- Farm Tasks (Sprint 19-20) ---
 router.include_router(tasks.router)
 
 # --- Feed Management (Sprint 20) ---
@@ -90,11 +89,17 @@ router.include_router(feed.router)
 # --- Finance Module (Q4) ---
 router.include_router(finance.router)
 
-# --- Integration Module (Q5) ---
+# --- External Integrations (Q5) ---
 router.include_router(integrations.router)
 
-# --- Multi-Farm Module (Q3) ---
+# --- Multi-Farm (Q3) ---
 router.include_router(farms.router)
 
 # --- Scale Integration (Q7) ---
 router.include_router(scales.router)
+
+# --- IoT Sensors ---
+router.include_router(sensors.router)
+
+# --- Nasl va Zotchilik (Sprint 25-26) ---
+router.include_router(breeding.router)
