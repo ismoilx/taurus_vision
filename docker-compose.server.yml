@@ -13,9 +13,24 @@
 # ============================================================
 
 services:
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: taurus-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - taurus-network
+
   frontend:
     environment:
-      # HTTPS proksi orqali HMR ishlashi uchun
-      VITE_HMR_CLIENT_PORT: "443"
-      # Docker tarmog'ida backend manzili (o'zgarmaydi)
+      VITE_HMR_CLIENT_PORT: "80"
       BACKEND_URL: "http://backend:8000"

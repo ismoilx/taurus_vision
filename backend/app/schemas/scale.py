@@ -53,6 +53,7 @@ class ScaleResponse(ScaleBase):
     last_reading_at:          Optional[datetime]
     last_weight_kg:           Optional[float]
     is_calibrated:            bool
+    api_token:                Optional[str]   = None
     created_at:               datetime
     updated_at:               datetime
 

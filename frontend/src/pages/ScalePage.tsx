@@ -31,10 +31,21 @@ import { useAuth } from '../context/AuthContext';
 // TYPES
 // =============================================================================
 
+type ScaleType = 'manual' | 'serial' | 'api';
+
+interface ScaleFormState {
+  name:        string;
+  scale_type:  ScaleType;
+  location:    string;
+  serial_port: string;
+  baud_rate:   number;
+  notes:       string;
+}
+
 interface ScaleData {
   id:                       number;
   name:                     string;
-  scale_type:               'manual' | 'serial' | 'api';
+  scale_type:               ScaleType;
   location:                 string | null;
   status:                   'active' | 'inactive' | 'error';
   is_active:                boolean;
@@ -76,9 +87,9 @@ interface ComparisonResponse {
 
 interface Animal { id: number; tag_id: string; species: string; }
 
-const EMPTY_FORM = {
+const EMPTY_FORM: ScaleFormState = {
   name:        '',
-  scale_type:  'manual' as const,
+  scale_type:  'manual',
   location:    '',
   serial_port: '',
   baud_rate:   9600,
@@ -104,7 +115,7 @@ export default function ScalePage() {
   const [activeTab,    setActiveTab]   = useState<'scales' | 'manual' | 'comparison' | 'calibration'>('scales');
   const [showForm,     setShowForm]    = useState(false);
   const [editScale,    setEditScale]   = useState<ScaleData | null>(null);
-  const [form,         setForm]        = useState(EMPTY_FORM);
+  const [form,         setForm]        = useState<ScaleFormState>(EMPTY_FORM);
   const [formErr,      setFormErr]     = useState<Record<string, string>>({});
   const [expandedId,   setExpandedId]  = useState<number | null>(null);
 
@@ -149,13 +160,13 @@ export default function ScalePage() {
   // ─── Mutations ────────────────────────────────────────────────────────────
 
   const createMut = useMutation({
-    mutationFn: (body: typeof EMPTY_FORM) =>
+    mutationFn: (body: ScaleFormState) =>
       apiFetch<ScaleData>('/api/v1/scales', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['scales'] }); closeForm(); },
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Partial<typeof EMPTY_FORM> }) =>
+    mutationFn: ({ id, body }: { id: number; body: ScaleFormState }) =>
       apiFetch<ScaleData>(`/api/v1/scales/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['scales'] }); closeForm(); },
   });
@@ -212,9 +223,16 @@ export default function ScalePage() {
 
   function handleFormSubmit() {
     if (!validate()) return;
-    const body = { ...form, location: form.location || null, serial_port: form.serial_port || null, notes: form.notes || null };
+    const body: ScaleFormState = {
+      name:        form.name,
+      scale_type:  form.scale_type,
+      location:    form.location,
+      serial_port: form.serial_port,
+      baud_rate:   form.baud_rate,
+      notes:       form.notes,
+    };
     if (editScale) updateMut.mutate({ id: editScale.id, body });
-    else           createMut.mutate(body as typeof EMPTY_FORM);
+    else           createMut.mutate(body);
   }
 
   function handleManualSubmit() {
@@ -645,7 +663,7 @@ export default function ScalePage() {
                       <td style={{ padding: '9px 14px', fontWeight: 600, color: '#0D1117' }}>{row.animal_tag_id}</td>
                       <td style={{ padding: '9px 14px', color: '#374151' }}>{new Date(row.timestamp).toLocaleDateString('uz-UZ')}</td>
                       <td style={{ padding: '9px 14px', fontFamily: "'JetBrains Mono',monospace", fontWeight: 600 }}>{row.ai_weight_kg.toFixed(1)} kg</td>
-                      <td style={{ padding: '9px 14px', fontFamily: "'JetBrains Mono',monospace', fontWeight: 600" }}>
+                      <td style={{ padding: '9px 14px', fontFamily: "'JetBrains Mono',monospace", fontWeight: 600 }}>
                         {row.actual_weight_kg ? `${row.actual_weight_kg.toFixed(1)} kg` : <span style={{ color: '#D1D5DB' }}>—</span>}
                       </td>
                       <td style={{ padding: '9px 14px' }}>
@@ -823,7 +841,7 @@ export default function ScalePage() {
 
               <div>
                 <label style={lbl}>Turi</label>
-                <select value={form.scale_type} onChange={e => setForm(f => ({ ...f, scale_type: e.target.value as 'manual'|'serial'|'api' }))} style={{ ...inp, cursor: 'pointer' }}>
+                <select value={form.scale_type} onChange={e => setForm(f => ({ ...f, scale_type: e.target.value as ScaleType }))} style={{ ...inp, cursor: 'pointer' }}>
                   <option value="manual">Qo'lda kiritish</option>
                   <option value="serial">Serial / USB</option>
                   <option value="api">API / Wi-Fi</option>

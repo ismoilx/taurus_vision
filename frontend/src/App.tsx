@@ -140,6 +140,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/reports',   icon:FileText,    label:'Hisobotlar'   },
       { to:'/health',    icon:Stethoscope, label:'Veterinariya' },
       { to:'/sensors',   icon:Radio,       label:'IoT Sensorlar'},
+      { to:'/scales',    icon:Scale,       label:'Tarozlar' },
     ],
   },
   {
@@ -152,7 +153,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/tasks',        icon:ClipboardList, label:'Vazifalar'           },
       { to:'/cameras',      icon:Camera,        label:'Kameralar'           },
       { to:'/farms',        icon:Building2,     label:'Fermalar'            },
-      { to:'/scales',       icon:Scale,         label:'Tarozlar'            },
       { to:'/users',        icon:Users,         label:'Foydalanuvchilar'    },
       { to:'/audit-log',    icon:Shield,         label:'Audit Log'          },
       { to:'/training',     icon:Cpu,           label:'AI Training'         },
