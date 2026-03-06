@@ -36,7 +36,8 @@ from app.api.v1.endpoints import (
     integrations,     
     farms,             
     scales,           
-    breeding,          
+    breeding,
+    employees,
 )
 
 router = APIRouter(prefix="/v1")
@@ -103,3 +104,6 @@ router.include_router(sensors.router)
 
 # --- Nasl va Zotchilik (Sprint 25-26) ---
 router.include_router(breeding.router)
+
+# --- Xodimlar va Vazifalar ---
+router.include_router(employees.router)

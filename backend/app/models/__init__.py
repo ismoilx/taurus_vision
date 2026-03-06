@@ -48,6 +48,16 @@ from app.models.breeding         import (                             # Sprint 2
     OffspringOutcome,
     GESTATION_DAYS,
 )
+from app.models.employee         import (                             # Xodimlar moduli
+    Employee,
+    WorkerTask,
+    EmployeePosition,
+    EmployeeStatus,
+    WorkerTaskStatus,
+    WorkerTaskPriority,
+    WorkerTaskType,
+    VerificationStatus,
+)
 
 __all__ = [
     # Base
@@ -123,4 +133,13 @@ __all__ = [
     "PregnancyCheckMethod",
     "OffspringOutcome",
     "GESTATION_DAYS",
+    # Xodimlar moduli
+    "Employee",
+    "WorkerTask",
+    "EmployeePosition",
+    "EmployeeStatus",
+    "WorkerTaskStatus",
+    "WorkerTaskPriority",
+    "WorkerTaskType",
+    "VerificationStatus",
 ]

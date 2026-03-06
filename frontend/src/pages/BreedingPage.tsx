@@ -1065,7 +1065,7 @@ export default function BreedingPage() {
               <X size={18} />
             </button>
             <h3 style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 17 }}>
-              ✅ Homiladorlikni Tasdiqlash
+              Homiladorlikni Tasdiqlash
             </h3>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>
               {showConfirm.mother?.tag_id} — {fmtDate(showConfirm.mating_date)} juftlashgan
@@ -1108,7 +1108,7 @@ export default function BreedingPage() {
               <button onClick={() => setShowConfirm(null)} style={ghostBtn}>Bekor</button>
               <button onClick={handleConfirm} disabled={confirmMut.isPending}
                 style={{ ...btn('#10B981'), flex: 1, justifyContent: 'center' }}>
-                {confirmMut.isPending ? '...' : '✅ Tasdiqlash'}
+                {confirmMut.isPending ? '...' : 'Tasdiqlash'}
               </button>
             </div>
           </div>
@@ -1125,7 +1125,7 @@ export default function BreedingPage() {
               <X size={18} />
             </button>
             <h3 style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 17 }}>
-              🍼 Tug'ilishni Qayd Etish
+              Tug'ilishni Qayd Etish
             </h3>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>
               {showBirth.mother?.tag_id} • Kutilgan: {fmtDate(showBirth.expected_birth_date)}
@@ -1184,9 +1184,9 @@ export default function BreedingPage() {
                           setBirthForm({ ...birthForm, offspring: newOff });
                         }}
                         style={{ ...sel, flex: 1 }}>
-                        <option value="alive">✅ Tirik</option>
-                        <option value="stillborn">💔 O'lik tug'ilgan</option>
-                        <option value="died_shortly">⚠️ Ko'p o'tmay o'ldi</option>
+                        <option value="alive">Tirik</option>
+                        <option value="stillborn">O'lik tug'ilgan</option>
+                        <option value="died_shortly">Ko'p o'tmay o'ldi</option>
                       </select>
                       <input type="number" step="0.1" value={off.birth_weight_kg}
                         onChange={e => {

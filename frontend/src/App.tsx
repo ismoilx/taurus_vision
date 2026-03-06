@@ -19,6 +19,7 @@ import {
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
   LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield, Building2, Scale,
   Baby,                                             // Sprint 25-26 — Nasl & Zotchilik
+  Briefcase,                                        // Hodimlar moduli
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -98,6 +99,7 @@ const AuditLogPage      = lazy(() => import('./pages/AuditLogPage'));
 const FarmsPage         = lazy(() => import('./pages/FarmsPage'));
 const ScalePage         = lazy(() => import('./pages/ScalePage'));
 const BreedingPage      = lazy(() => import('./pages/BreedingPage'));   // Sprint 25-26
+const EmployeesPage     = lazy(() => import('./pages/EmployeesPage'));  // Hodimlar moduli
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -159,6 +161,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/cameras',      icon:Camera,        label:'Kameralar'        },
       { to:'/farms',        icon:Building2,     label:'Fermalar'         },
       { to:'/users',        icon:Users,         label:'Foydalanuvchilar' },
+      { to:'/employees',    icon:Briefcase,     label:'Hodimlar' },
       { to:'/audit-log',    icon:Shield,         label:'Audit Log'       },
       { to:'/training',     icon:Cpu,           label:'AI Training'      },
     ],
@@ -790,6 +793,7 @@ export default function App() {
                     <Route path="/integrations"  element={<IntegrationsPage/>}/>
                     <Route path="/sensors"       element={<SensorPage/>}/>
                     <Route path="/breeding"      element={<BreedingPage/>}/>   {/* Sprint 25-26 */}
+                    <Route path="/employees"     element={<EmployeesPage/>}/>  {/* Hodimlar */}
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>
                 </Layout>
