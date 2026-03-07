@@ -19,6 +19,8 @@ import {
   Baby,
   Briefcase,
   WifiOff,
+  Droplets,
+  Pill,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -102,6 +104,8 @@ const FarmsPage         = lazy(() => import('./pages/FarmsPage'));
 const ScalePage         = lazy(() => import('./pages/ScalePage'));
 const BreedingPage      = lazy(() => import('./pages/BreedingPage'));   // Sprint 25-26
 const EmployeesPage     = lazy(() => import('./pages/EmployeesPage'));  // Hodimlar moduli
+const MilkProductionPage = lazy(() => import('./pages/MilkProductionPage')); // Sut ishlab chiqarish
+const MedicinePage      = lazy(() => import('./pages/MedicinePage'));   // Dori-darmon ombori
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
 function Spinner({ full = false }: { full?: boolean }) {
@@ -139,6 +143,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/adi',         icon:TrendingUp,    label:'ADI Monitor'      },
       { to:'/predictions', icon:Brain,         label:'Bashorat'         },
       { to:'/breeding',    icon:Baby,          label:'Nasl & Zotchilik' }, // Sprint 25-26
+      { to:'/milk',        icon:Droplets,      label:'Sut Ishlab Chiqarish' },
     ],
   },
   {
@@ -157,6 +162,7 @@ const NAV_GROUPS: NavGroup[] = [
     items:[
       { to:'/alerts',       icon:Bell,          label:'Alertlar',        also:['/notifications'] },
       { to:'/feed',         icon:Wheat,         label:'Ozuqa'            },
+      { to:'/medicine',     icon:Pill,          label:'Dori-Darmon'      },
       { to:'/finance',      icon:Coins,         label:'Moliya'           },
       { to:'/integrations', icon:Radio,         label:'Integratsiyalar'  },
       { to:'/tasks',        icon:ClipboardList, label:'Vazifalar'        },
@@ -865,6 +871,8 @@ export default function App() {
                     <Route path="/sensors"       element={<SensorPage/>}/>
                     <Route path="/breeding"      element={<BreedingPage/>}/>   {/* Sprint 25-26 */}
                     <Route path="/employees"     element={<EmployeesPage/>}/>  {/* Hodimlar */}
+                    <Route path="/milk"          element={<MilkProductionPage/>}/> {/* Sut */}
+                    <Route path="/medicine"      element={<MedicinePage/>}/>   {/* Dori ombori */}
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>
                 </Layout>

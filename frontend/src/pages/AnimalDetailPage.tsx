@@ -5,7 +5,7 @@ import {
   ArrowLeft, Camera, Upload, Star, Scan, Trash2,
   ZoomIn, X, RefreshCw, CheckCircle, AlertTriangle,
   TrendingUp, TrendingDown, Minus, Scale, Activity,
-  Heart, Plus, Download, ChevronRight,
+  Heart, Plus, Download, ChevronRight, Droplets, Pill,
 } from "lucide-react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -15,6 +15,8 @@ import { format, parseISO } from "date-fns";
 import { apiFetch } from "../utils/apiFetch";
 import config from "../config";
 import { useIsMobile } from "../hooks/useResponsive";
+import { MilkTab } from "../features/animals/tabs/MilkTab";
+import { MedicineTab } from "../features/animals/tabs/MedicineTab";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,7 @@ interface Animal {
   id: number; tag_id: string; species: string; gender: string;
   status: string; breed?: string; notes?: string;
   acquisition_date?: string; birth_date?: string;
+  category?: string;
   profile_image?: string | null; muzzle_image?: string | null;
   total_detections: number; last_detected_at: string | null;
   created_at: string;
@@ -551,7 +554,7 @@ export default function AnimalDetailPage() {
   const numId    = Number(id);
   const isMobile = useIsMobile();
 
-  const [tab, setTab]           = useState<"overview"|"adi"|"weight"|"health"|"photos">("overview");
+  const [tab, setTab] = useState<"overview"|"adi"|"weight"|"health"|"milk"|"medicine"|"photos">("overview");
   const [picker, setPicker]     = useState<"profile"|"muzzle"|null>(null);
   const [lightbox, setLightbox] = useState<number|null>(null);
   const [uploading, setUploading] = useState(0);
@@ -979,19 +982,28 @@ export default function AnimalDetailPage() {
         width: isMobile ? "100%" : "fit-content",
         overflowX: isMobile ? "auto" : "visible",
       }}>
-        {(["overview", "adi", "weight", "health", "photos"] as const).map(t => (
+        {([
+          { key: "overview",  label: "Umumiy" },
+          { key: "adi",       label: "ADI" },
+          { key: "weight",    label: "Vazn" },
+          { key: "health",    label: "Sog'liq" },
+          { key: "milk",      label: "🥛 Sut" },
+          { key: "medicine",  label: "💊 Dori" },
+          { key: "photos",    label: "📸 Rasmlar" },
+        ] as { key: typeof tab; label: string }[]).map(t => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             style={{
               padding: "7px 16px", borderRadius: 9, fontSize: 13, fontWeight: 500,
               cursor: "pointer", border: "none", transition: "all .15s", fontFamily: "inherit",
-              background: tab === t ? "#fff" : "transparent",
-              color:      tab === t ? "#2563EB" : "#64748B",
-              boxShadow:  tab === t ? "0 1px 6px rgba(0,0,0,.08)" : "none",
+              background: tab === t.key ? "#fff" : "transparent",
+              color:      tab === t.key ? "#2563EB" : "#64748B",
+              boxShadow:  tab === t.key ? "0 1px 6px rgba(0,0,0,.08)" : "none",
+              whiteSpace: "nowrap",
             }}
           >
-            {t === "overview" ? "Umumiy" : t === "adi" ? "ADI" : t === "weight" ? "Vazn" : t === "health" ? "Sog'liq" : "📸 Rasmlar"}
+            {t.label}
           </button>
         ))}
       </div>
@@ -1009,6 +1021,7 @@ export default function AnimalDetailPage() {
               ["Holat", animal.status === "active" ? "Faol" : animal.status],
               ["Olingan", animal.acquisition_date ? format(new Date(animal.acquisition_date), "dd.MM.yyyy") : "—"],
               ["Tug'ilgan", animal.birth_date ? format(new Date(animal.birth_date), "dd.MM.yyyy") : "—"],
+              ["Kategoriya", animal.category ?? "—"],
             ] as [string, string][]).map(([l, v]) => (
               <div key={l} style={{
                 display: "flex", justifyContent: "space-between", padding: "8px 0",
@@ -1545,6 +1558,16 @@ export default function AnimalDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ═══════════════════ SUT ═══════════════════ */}
+      {tab === "milk" && (
+        <MilkTab animalId={numId} gender={animal.gender} />
+      )}
+
+      {/* ═══════════════════ DORI ═══════════════════ */}
+      {tab === "medicine" && (
+        <MedicineTab animalId={numId} />
       )}
 
       {/* ═══════════════════ PHOTOS ═══════════════════ */}

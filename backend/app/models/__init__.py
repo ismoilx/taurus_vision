@@ -11,6 +11,7 @@ from app.models.base             import BaseModel
 from app.models.farm             import Farm
 from app.models.user             import User, UserRole
 from app.models.camera           import Camera, CameraType
+from app.models.animal_category  import AnimalCategory, SPECIES_CATEGORIES, CATEGORY_LABELS
 from app.models.animal           import Animal, AnimalSpecies, AnimalGender, AnimalStatus
 from app.models.animal_photo     import AnimalPhoto
 from app.models.detection        import Detection
@@ -18,6 +19,14 @@ from app.models.animal_embedding import AnimalEmbedding
 from app.models.scale            import Scale, ScaleType, ScaleStatus
 from app.models.weight_measurement import WeightMeasurement, WeightSource
 from app.models.health_record    import HealthRecord
+from app.models.milk_production  import MilkProduction, MilkSession, MilkQualityGrade
+from app.models.medicine         import (
+    MedicineInventory,
+    MedicineUsage,
+    MedicineType,
+    MedicineUnit,
+    MedicineAdminRoute,
+)
 from app.models.adi_log          import ADILog, ADICategory
 from app.models.alert            import Alert, AlertType, AlertSeverity, AlertStatus
 from app.models.health_prediction import HealthPrediction, RiskLevel
@@ -80,7 +89,20 @@ __all__ = [
     "AnimalSpecies",
     "AnimalGender",
     "AnimalStatus",
+    "AnimalCategory",
+    "SPECIES_CATEGORIES",
+    "CATEGORY_LABELS",
     "AnimalPhoto",
+    # Milk Production
+    "MilkProduction",
+    "MilkSession",
+    "MilkQualityGrade",
+    # Medicine Inventory
+    "MedicineInventory",
+    "MedicineUsage",
+    "MedicineType",
+    "MedicineUnit",
+    "MedicineAdminRoute",
     # Scales (Q7)
     "Scale",
     "ScaleType",

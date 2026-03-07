@@ -38,6 +38,8 @@ from app.api.v1.endpoints import (
     scales,           
     breeding,
     employees,
+    milk,
+    medicine,
 )
 
 router = APIRouter(prefix="/v1")
@@ -107,3 +109,9 @@ router.include_router(breeding.router)
 
 # --- Xodimlar va Vazifalar ---
 router.include_router(employees.router)
+
+# --- Sut Ishlab Chiqarish ---
+router.include_router(milk.router)
+
+# --- Dori-Darmon Ombori ---
+router.include_router(medicine.router)

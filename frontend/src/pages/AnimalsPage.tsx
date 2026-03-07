@@ -197,6 +197,10 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
     breed:            initial?.breed            ?? '',
     gender:           initial?.gender           ?? 'unknown',
     status:           initial?.status           ?? 'active',
+    category:         (initial as any)?.category ?? '',
+    birth_date:       (initial as any)?.birth_date
+      ? (initial as any).birth_date.slice(0, 10)
+      : '',
     acquisition_date: initial?.acquisition_date
       ? initial.acquisition_date.slice(0, 10)
       : new Date().toISOString().slice(0, 10),
@@ -244,6 +248,8 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
         breed:            form.breed.trim() || null,
         gender:           form.gender,
         status:           form.status,
+        category:         (form as any).category || null,
+        birth_date:       (form as any).birth_date || null,
         acquisition_date: form.acquisition_date || null,
         notes:            form.notes.trim() || null,
       };
@@ -361,6 +367,55 @@ function AnimalModal({ initial, onClose, onSaved }: AnimalModalProps) {
             <label className="block text-xs font-medium text-gray-700 mb-1.5">Sotib olingan sana</label>
             <input type="date" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {/* Tug'ilgan sana */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Tug'ilgan sana (ixtiyoriy)</label>
+            <input type="date" value={(form as any).birth_date ?? ''} onChange={e => set('birth_date', e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {/* Kategoriya */}
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1.5">Kategoriya</label>
+            <select value={(form as any).category ?? ''} onChange={e => set('category', e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">— Kategoriya tanlanmagan —</option>
+              {form.species === 'cattle' && <>
+                <option value="buzoq">🐄 Buzoq (&lt;6 oy)</option>
+                <option value="sut_uchun">🥛 Sut uchun</option>
+                <option value="gosht_uchun">🥩 Go'sht uchun</option>
+                <option value="nasl_uchun">🧬 Nasl uchun</option>
+                <option value="ishchi">💪 Ishchi</option>
+                <option value="boshqa">📋 Boshqa</option>
+              </>}
+              {form.species === 'sheep' && <>
+                <option value="qo'zichoq">🐑 Qo'zichoq (&lt;4 oy)</option>
+                <option value="gosht_uchun">🥩 Go'sht uchun</option>
+                <option value="nasl_uchun">🧬 Nasl uchun</option>
+                <option value="jun_uchun">🧶 Jun uchun</option>
+                <option value="boshqa">📋 Boshqa</option>
+              </>}
+              {form.species === 'goat' && <>
+                <option value="uloqcha">🐐 Uloqcha (&lt;4 oy)</option>
+                <option value="sut_uchun">🥛 Sut uchun</option>
+                <option value="gosht_uchun">🥩 Go'sht uchun</option>
+                <option value="nasl_uchun">🧬 Nasl uchun</option>
+                <option value="boshqa">📋 Boshqa</option>
+              </>}
+              {form.species === 'horse' && <>
+                <option value="toy">🐴 Toy (&lt;1 yil)</option>
+                <option value="nasl_uchun">🧬 Nasl uchun</option>
+                <option value="ishchi">💪 Ishchi / Mehnat</option>
+                <option value="boshqa">📋 Boshqa</option>
+              </>}
+              {(form.species === 'other' || !form.species) && <>
+                <option value="gosht_uchun">🥩 Go'sht uchun</option>
+                <option value="nasl_uchun">🧬 Nasl uchun</option>
+                <option value="boshqa">📋 Boshqa</option>
+              </>}
+            </select>
           </div>
 
           {/* Izoh */}

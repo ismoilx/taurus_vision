@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
 from app.models.base import BaseModel
+from app.models.animal_category import AnimalCategory, SPECIES_CATEGORIES, CATEGORY_LABELS
 
 
 class AnimalSpecies(str, enum.Enum):
@@ -130,6 +131,17 @@ class Animal(BaseModel):
         nullable=True,
     )
 
+    # ------------------------------------------------------------------ #
+    # Category (maqsad bo'yicha tasnif)                                   #
+    # ------------------------------------------------------------------ #
+
+    category: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Jonivor kategoriyasi: buzoq, sut_uchun, gosht_uchun, nasl_uchun...",
+    )
+
     profile_image: Mapped[Optional[str]] = mapped_column(
         String(500),
         nullable=True,
@@ -228,6 +240,22 @@ class Animal(BaseModel):
         cascade="all, delete-orphan",
         lazy="noload",
         order_by="AnimalPhoto.created_at.desc()",
+    )
+
+    milk_productions: Mapped[list["MilkProduction"]] = relationship(  # type: ignore[name-defined]
+        "MilkProduction",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="MilkProduction.record_date.desc()",
+    )
+
+    medicine_usages: Mapped[list["MedicineUsage"]] = relationship(  # type: ignore[name-defined]
+        "MedicineUsage",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="MedicineUsage.given_date.desc()",
     )
 
     # ------------------------------------------------------------------ #

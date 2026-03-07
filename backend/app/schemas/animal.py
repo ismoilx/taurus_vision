@@ -27,6 +27,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from app.models.animal import AnimalGender, AnimalSpecies, AnimalStatus
+from app.models.animal_category import AnimalCategory, SPECIES_CATEGORIES, CATEGORY_LABELS
 
 
 # =============================================================================
@@ -70,6 +71,11 @@ class AnimalBase(BaseModel):
     status: AnimalStatus = Field(default=AnimalStatus.ACTIVE, description="Joriy holat")
     notes: Optional[str] = Field(None, max_length=1000, description="Qo'shimcha izoh")
     profile_image: Optional[str] = Field(None, description="Profil rasmi URL")
+    category: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Kategoriya: buzoq, sut_uchun, gosht_uchun, nasl_uchun...",
+    )
 
     # ------------------------------------------------------------------
     # VALIDATORS
