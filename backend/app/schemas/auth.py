@@ -212,38 +212,13 @@ class AdminPasswordResetRequest(BaseModel):
             ValueError: Parol kuchsiz
         """
         if len(v) < 8:
-            raise ValueError("Parol kamida 8 belgidan iborat bo'lishi kerak.")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Parol kamida 1 ta katta harf (A-Z) o'z ichiga olishi kerak.")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("Parol kamida 1 ta kichik harf (a-z) o'z ichiga olishi kerak.")
-        if not re.search(r"\d", v):
-            raise ValueError("Parol kamida 1 ta raqam (0-9) o'z ichiga olishi kerak.")
-        return v
-
-    @field_validator("new_password")
-    @classmethod
-    def validate_new_password(cls, v: str) -> str:
-        """
-        Yangi parol kuchliligi tekshiruvi.
-
-        Args:
-            v: Yangi parol
-
-        Returns:
-            Parol (o'zgartirilmaydi)
-
-        Raises:
-            ValueError: Parol kuchsiz
-        """
-        if len(v) < 8:
             raise ValueError("Yangi parol kamida 8 belgidan iborat bo'lishi kerak.")
         if not re.search(r"[A-Z]", v):
-            raise ValueError("Yangi parol kamida 1 ta katta harf o'z ichiga olishi kerak.")
+            raise ValueError("Yangi parol kamida 1 ta katta harf (A-Z) o'z ichiga olishi kerak.")
         if not re.search(r"[a-z]", v):
-            raise ValueError("Yangi parol kamida 1 ta kichik harf o'z ichiga olishi kerak.")
+            raise ValueError("Yangi parol kamida 1 ta kichik harf (a-z) o'z ichiga olishi kerak.")
         if not re.search(r"\d", v):
-            raise ValueError("Yangi parol kamida 1 ta raqam o'z ichiga olishi kerak.")
+            raise ValueError("Yangi parol kamida 1 ta raqam (0-9) o'z ichiga olishi kerak.")
         return v
 
 # =============================================================================

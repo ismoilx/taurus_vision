@@ -119,7 +119,7 @@ services:
     networks:
       - taurus-network
     command: >
-      sh -c "alembic upgrade heads && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     mem_limit: 2g
     memswap_limit: 2g
 
