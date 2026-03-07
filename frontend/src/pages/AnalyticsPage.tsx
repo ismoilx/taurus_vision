@@ -525,7 +525,7 @@ function OverviewTab() {
         {insightsLoading ? <LoadingState /> : insights?.insights.length ? (
           <>
             {/* Summary row */}
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
               {[
                 { label: 'Kritik',       val: insights.summary.critical, color: 'text-red-600',     bg: 'bg-red-50'     },
                 { label: 'Ogohlantirish', val: insights.summary.warning,  color: 'text-amber-600',  bg: 'bg-amber-50'   },
@@ -1204,7 +1204,7 @@ function PatternsTab() {
 
       {/* Stats summary */}
       {patterns && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <KpiCard label="Jami aniqlash"       value={patterns.statistics.total_detections.toLocaleString()} icon={Activity}   iconColor="text-indigo-400" />
           <KpiCard label="Soatiga o'rtacha"     value={patterns.statistics.detection_rate_per_hour.toFixed(1)} icon={BarChart3} iconColor="text-violet-400" />
           <KpiCard label="Eng faol soat"        value={peakHour != null ? `${String(peakHour).padStart(2, '0')}:00` : '—'} icon={Zap} iconColor="text-amber-400" />
@@ -1404,7 +1404,7 @@ function HealthTab() {
               <h3 className={`text-base font-bold ${riskCfg.color}`}>Xavf Balli: {riskScore}/100</h3>
               <p className="text-sm text-gray-600 mt-0.5">{riskCfg.label}</p>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {[
                 { label: 'Jami', val: health.alert_summary.total, c: 'text-gray-700' },
                 { label: 'Kritik', val: health.alert_summary.critical, c: 'text-red-600' },

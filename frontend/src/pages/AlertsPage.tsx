@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { apiFetch } from '../utils/apiFetch';
+import { useIsMobile } from '../hooks/useResponsive';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +134,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 
 export default function AlertsPage() {
   const qClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [filter,   setFilter]   = useState<FilterKey>('open');
   const [actionId, setActionId] = useState<number | null>(null);
 
@@ -190,7 +192,7 @@ export default function AlertsPage() {
   const openCount = stats ? (stats.total_open ?? 0) : 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className={isMobile ? "px-3 py-4" : "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"}>
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between mb-8">

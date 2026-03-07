@@ -1,29 +1,62 @@
 /**
- * Taurus Vision — Notifications Page (Sprint 11)
+ * Taurus Vision — Notifications Page (To'liq qayta yozildi)
  *
- * Email bildirishnomalar sozlamalari va boshqaruvi.
+ * 2 TAB:
+ *   1. In-App Bildirishnomalar — real-time, o'qildi/yashirildi boshqaruvi
+ *   2. Email Sozlamalari — SMTP config, test, manual send
  *
- * SECTIONS:
- *   1. SMTP Holati — sozlanganmi, qanday rejimda ishlayapti
- *   2. Recipient ro'yxati — kim email oladi
- *   3. Severity qoidalari — qaysi darajada email yuboriladi
- *   4. Test Email — SMTP ni sinab ko'rish
- *   5. Alert Email — bitta alertga qo'lda email yuborish
- *   6. .env sozlash yo'riqnomasi
+ * YANGILIKLAR:
+ *   - In-app notification ro'yxati (pagination, filtr)
+ *   - Badge: o'qilmagan soni
+ *   - O'qildi / Hammasi o'qildi
+ *   - Yashirish / Hammasi yashirish
+ *   - Admin: yangi notification yaratish
+ *   - Real-time WebSocket yangilanish
  */
 
-import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useState, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Mail, CheckCircle, XCircle, AlertCircle,
-  Send, Settings, Users, Bell, RefreshCw,
-  Info, ChevronRight, Copy, Eye, EyeOff,
+  Bell, Mail, CheckCircle, XCircle, AlertCircle,
+  Send, Settings, Users, RefreshCw, Info, ChevronRight,
+  Copy, Inbox, BellOff, Megaphone, Trash2, Check,
+  AlertTriangle, Activity, FileText, Camera, Cpu,
+  Plus, X, ChevronDown,
 } from 'lucide-react';
 import { apiFetch } from '../utils/apiFetch';
+import { useAuth } from '../context/AuthContext';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// =============================================================================
+// TYPES
+// =============================================================================
+
+type NType = 'info' | 'success' | 'warning' | 'alert' | 'system';
+type EntityType = 'animal' | 'camera' | 'sensor' | 'alert' | 'task' | 'training' | 'report' | 'system' | 'user';
+
+interface Notification {
+  id:            number;
+  user_id:       number | null;
+  n_type:        NType;
+  title:         string;
+  message:       string;
+  entity_type:   EntityType | null;
+  entity_id:     number | null;
+  action_url:    string | null;
+  is_read:       boolean;
+  read_at:       string | null;
+  is_dismissed:  boolean;
+  extra_data:    Record<string, any> | null;
+  created_at:    string;
+}
+
+interface NotificationList {
+  items:        Notification[];
+  total:        number;
+  unread_count: number;
+  page:         number;
+  limit:        number;
+  has_more:     boolean;
+}
 
 interface SmtpSettings {
   configured:       boolean;
@@ -36,63 +69,185 @@ interface SmtpSettings {
   severity_rules:   Record<string, string>;
 }
 
-// ---------------------------------------------------------------------------
-// Stat Card
-// ---------------------------------------------------------------------------
-function StatCard({
-  icon: Icon, label, value, color, bg,
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const N_TYPE_CONFIG: Record<NType, { color: string; bg: string; icon: any; label: string }> = {
+  info:    { color: '#3B82F6', bg: '#EFF6FF', icon: Info,          label: 'Ma\'lumot'      },
+  success: { color: '#10B981', bg: '#ECFDF5', icon: CheckCircle,   label: 'Muvaffaqiyat'   },
+  warning: { color: '#D97706', bg: '#FFFBEB', icon: AlertTriangle, label: 'Ogohlantirish'  },
+  alert:   { color: '#DC2626', bg: '#FEF2F2', icon: AlertCircle,   label: 'Kritik'         },
+  system:  { color: '#6B7280', bg: '#F3F4F6', icon: Activity,      label: 'Tizim'          },
+};
+
+const ENTITY_ICON: Record<EntityType, any> = {
+  animal:   Bell,
+  camera:   Camera,
+  sensor:   Cpu,
+  alert:    AlertTriangle,
+  task:     CheckCircle,
+  training: Activity,
+  report:   FileText,
+  system:   Settings,
+  user:     Users,
+};
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1)  return 'Hozirgina';
+  if (mins < 60) return `${mins} daqiqa oldin`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)  return `${hrs} soat oldin`;
+  return `${Math.floor(hrs / 24)} kun oldin`;
+}
+
+// =============================================================================
+// NOTIFICATION CARD
+// =============================================================================
+
+function NotifCard({
+  notif,
+  onRead,
+  onDismiss,
 }: {
-  icon: any; label: string; value: string; color: string; bg: string;
+  notif:     Notification;
+  onRead:    (id: number) => void;
+  onDismiss: (id: number) => void;
 }) {
+  const cfg     = N_TYPE_CONFIG[notif.n_type];
+  const TypeIcon = cfg.icon;
+  const isBroadcast = notif.user_id === null;
+
   return (
     <div style={{
-      background: '#fff',
-      border: '1px solid #E4E7ED',
-      borderRadius: 12,
-      padding: '18px 20px',
-      display: 'flex', alignItems: 'center', gap: 14,
+      background:   notif.is_read ? '#FAFAFA' : '#fff',
+      border:       `1px solid ${notif.is_read ? '#F3F4F6' : '#E4E7ED'}`,
+      borderLeft:   `3px solid ${notif.is_read ? '#E4E7ED' : cfg.color}`,
+      borderRadius: 10,
+      padding:      '14px 16px',
+      display:      'flex',
+      gap:          12,
+      transition:   'all .15s',
+      opacity:      notif.is_read ? 0.75 : 1,
     }}>
+      {/* Icon */}
       <div style={{
-        width: 44, height: 44, borderRadius: 10,
-        background: bg, display: 'grid', placeItems: 'center', flexShrink: 0,
+        width: 38, height: 38, borderRadius: 9,
+        background: cfg.bg, display: 'grid', placeItems: 'center', flexShrink: 0,
       }}>
-        <Icon size={20} color={color} />
+        <TypeIcon size={18} color={cfg.color} />
       </div>
-      <div>
-        <div style={{ fontSize: 11, color: '#6B7280', fontWeight: 500 }}>{label}</div>
-        <div style={{ fontSize: 20, fontWeight: 800, color: '#0D1117', marginTop: 2 }}>{value}</div>
+
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#0D1117' }}>
+              {notif.title}
+            </span>
+            {isBroadcast && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                padding: '1px 6px', borderRadius: 20,
+                background: '#EFF6FF', color: '#3B82F6',
+              }}>BROADCAST</span>
+            )}
+            {!notif.is_read && (
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: cfg.color, flexShrink: 0,
+              }} />
+            )}
+          </div>
+          <span style={{ fontSize: 11, color: '#9CA3AF', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {timeAgo(notif.created_at)}
+          </span>
+        </div>
+
+        <p style={{ fontSize: 12, color: '#4B5563', margin: '4px 0 8px', lineHeight: 1.5 }}>
+          {notif.message}
+        </p>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!notif.is_read && (
+            <button
+              onClick={() => onRead(notif.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '3px 10px', borderRadius: 6,
+                background: '#F0FDF4', color: '#059669',
+                border: '1px solid #A7F3D0',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                fontFamily: 'Outfit, sans-serif',
+              }}>
+              <Check size={10} /> O'qildi
+            </button>
+          )}
+          {notif.action_url && (
+            <a
+              href={notif.action_url}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '3px 10px', borderRadius: 6,
+                background: '#EFF6FF', color: '#3B82F6',
+                border: '1px solid #BFDBFE',
+                fontSize: 11, fontWeight: 600,
+                textDecoration: 'none',
+              }}>
+              Ko'rish <ChevronRight size={10} />
+            </a>
+          )}
+          <button
+            onClick={() => onDismiss(notif.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 10px', borderRadius: 6,
+              background: 'none', color: '#9CA3AF',
+              border: '1px solid #F3F4F6',
+              fontSize: 11, cursor: 'pointer',
+              fontFamily: 'Outfit, sans-serif',
+            }}>
+            <X size={10} /> Yashirish
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Env Guide Modal
-// ---------------------------------------------------------------------------
-function EnvGuideModal({ onClose }: { onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
+// =============================================================================
+// CREATE NOTIFICATION MODAL (ADMIN)
+// =============================================================================
 
-  const envExample = `# .env fayliga qo'shing:
+function CreateNotifModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [form, setForm] = useState({
+    user_id: '',
+    n_type:  'info' as NType,
+    title:   '',
+    message: '',
+    action_url: '',
+  });
 
-# Gmail uchun:
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-SMTP_FROM=Taurus Vision <your-email@gmail.com>
-
-# Yandex uchun:
-# SMTP_HOST=smtp.yandex.ru
-# SMTP_PORT=587
-
-# Bildirishnoma oluvchilar (vergul bilan ajrating):
-NOTIFICATION_EMAILS=admin@farm.uz,vet@farm.uz,manager@farm.uz`;
-
-  function copyEnv() {
-    navigator.clipboard.writeText(envExample);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
+  const mut = useMutation({
+    mutationFn: () => apiFetch<Notification>('/api/v1/notifications', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id:    form.user_id ? Number(form.user_id) : null,
+        n_type:     form.n_type,
+        title:      form.title,
+        message:    form.message,
+        action_url: form.action_url || null,
+      }),
+    }),
+    onSuccess: () => { onSuccess(); onClose(); },
+  });
 
   return (
     <div style={{
@@ -103,119 +258,163 @@ NOTIFICATION_EMAILS=admin@farm.uz,vet@farm.uz,manager@farm.uz`;
       <div style={{
         background: '#fff', borderRadius: 16,
         boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-        width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto',
+        width: '100%', maxWidth: 520,
       }}>
         <div style={{
-          padding: '20px 24px', borderBottom: '1px solid #F3F4F6',
+          padding: '18px 24px', borderBottom: '1px solid #F3F4F6',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Settings size={18} color="#1E3EB4" />
-            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0D1117', margin: 0 }}>
-              SMTP Sozlash Yo'riqnomasi
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Megaphone size={16} color="#1E3EB4" />
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0D1117', margin: 0 }}>
+              Yangi Notification
+            </h3>
           </div>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 18, color: '#9CA3AF',
-          }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }}>
+            <X size={18} />
+          </button>
         </div>
 
-        <div style={{ padding: '20px 24px' }}>
-
-          {/* Steps */}
-          {[
-            {
-              step: '1',
-              title: 'Gmail App Password yarating',
-              content: 'Google Account → Security → 2-Step Verification → App Passwords → "Mail" uchun parol yarating',
-            },
-            {
-              step: '2',
-              title: '.env faylini tahrirlang',
-              content: '~/taurus-vision/backend/.env faylini oching va quyidagi qatorlarni qo\'shing:',
-            },
-            {
-              step: '3',
-              title: 'Backend restart qiling',
-              content: 'cd ~/taurus-vision && docker compose restart backend',
-            },
-            {
-              step: '4',
-              title: 'Test Email yuborib ko\'ring',
-              content: 'Sahifadagi "Test Email" tugmasini bosing',
-            },
-          ].map(({ step, title, content }) => (
-            <div key={step} style={{
-              display: 'flex', gap: 14, marginBottom: 20,
-            }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: '50%',
-                background: '#EEF2FF', color: '#1E3EB4',
-                display: 'grid', placeItems: 'center',
-                fontSize: 13, fontWeight: 700, flexShrink: 0,
-              }}>
-                {step}
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#0D1117', marginBottom: 4 }}>
-                  {title}
-                </div>
-                <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>{content}</div>
-              </div>
-            </div>
-          ))}
-
-          {/* Code block */}
-          <div style={{ position: 'relative' }}>
-            <pre style={{
-              background: '#0D1117', color: '#E5E7EB',
-              padding: '16px 20px', borderRadius: 10,
-              fontSize: 12, lineHeight: 1.7,
-              overflowX: 'auto', margin: 0,
-            }}>
-              {envExample}
-            </pre>
-            <button
-              onClick={copyEnv}
+        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Tur */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Tur
+            </label>
+            <select
+              value={form.n_type}
+              onChange={e => setForm(f => ({ ...f, n_type: e.target.value as NType }))}
               style={{
-                position: 'absolute', top: 10, right: 10,
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '5px 10px',
-                background: copied ? '#10B981' : 'rgba(255,255,255,0.1)',
-                border: 'none', borderRadius: 6,
-                color: '#fff', fontSize: 11, fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
-              {copied ? 'Nusxalandi!' : 'Nusxalash'}
-            </button>
+                width: '100%', padding: '9px 12px',
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#0D1117', outline: 'none',
+                fontFamily: 'Outfit, sans-serif',
+              }}>
+              {Object.entries(N_TYPE_CONFIG).map(([v, c]) => (
+                <option key={v} value={v}>{c.label}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Note */}
-          <div style={{
-            display: 'flex', gap: 10, marginTop: 16,
-            background: '#FFF7ED', border: '1px solid #FED7AA',
-            borderRadius: 8, padding: '10px 14px',
-          }}>
-            <Info size={14} color="#EA580C" style={{ flexShrink: 0, marginTop: 1 }} />
-            <p style={{ fontSize: 12, color: '#92400E', margin: 0, lineHeight: 1.5 }}>
-              Gmail uchun odatiy parol emas, <strong>App Password</strong> kerak.
-              2-Step Verification yoqilgan bo'lishi shart.
-            </p>
+          {/* Manzil */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Foydalanuvchi ID <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(bo'sh = barcha uchun)</span>
+            </label>
+            <input
+              type="number"
+              value={form.user_id}
+              onChange={e => setForm(f => ({ ...f, user_id: e.target.value }))}
+              placeholder="Broadcast uchun bo'sh qoldiring"
+              style={{
+                width: '100%', padding: '9px 12px',
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#0D1117', outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
           </div>
+
+          {/* Sarlavha */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Sarlavha *
+            </label>
+            <input
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="Qisqa sarlavha"
+              maxLength={120}
+              style={{
+                width: '100%', padding: '9px 12px',
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#0D1117', outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* Xabar */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Xabar *
+            </label>
+            <textarea
+              value={form.message}
+              onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
+              rows={3}
+              placeholder="To'liq xabar matni..."
+              style={{
+                width: '100%', padding: '9px 12px',
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#0D1117', outline: 'none',
+                resize: 'vertical', fontFamily: 'Outfit, sans-serif',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* Havola */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Havola <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ixtiyoriy, masalan: /animals/5)</span>
+            </label>
+            <input
+              value={form.action_url}
+              onChange={e => setForm(f => ({ ...f, action_url: e.target.value }))}
+              placeholder="/animals/5"
+              style={{
+                width: '100%', padding: '9px 12px',
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#0D1117', outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {mut.isError && (
+            <div style={{
+              padding: '8px 12px', background: '#FEF2F2',
+              border: '1px solid #FECACA', borderRadius: 8,
+              fontSize: 12, color: '#DC2626',
+            }}>
+              Xato: {(mut.error as Error)?.message}
+            </div>
+          )}
         </div>
 
-        <div style={{ padding: '14px 24px', borderTop: '1px solid #F3F4F6' }}>
+        <div style={{
+          padding: '14px 24px', borderTop: '1px solid #F3F4F6',
+          display: 'flex', gap: 10, justifyContent: 'flex-end',
+        }}>
           <button onClick={onClose} style={{
-            width: '100%', padding: '10px',
-            background: '#1E3EB4', color: '#fff',
-            border: 'none', borderRadius: 8,
-            fontSize: 14, fontWeight: 700, cursor: 'pointer',
-            fontFamily: 'Outfit, sans-serif',
+            padding: '9px 20px', border: '1px solid #D1D5DB',
+            borderRadius: 8, background: '#fff', fontSize: 13,
+            fontWeight: 600, cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
           }}>
-            Tushunarli
+            Bekor
+          </button>
+          <button
+            onClick={() => mut.mutate()}
+            disabled={mut.isPending || !form.title.trim() || !form.message.trim()}
+            style={{
+              padding: '9px 24px',
+              background: (mut.isPending || !form.title.trim() || !form.message.trim())
+                ? '#9CA3AF' : '#1E3EB4',
+              color: '#fff', border: 'none', borderRadius: 8,
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'Outfit, sans-serif',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+            {mut.isPending ? (
+              <div style={{
+                width: 12, height: 12, borderRadius: '50%',
+                border: '2px solid rgba(255,255,255,0.4)',
+                borderTopColor: '#fff',
+                animation: 'spin .7s linear infinite',
+              }} />
+            ) : <Megaphone size={13} />}
+            Yuborish
           </button>
         </div>
       </div>
@@ -223,425 +422,563 @@ NOTIFICATION_EMAILS=admin@farm.uz,vet@farm.uz,manager@farm.uz`;
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
+// =============================================================================
+// EMAIL SOZLAMALARI TAB
+// =============================================================================
 
-export default function NotificationsPage() {
+function EmailTab() {
   const [testEmail,   setTestEmail]  = useState('');
   const [testResult,  setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [alertId,     setAlertId]    = useState('');
   const [sendResult,  setSendResult] = useState<any>(null);
   const [showGuide,   setShowGuide]  = useState(false);
+  const [copied,      setCopied]     = useState(false);
 
-  // ── Queries ───────────────────────────────────────────────────────────────
-  const { data: settings, isLoading: loading, refetch } = useQuery({
-    queryKey: ['notifications', 'settings'],
-    queryFn:  () => apiFetch<SmtpSettings>('/api/v1/notifications/settings'),
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['notifications', 'email-settings'],
+    queryFn:  () => apiFetch<SmtpSettings>('/api/v1/notifications/email/settings'),
   });
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
-  const testMutation = useMutation({
-    mutationFn: () => apiFetch<any>('/api/v1/notifications/test', {
+  const testMut = useMutation({
+    mutationFn: () => apiFetch<any>('/api/v1/notifications/email/test', {
       method: 'POST',
       body: JSON.stringify({ recipient: testEmail }),
     }),
-    onSuccess: (result) => setTestResult({
-      ok: result.sent || result.ok,
-      message: result.message || (result.sent ? 'Email yuborildi!' : 'Xato yuz berdi'),
-    }),
-    onError: (e: Error) => setTestResult({ ok: false, message: e.message }),
+    onSuccess: r => setTestResult({ ok: r.sent || r.ok, message: r.message || 'Yuborildi' }),
+    onError:   e => setTestResult({ ok: false, message: (e as Error).message }),
   });
 
-  const sendMutation = useMutation({
-    mutationFn: () => apiFetch<any>(`/api/v1/notifications/send/${alertId}`, {
-      method: 'POST',
-      body: JSON.stringify({ recipients: null }),
+  const sendMut = useMutation({
+    mutationFn: () => apiFetch<any>(`/api/v1/notifications/email/send/${alertId}`, {
+      method: 'POST', body: JSON.stringify({ recipients: null }),
     }),
     onSuccess: setSendResult,
-    onError: (e: Error) => setSendResult({ sent: false, error: e.message }),
+    onError:   e => setSendResult({ sent: false, error: (e as Error).message }),
   });
 
-  function handleTestEmail()  { if (testEmail.trim())  testMutation.mutate(); }
-  function handleSendAlert()  { if (alertId.trim())    sendMutation.mutate(); }
-  function handleRefresh()    { refetch(); }
+  const envExample = `SMTP_HOST=smtp.gmail.com\nSMTP_PORT=587\nSMTP_USER=your@gmail.com\nSMTP_PASSWORD=app-password\nSMTP_FROM=Taurus Vision <your@gmail.com>\nNOTIFICATION_EMAILS=admin@farm.uz,vet@farm.uz`;
 
-  const testLoading = testMutation.isPending;
-  const sendLoading = sendMutation.isPending;
-  const refreshing  = false;
+  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#9CA3AF' }}>Yuklanmoqda...</div>;
 
-  if (loading) {
-    return (
-      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '48px 24px', textAlign: 'center', color: '#9CA3AF', fontFamily: 'Outfit, sans-serif' }}>
-        Yuklanmoqda...
-      </div>
-    );
-  }
-
-  const isConfigured = settings?.configured ?? false;
+  const ok = settings?.configured ?? false;
 
   return (
-    <div style={{
-      maxWidth: 1000, margin: '0 auto',
-      padding: '32px 24px',
-      fontFamily: 'Outfit, sans-serif',
-    }}>
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
-        <div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0D1117', margin: 0 }}>
-            Bildirishnomalar
-          </h1>
-          <p style={{ fontSize: 14, color: '#6B7280', margin: '4px 0 0' }}>
-            Email xabarnomalar sozlamalari va boshqaruvi
-          </p>
+    <div>
+      {/* Status banner */}
+      <div style={{
+        padding: '14px 18px', marginBottom: 20,
+        background: ok ? '#F0FDF4' : '#FFF7ED',
+        border: `1px solid ${ok ? '#A7F3D0' : '#FED7AA'}`,
+        borderRadius: 12,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        {ok
+          ? <CheckCircle size={16} color="#10B981" />
+          : <AlertCircle size={16} color="#EA580C" />}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: ok ? '#065F46' : '#92400E' }}>
+            {ok ? `SMTP tayyor — ${settings?.smtp_host}:${settings?.smtp_port}` : 'SMTP sozlanmagan'}
+          </div>
+          <div style={{ fontSize: 11, color: ok ? '#059669' : '#B45309', marginTop: 2 }}>
+            {ok
+              ? `${settings?.smtp_user} · ${settings?.total_recipients} ta recipient`
+              : 'Email log da saqlanadi'}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={handleRefresh} disabled={refreshing} style={{
-            padding: '9px 12px',
-            border: '1px solid #D1D5DB', borderRadius: 8, background: '#fff',
-            cursor: 'pointer', display: 'flex', alignItems: 'center',
-          }}>
-            <RefreshCw size={15} color="#6B7280"
-              style={{ animation: refreshing ? 'spin .7s linear infinite' : 'none' }} />
-          </button>
+        {!ok && (
           <button onClick={() => setShowGuide(true)} style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '9px 18px',
-            background: '#F9FAFB', color: '#374151',
-            border: '1px solid #D1D5DB', borderRadius: 8,
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            padding: '5px 14px', background: '#EA580C', color: '#fff',
+            border: 'none', borderRadius: 7,
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
             fontFamily: 'Outfit, sans-serif',
           }}>
-            <Settings size={15} />
-            SMTP Sozlash
-          </button>
-        </div>
-      </div>
-
-      {/* Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
-        <StatCard
-          icon={isConfigured ? CheckCircle : XCircle}
-          label="SMTP Holati"
-          value={isConfigured ? 'Sozlangan' : 'Sozlanmagan'}
-          color={isConfigured ? '#10B981' : '#9CA3AF'}
-          bg={isConfigured ? '#ECFDF5' : '#F3F4F6'}
-        />
-        <StatCard
-          icon={Users}
-          label="Recipient soni"
-          value={String(settings?.total_recipients ?? 0)}
-          color="#3B82F6"
-          bg="#EFF6FF"
-        />
-        <StatCard
-          icon={Mail}
-          label="Email rejimi"
-          value={isConfigured ? 'SMTP' : 'Log rejimi'}
-          color={isConfigured ? '#8B5CF6' : '#F59E0B'}
-          bg={isConfigured ? '#F5F3FF' : '#FFF7ED'}
-        />
-        <StatCard
-          icon={Bell}
-          label="Kunlik digest"
-          value="07:00 UTC"
-          color="#059669"
-          bg="#F0FDF4"
-        />
-      </div>
-
-      {/* SMTP Status Banner */}
-      <div style={{
-        padding: '16px 20px',
-        background: isConfigured ? '#F0FDF4' : '#FFF7ED',
-        border: `1px solid ${isConfigured ? '#A7F3D0' : '#FED7AA'}`,
-        borderRadius: 12, marginBottom: 24,
-        display: 'flex', alignItems: 'flex-start', gap: 12,
-      }}>
-        {isConfigured
-          ? <CheckCircle size={18} color="#10B981" style={{ flexShrink: 0, marginTop: 1 }} />
-          : <AlertCircle size={18} color="#EA580C" style={{ flexShrink: 0, marginTop: 1 }} />}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: isConfigured ? '#065F46' : '#92400E', marginBottom: 4 }}>
-            {isConfigured
-              ? `SMTP tayyor — ${settings?.smtp_host}:${settings?.smtp_port}`
-              : 'SMTP sozlanmagan — email log da saqlanadi'}
-          </div>
-          <div style={{ fontSize: 12, color: isConfigured ? '#059669' : '#B45309' }}>
-            {isConfigured
-              ? `${settings?.smtp_user} orqali yuboriladi · ${settings?.total_recipients} ta recipient`
-              : 'Alert emaillar log faylda ko\'rinadi. SMTP sozlash uchun "SMTP Sozlash" tugmasini bosing.'}
-          </div>
-        </div>
-        {!isConfigured && (
-          <button onClick={() => setShowGuide(true)} style={{
-            display: 'flex', alignItems: 'center', gap: 5,
-            padding: '6px 14px',
-            background: '#EA580C', color: '#fff',
-            border: 'none', borderRadius: 7,
-            fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            fontFamily: 'Outfit, sans-serif', flexShrink: 0,
-          }}>
-            Sozlash <ChevronRight size={12} />
+            Sozlash
           </button>
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
-
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
         {/* Recipients */}
-        <div style={{
-          background: '#fff', border: '1px solid #E4E7ED',
-          borderRadius: 14, padding: 20,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Users size={15} color="#1E3EB4" />
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0D1117', margin: 0 }}>
-              Email Recipientlar
-            </h3>
+        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
+            <Users size={14} color="#1E3EB4" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#0D1117' }}>Recipientlar</span>
           </div>
-
-          {settings?.recipients && settings.recipients.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {settings.recipients.map((email, i) => (
+          {settings?.recipients?.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {settings.recipients.map((e, i) => (
                 <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 12px',
-                  background: '#F9FAFB', border: '1px solid #F3F4F6',
-                  borderRadius: 8,
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '7px 10px', background: '#F9FAFB',
+                  border: '1px solid #F3F4F6', borderRadius: 7,
                 }}>
-                  <Mail size={13} color="#6B7280" />
-                  <span style={{ fontSize: 13, color: '#0D1117', fontFamily: 'monospace' }}>
-                    {email}
-                  </span>
+                  <Mail size={11} color="#6B7280" />
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#374151' }}>{e}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{
-              padding: '20px', textAlign: 'center',
-              background: '#F9FAFB', borderRadius: 8,
-            }}>
-              <Mail size={24} color="#D1D5DB" style={{ margin: '0 auto 8px' }} />
-              <p style={{ fontSize: 12, color: '#9CA3AF', margin: 0 }}>
-                Recipient sozlanmagan.<br />
-                .env da NOTIFICATION_EMAILS ni kiriting.
-              </p>
+            <div style={{ padding: 16, textAlign: 'center', color: '#9CA3AF', fontSize: 12 }}>
+              Sozlanmagan
             </div>
           )}
-
-          <p style={{ fontSize: 11, color: '#9CA3AF', margin: '10px 0 0' }}>
-            Tahrirlash: .env → NOTIFICATION_EMAILS=email1,email2
-          </p>
         </div>
 
-        {/* Severity Rules */}
-        <div style={{
-          background: '#fff', border: '1px solid #E4E7ED',
-          borderRadius: 14, padding: 20,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Bell size={15} color="#1E3EB4" />
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0D1117', margin: 0 }}>
-              Severity Qoidalari
-            </h3>
+        {/* Severity rules */}
+        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
+            <Bell size={14} color="#1E3EB4" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#0D1117' }}>Severity Qoidalari</span>
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[
-              { sev: 'critical', label: 'KRITIK',  emoji: '🔴', send: true },
-              { sev: 'high',     label: 'YUQORI',  emoji: '🟠', send: true },
-              { sev: 'medium',   label: "O'RTA",   emoji: '🟡', send: true },
-              { sev: 'low',      label: 'PAST',    emoji: '🟢', send: false },
-            ].map(({ sev, label, emoji, send }) => (
-              <div key={sev} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 12px',
-                background: '#F9FAFB', border: '1px solid #F3F4F6',
-                borderRadius: 8,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 14 }}>{emoji}</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#0D1117' }}>{label}</span>
-                </div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  fontSize: 11, fontWeight: 600,
-                  color: send ? '#059669' : '#9CA3AF',
-                }}>
-                  {send
-                    ? <><CheckCircle size={12} /> Email yuboriladi</>
-                    : <><XCircle size={12} /> Yuborilmaydi</>}
-                </div>
+          {[
+            { s: 'critical', l: 'KRITIK',  e: '🔴', send: true },
+            { s: 'high',     l: 'YUQORI',  e: '🟠', send: true },
+            { s: 'medium',   l: "O'RTA",   e: '🟡', send: true },
+            { s: 'low',      l: 'PAST',    e: '🟢', send: false },
+          ].map(({ s, l, e, send }) => (
+            <div key={s} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '7px 10px', marginBottom: 6,
+              background: '#F9FAFB', border: '1px solid #F3F4F6', borderRadius: 7,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span>{e}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#0D1117' }}>{l}</span>
               </div>
-            ))}
-          </div>
-
-          <p style={{ fontSize: 11, color: '#9CA3AF', margin: '10px 0 0' }}>
-            LOW darajali alertlar email yubormasdan log da qoladi.
-          </p>
+              <span style={{ fontSize: 11, color: send ? '#059669' : '#9CA3AF', fontWeight: 600 }}>
+                {send ? '✅ Email' : '❌ Yo\'q'}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Test Email */}
-      <div style={{
-        background: '#fff', border: '1px solid #E4E7ED',
-        borderRadius: 14, padding: 24, marginBottom: 20,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <Send size={15} color="#1E3EB4" />
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0D1117', margin: 0 }}>
-            Test Email Yuborish
-          </h3>
+      {/* Test email */}
+      <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
+          <Send size={14} color="#1E3EB4" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Test Email</span>
         </div>
-
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
           <input
-            type="email"
-            value={testEmail}
+            type="email" value={testEmail}
             onChange={e => setTestEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleTestEmail()}
+            onKeyDown={e => e.key === 'Enter' && testEmail.trim() && testMut.mutate()}
             placeholder="test@example.com"
             style={{
-              flex: 1, padding: '10px 14px',
+              flex: 1, padding: '9px 12px',
               border: '1px solid #D1D5DB', borderRadius: 8,
-              fontSize: 13, color: '#0D1117', outline: 'none',
-              fontFamily: 'monospace',
+              fontSize: 13, outline: 'none', fontFamily: 'monospace',
             }}
           />
           <button
-            onClick={handleTestEmail}
-            disabled={testLoading || !testEmail.trim()}
+            onClick={() => testMut.mutate()}
+            disabled={testMut.isPending || !testEmail.trim()}
             style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '10px 20px',
-              background: testLoading || !testEmail.trim() ? '#9CA3AF' : '#1E3EB4',
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '9px 18px',
+              background: (testMut.isPending || !testEmail.trim()) ? '#9CA3AF' : '#1E3EB4',
               color: '#fff', border: 'none', borderRadius: 8,
-              fontSize: 13, fontWeight: 700,
-              cursor: testLoading || !testEmail.trim() ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
               fontFamily: 'Outfit, sans-serif',
-            }}
-          >
-            {testLoading ? (
-              <div style={{
-                width: 14, height: 14, borderRadius: '50%',
-                border: '2px solid rgba(255,255,255,0.4)',
-                borderTopColor: '#fff',
-                animation: 'spin .7s linear infinite',
-              }} />
-            ) : <Send size={14} />}
-            {testLoading ? 'Yuborilmoqda...' : 'Test Yuborish'}
+            }}>
+            <Send size={13} />
+            {testMut.isPending ? 'Yuborilmoqda...' : 'Yuborish'}
           </button>
         </div>
-
         {testResult && (
           <div style={{
-            display: 'flex', alignItems: 'flex-start', gap: 8,
-            marginTop: 12,
-            padding: '10px 14px',
+            marginTop: 10, padding: '8px 12px',
             background: testResult.ok ? '#F0FDF4' : '#FEF2F2',
             border: `1px solid ${testResult.ok ? '#A7F3D0' : '#FECACA'}`,
-            borderRadius: 8,
+            borderRadius: 8, fontSize: 12,
+            color: testResult.ok ? '#065F46' : '#DC2626',
+            display: 'flex', alignItems: 'center', gap: 6,
           }}>
-            {testResult.ok
-              ? <CheckCircle size={14} color="#10B981" style={{ flexShrink: 0, marginTop: 1 }} />
-              : <XCircle size={14} color="#DC2626" style={{ flexShrink: 0, marginTop: 1 }} />}
-            <span style={{ fontSize: 13, color: testResult.ok ? '#065F46' : '#DC2626' }}>
-              {testResult.message}
-            </span>
+            {testResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+            {testResult.message}
           </div>
         )}
       </div>
 
-      {/* Manual Alert Send */}
-      <div style={{
-        background: '#fff', border: '1px solid #E4E7ED',
-        borderRadius: 14, padding: 24,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <Bell size={15} color="#1E3EB4" />
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0D1117', margin: 0 }}>
-            Alert Email Yuborish
-          </h3>
+      {/* Alert email */}
+      <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
+          <Bell size={14} color="#1E3EB4" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#0D1117' }}>Alert Email Yuborish</span>
         </div>
-
-        <p style={{ fontSize: 13, color: '#6B7280', margin: '0 0 14px' }}>
-          Mavjud alert ID ni kiriting — o'sha alert uchun email yuboriladi.
-        </p>
-
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
           <input
-            type="number"
-            value={alertId}
+            type="number" value={alertId}
             onChange={e => setAlertId(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSendAlert()}
-            placeholder="Alert ID (masalan: 1)"
+            placeholder="Alert ID"
             style={{
-              flex: 1, padding: '10px 14px',
+              flex: 1, padding: '9px 12px',
               border: '1px solid #D1D5DB', borderRadius: 8,
-              fontSize: 13, color: '#0D1117', outline: 'none',
-              fontFamily: 'monospace',
+              fontSize: 13, outline: 'none',
             }}
           />
           <button
-            onClick={handleSendAlert}
-            disabled={sendLoading || !alertId.trim()}
+            onClick={() => sendMut.mutate()}
+            disabled={sendMut.isPending || !alertId.trim()}
             style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '10px 20px',
-              background: sendLoading || !alertId.trim() ? '#9CA3AF' : '#7C3AED',
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '9px 18px',
+              background: (sendMut.isPending || !alertId.trim()) ? '#9CA3AF' : '#7C3AED',
               color: '#fff', border: 'none', borderRadius: 8,
-              fontSize: 13, fontWeight: 700,
-              cursor: sendLoading || !alertId.trim() ? 'not-allowed' : 'pointer',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
               fontFamily: 'Outfit, sans-serif',
-            }}
-          >
-            {sendLoading ? (
-              <div style={{
-                width: 14, height: 14, borderRadius: '50%',
-                border: '2px solid rgba(255,255,255,0.4)',
-                borderTopColor: '#fff',
-                animation: 'spin .7s linear infinite',
-              }} />
-            ) : <Mail size={14} />}
-            {sendLoading ? 'Yuborilmoqda...' : 'Email Yuborish'}
+            }}>
+            <Mail size={13} />
+            {sendMut.isPending ? 'Yuborilmoqda...' : 'Yuborish'}
           </button>
         </div>
-
         {sendResult && (
           <div style={{
-            marginTop: 12,
-            padding: '10px 14px',
+            marginTop: 10, padding: '8px 12px',
             background: sendResult.sent ? '#F0FDF4' : '#FEF2F2',
             border: `1px solid ${sendResult.sent ? '#A7F3D0' : '#FECACA'}`,
-            borderRadius: 8,
+            borderRadius: 8, fontSize: 12,
+            color: sendResult.sent ? '#065F46' : '#DC2626',
           }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              marginBottom: sendResult.recipients?.length ? 6 : 0,
-            }}>
-              {sendResult.sent
-                ? <CheckCircle size={14} color="#10B981" />
-                : <XCircle size={14} color="#DC2626" />}
-              <span style={{ fontSize: 13, fontWeight: 600, color: sendResult.sent ? '#065F46' : '#DC2626' }}>
-                {sendResult.sent
-                  ? `Email ${sendResult.mode === 'log' ? '(log rejimda)' : ''} muvaffaqiyatli yuborildi`
-                  : `Xato: ${sendResult.error || 'Noma\'lum xato'}`}
-              </span>
-            </div>
-            {sendResult.recipients?.length > 0 && (
-              <p style={{ fontSize: 12, color: '#6B7280', margin: 0 }}>
-                Recipientlar: {sendResult.recipients.join(', ')}
-              </p>
-            )}
+            {sendResult.sent
+              ? `✅ Muvaffaqiyatli (${sendResult.mode === 'log' ? 'log rejimida' : 'SMTP'})`
+              : `❌ Xato: ${sendResult.error || 'Noma\'lum'}`}
           </div>
         )}
       </div>
 
       {/* Guide Modal */}
-      {showGuide && <EnvGuideModal onClose={() => setShowGuide(false)} />}
+      {showGuide && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 50, padding: 16,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, maxWidth: 560,
+            width: '100%', maxHeight: '90vh', overflow: 'auto',
+          }}>
+            <div style={{
+              padding: '18px 24px', borderBottom: '1px solid #F3F4F6',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Settings size={16} color="#1E3EB4" />
+                <span style={{ fontSize: 15, fontWeight: 700 }}>SMTP Sozlash</span>
+              </div>
+              <button onClick={() => setShowGuide(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ padding: 24 }}>
+              <div style={{ position: 'relative' }}>
+                <pre style={{
+                  background: '#0D1117', color: '#E5E7EB',
+                  padding: '16px 20px', borderRadius: 10,
+                  fontSize: 12, lineHeight: 1.7, overflowX: 'auto',
+                }}>
+                  {envExample}
+                </pre>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(envExample);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }} style={{
+                  position: 'absolute', top: 10, right: 10,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px',
+                  background: copied ? '#10B981' : 'rgba(255,255,255,0.1)',
+                  border: 'none', borderRadius: 6,
+                  color: '#fff', fontSize: 11, cursor: 'pointer',
+                }}>
+                  {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
+                  {copied ? 'Nusxalandi' : 'Nusxalash'}
+                </button>
+              </div>
+              <p style={{ fontSize: 12, color: '#6B7280', marginTop: 12 }}>
+                Gmail uchun oddiy parol emas, <strong>App Password</strong> kerak.
+                Keyinroq: <code>docker compose restart backend</code>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// MAIN PAGE
+// =============================================================================
+
+export default function NotificationsPage() {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+
+  const [activeTab,   setActiveTab]   = useState<'inapp' | 'email'>('inapp');
+  const [filter,      setFilter]      = useState<'all' | 'unread'>('all');
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [page,        setPage]        = useState(0);
+  const LIMIT = 20;
+
+  const isAdmin = (user as any)?.role === 'admin';
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['notifications', 'list', filter, page],
+    queryFn:  () => apiFetch<NotificationList>(
+      `/api/v1/notifications?limit=${LIMIT}&offset=${page * LIMIT}&unread_only=${filter === 'unread'}`
+    ),
+    refetchInterval: 30_000,
+  });
+
+  const { data: countData } = useQuery({
+    queryKey: ['notifications', 'count'],
+    queryFn:  () => apiFetch<{ unread_count: number; total: number }>('/api/v1/notifications/count'),
+    refetchInterval: 15_000,
+  });
+
+  // ── Mutations ────────────────────────────────────────────────────────────────
+  const readMut = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/notifications/read/${id}`, { method: 'POST' }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['notifications'] }); },
+  });
+
+  const readAllMut = useMutation({
+    mutationFn: () => apiFetch('/api/v1/notifications/read-all', { method: 'POST' }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['notifications'] }); },
+  });
+
+  const dismissMut = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/v1/notifications/dismiss/${id}`, { method: 'POST' }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['notifications'] }); },
+  });
+
+  const dismissAllMut = useMutation({
+    mutationFn: () => apiFetch('/api/v1/notifications/dismiss-all', { method: 'POST' }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['notifications'] }); },
+  });
+
+  const unread = countData?.unread_count ?? 0;
+
+  return (
+    <div style={{
+      maxWidth: 900, margin: '0 auto',
+      padding: '32px 24px',
+      fontFamily: 'Outfit, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0D1117', margin: 0 }}>
+            Bildirishnomalar
+          </h1>
+          <p style={{ fontSize: 14, color: '#6B7280', margin: '4px 0 0' }}>
+            In-app xabarlar va email sozlamalari
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => refetch()} style={{
+            padding: '8px 12px', border: '1px solid #D1D5DB',
+            borderRadius: 8, background: '#fff', cursor: 'pointer',
+          }}>
+            <RefreshCw size={14} color="#6B7280" />
+          </button>
+          {isAdmin && activeTab === 'inapp' && (
+            <button onClick={() => setShowCreate(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 16px',
+              background: '#1E3EB4', color: '#fff',
+              border: 'none', borderRadius: 8,
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'Outfit, sans-serif',
+            }}>
+              <Plus size={14} /> Yuborish
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{
+        display: 'flex', gap: 0,
+        background: '#F3F4F6', borderRadius: 10, padding: 3,
+        marginBottom: 24, width: 'fit-content',
+      }}>
+        {([
+          { key: 'inapp', label: 'In-App', icon: Bell,  badge: unread },
+          { key: 'email', label: 'Email',  icon: Mail,  badge: 0 },
+        ] as const).map(({ key, label, icon: Icon, badge }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '8px 18px', borderRadius: 8,
+              background: activeTab === key ? '#fff' : 'transparent',
+              boxShadow: activeTab === key ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+              border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: 600,
+              color: activeTab === key ? '#0D1117' : '#6B7280',
+              fontFamily: 'Outfit, sans-serif',
+              transition: 'all .15s',
+            }}>
+            <Icon size={14} />
+            {label}
+            {badge > 0 && (
+              <span style={{
+                minWidth: 18, height: 18, borderRadius: 9,
+                background: '#DC2626', color: '#fff',
+                fontSize: 10, fontWeight: 700,
+                display: 'grid', placeItems: 'center',
+                padding: '0 4px',
+              }}>
+                {badge > 99 ? '99+' : badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* IN-APP TAB */}
+      {activeTab === 'inapp' && (
+        <div>
+          {/* Toolbar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 16,
+          }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(['all', 'unread'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => { setFilter(f); setPage(0); }}
+                  style={{
+                    padding: '6px 14px', borderRadius: 7,
+                    background: filter === f ? '#1E3EB4' : '#F3F4F6',
+                    color: filter === f ? '#fff' : '#6B7280',
+                    border: 'none', cursor: 'pointer',
+                    fontSize: 12, fontWeight: 600,
+                    fontFamily: 'Outfit, sans-serif',
+                  }}>
+                  {f === 'all' ? 'Barchasi' : `O'qilmagan${unread > 0 ? ` (${unread})` : ''}`}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {unread > 0 && (
+                <button
+                  onClick={() => readAllMut.mutate()}
+                  disabled={readAllMut.isPending}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '6px 12px', borderRadius: 7,
+                    background: '#F0FDF4', color: '#059669',
+                    border: '1px solid #A7F3D0',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'Outfit, sans-serif',
+                  }}>
+                  <Check size={11} /> Hammasini o'qildi
+                </button>
+              )}
+              {(data?.total ?? 0) > 0 && (
+                <button
+                  onClick={() => dismissAllMut.mutate()}
+                  disabled={dismissAllMut.isPending}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '6px 12px', borderRadius: 7,
+                    background: '#FEF2F2', color: '#DC2626',
+                    border: '1px solid #FECACA',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'Outfit, sans-serif',
+                  }}>
+                  <Trash2 size={11} /> Hammasini yashirish
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* List */}
+          {isLoading ? (
+            <div style={{ padding: 48, textAlign: 'center', color: '#9CA3AF' }}>
+              Yuklanmoqda...
+            </div>
+          ) : !data?.items?.length ? (
+            <div style={{
+              padding: 48, textAlign: 'center',
+              background: '#F9FAFB', borderRadius: 12,
+              border: '1px dashed #E4E7ED',
+            }}>
+              <Inbox size={40} color="#D1D5DB" style={{ margin: '0 auto 12px' }} />
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#9CA3AF', margin: 0 }}>
+                {filter === 'unread' ? "O'qilmagan xabarlar yo'q" : 'Bildirishnomalar yo\'q'}
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {data.items.map(n => (
+                <NotifCard
+                  key={n.id}
+                  notif={n}
+                  onRead={id => readMut.mutate(id)}
+                  onDismiss={id => dismissMut.mutate(id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {data && data.total > LIMIT && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 12, marginTop: 20,
+            }}>
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                style={{
+                  padding: '7px 16px', borderRadius: 8,
+                  border: '1px solid #D1D5DB',
+                  background: page === 0 ? '#F9FAFB' : '#fff',
+                  color: page === 0 ? '#9CA3AF' : '#374151',
+                  fontSize: 13, cursor: page === 0 ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Outfit, sans-serif',
+                }}>
+                ← Oldingi
+              </button>
+              <span style={{ fontSize: 13, color: '#6B7280' }}>
+                {page + 1} / {Math.ceil(data.total / LIMIT)}
+              </span>
+              <button
+                onClick={() => setPage(p => p + 1)}
+                disabled={!data.has_more}
+                style={{
+                  padding: '7px 16px', borderRadius: 8,
+                  border: '1px solid #D1D5DB',
+                  background: !data.has_more ? '#F9FAFB' : '#fff',
+                  color: !data.has_more ? '#9CA3AF' : '#374151',
+                  fontSize: 13, cursor: !data.has_more ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Outfit, sans-serif',
+                }}>
+                Keyingi →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* EMAIL TAB */}
+      {activeTab === 'email' && <EmailTab />}
+
+      {/* Create Modal */}
+      {showCreate && (
+        <CreateNotifModal
+          onClose={() => setShowCreate(false)}
+          onSuccess={() => qc.invalidateQueries({ queryKey: ['notifications'] })}
+        />
+      )}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

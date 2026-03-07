@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch }            from '../utils/apiFetch';
 import { useWebSocketContext } from '../context/WebSocketContext';
 import { ConnectionStatus as WsStatus } from '../shared/types';
+import { useResponsive } from '../hooks/useResponsive';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -88,11 +89,22 @@ function MjpegPlayer({
   expanded: boolean;
   onExpand: () => void;
 }) {
-  const [phase, setPhase] = useState<'loading' | 'live' | 'error'>('loading');
+  // LAZY LOAD: stream faqat foydalanuvchi "Ko'rish" bosganda ochiladi
+  const [streamActive, setStreamActive] = useState(false);
+  const [phase, setPhase] = useState<'loading' | 'live' | 'error'>('idle' as any);
   const [imgKey, setImgKey] = useState(0);
   const retry = useCallback(() => { setPhase('loading'); setImgKey(k => k + 1); }, []);
 
-  useEffect(() => { setPhase('loading'); setImgKey(k => k + 1); }, [cam.id]);
+  // Kamera o'zgarganda streamni to'xtatib, qayta bosishni talab qilish
+  useEffect(() => {
+    setStreamActive(false);
+    setPhase('idle' as any);
+  }, [cam.id]);
+
+  // Expand bo'lganda avtomatik stream boshlash
+  useEffect(() => {
+    if (expanded) { setStreamActive(true); setPhase('loading'); }
+  }, [expanded]);
 
   const running = pipeInfo?.running ?? false;
   const fps     = pipeInfo?.stats?.fps ?? 0;
@@ -150,15 +162,45 @@ function MjpegPlayer({
         </div>
       )}
 
-      {/* MJPEG kadr */}
-      <img
-        key={imgKey}
-        src={src}
-        alt={`${cam.name} stream`}
-        style={{ width: '100%', height: '100%', objectFit: 'contain', display: phase === 'error' ? 'none' : 'block' }}
-        onLoad={() => setPhase('live')}
-        onError={() => setPhase('error')}
-      />
+      {/* IDLE — Stream bosilmagan holat */}
+      {!streamActive && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 4,
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 12,
+          background: '#0D1117',
+        }}>
+          <Camera size={28} color="#1E293B"/>
+          <p style={{ fontSize: 11, color: '#4B5563', margin: 0 }}>
+            {running ? 'Pipeline aktiv' : "Pipeline to'xtatilgan"}
+          </p>
+          {running && (
+            <button
+              onClick={() => { setStreamActive(true); setPhase('loading'); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '6px 16px',
+                background: '#1E3EB4', border: 'none',
+                borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              }}
+            >
+              <Play size={11}/> Ko'rish
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* MJPEG kadr — faqat streamActive bo'lganda */}
+      {streamActive && (
+        <img
+          key={imgKey}
+          src={src}
+          alt={`${cam.name} stream`}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: phase === 'error' ? 'none' : 'block' }}
+          onLoad={() => setPhase('live')}
+          onError={() => { setPhase('error'); }}
+        />
+      )}
 
       {/* LIVE badge */}
       {phase === 'live' && running && (
@@ -383,6 +425,7 @@ function DetectionPanel({ events }: { events: DetectionEvent[] }) {
 export default function LiveFeedPage() {
   const token = localStorage.getItem('tv_access_token') ?? '';
   const { status: wsStatus, liveDetections } = useWebSocketContext();
+  const { isMobile, isTablet } = useResponsive();
 
   const [events, setEvents]           = useState<DetectionEvent[]>([]);
   const [expandedCam, setExpandedCam] = useState<string | null>(null);
@@ -440,7 +483,9 @@ export default function LiveFeedPage() {
 
   return (
     <div style={{
-      height: 'calc(100vh - 64px)', overflow: 'hidden',
+      height: isMobile ? 'auto' : 'calc(100vh - 64px)',
+      minHeight: isMobile ? 'calc(100vh - 64px)' : undefined,
+      overflow: isMobile ? 'auto' : 'hidden',
       background: '#F7F8FA', display: 'flex', flexDirection: 'column',
       fontFamily: "'Outfit', system-ui, sans-serif",
     }}>
@@ -495,7 +540,7 @@ export default function LiveFeedPage() {
       </div>
 
       {/* ── Body ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 260px', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (isTablet ? '1fr' : '1fr 260px'), overflow: isMobile ? 'auto' : 'hidden' }}>
 
         {/* ── Kamera grid ─────────────────────────────────────── */}
         <div className="lv-scroll" style={{ overflowY: 'auto', padding: 14 }}>
@@ -591,15 +636,29 @@ export default function LiveFeedPage() {
         </div>
 
         {/* ── Detection panel ─────────────────────────────────── */}
+        {!isMobile && !isTablet && (
+          <div style={{
+            borderLeft: '1px solid #E4E7ED',
+            overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+            background: '#fff',
+          }}>
+            <DetectionPanel events={events}/>
+          </div>
+        )}
+      </div>
+
+      {/* ── Mobile Detection Panel (below cameras) ──────────── */}
+      {(isMobile || isTablet) && events.length > 0 && (
         <div style={{
-          borderLeft: '1px solid #E4E7ED',
-          overflow: 'hidden',
-          display: 'flex', flexDirection: 'column',
+          borderTop: '1px solid #E4E7ED',
           background: '#fff',
+          maxHeight: 220,
+          overflowY: 'auto',
         }}>
           <DetectionPanel events={events}/>
         </div>
-      </div>
+      )}
     </div>
   );
 }

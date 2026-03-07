@@ -22,6 +22,7 @@ import {
   AlertCircle, FileText, X, XCircle, Lock, Unlock, Info,
 } from 'lucide-react';
 import { apiFetch } from '../utils/apiFetch';
+import { useIsMobile } from '../hooks/useResponsive';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -660,6 +661,7 @@ function RecordRow({
 
 export default function HealthPage() {
   const qClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [search, setSearch]         = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sevFilter, setSevFilter]   = useState('all');
@@ -769,7 +771,7 @@ export default function HealthPage() {
   const criticalCount = records.filter(r => !r.is_resolved && r.severity === 'critical').length;
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '32px 24px', fontFamily: 'Outfit, sans-serif' }}>
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '14px 12px 80px' : '32px 24px', fontFamily: 'Outfit, sans-serif' }}>
 
       {/* Toast */}
       {toast && (
@@ -833,7 +835,7 @@ export default function HealthPage() {
       )}
 
       {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(5, 1fr)', gap: isMobile ? 10 : 14, marginBottom: 24 }}>
         {[
           { label: 'Jami yozuvlar',  value: stats?.total_records ?? 0,      icon: FileText,    color: '#1D4ED8', bg: '#EFF6FF' },
           { label: 'Hal etilmagan',  value: stats?.unresolved ?? 0,          icon: Clock,       color: '#D97706', bg: '#FFFBEB' },
@@ -894,7 +896,7 @@ export default function HealthPage() {
 
       {/* Main layout: table + sidebar */}
 {activeSection === 'records' && (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 300px', gap: 20 }}>
 
         {/* LEFT — Records table */}
         <div>
@@ -949,7 +951,8 @@ export default function HealthPage() {
           </div>
 
           {/* Table */}
-          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 14, overflow: 'hidden', overflowX: isMobile ? 'auto' : 'visible' }}>
+            <div style={{ minWidth: isMobile ? 600 : undefined }}>
             {/* Header */}
             <div style={{
               display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1.1fr 1fr 1.2fr 80px',
@@ -982,6 +985,7 @@ export default function HealthPage() {
                 onClick={() => setDetail(r)}
               />
             ))}
+            </div>{/* end minWidth wrapper */}
           </div>
 
           <p style={{ fontSize: 12, color: '#9CA3AF', marginTop: 10, textAlign: 'center' }}>
@@ -1090,7 +1094,7 @@ export default function HealthPage() {
 
       {/* ═══════════════════ F2 — VAKSINATSIYA JADVALI ═══════════════════ */}
       {activeSection === 'vaccination' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 300px', gap: 20 }}>
 
           {/* LEFT */}
           <div>

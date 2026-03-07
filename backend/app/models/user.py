@@ -20,7 +20,10 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, Boolean, Enum as SQLEnum, DateTime, Integer, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.models.notification import Notification
 
 from app.models.base import BaseModel
 
@@ -134,6 +137,14 @@ class User(BaseModel):
         nullable=True,
         index=True,
         comment="Foydalanuvchi hozir ishlayotgan ferma ID si",
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    notifications: Mapped[list["Notification"]] = relationship(
+        "Notification",
+        back_populates="user",
+        lazy="noload",
+        cascade="all, delete-orphan",
     )
 
     # =========================================================================

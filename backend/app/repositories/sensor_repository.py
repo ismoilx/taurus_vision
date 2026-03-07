@@ -104,9 +104,7 @@ class SensorRepository:
             }
             yoki None agar ma'lumot bo'lmasa
         """
-        date = datetime.strptime(date_str, "%Y-%m-%d").replace(
-            tzinfo=timezone.utc
-        )
+        date = datetime.strptime(date_str, "%Y-%m-%d")  # naive — TIMESTAMP WITHOUT TIME ZONE
         start = date
         end   = date + timedelta(days=1)
 
@@ -147,7 +145,7 @@ class SensorRepository:
         self, hours: int = 24
     ) -> list[dict]:
         """So'nggi N soatda ma'lumot yuborgan qurilmalar."""
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        since = datetime.utcnow() - timedelta(hours=hours)
 
         result = await self.db.execute(
             select(
@@ -179,9 +177,7 @@ class SensorRepository:
 
     async def get_farm_stats_today(self) -> dict:
         """Ferma bo'yicha bugungi sensor statistikasi."""
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
         total = await self.db.scalar(
             select(func.count(SensorReading.id)).where(
@@ -215,9 +211,7 @@ class SensorRepository:
         Bugungi anormal qiymatlar.
         Normal diapazondagi: harorat 38.0-39.5°C, HR 40-80 bpm.
         """
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
         result = await self.db.execute(
             select(SensorReading)

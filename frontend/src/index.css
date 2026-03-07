@@ -73,3 +73,72 @@
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
+/* ============================================================
+   PWA & Mobile responsive helpers  (Q1)
+   ============================================================ */
+
+/* Touch-target minimum 44×44 px (Apple HIG) */
+button, a, [role="button"] {
+  min-height: 44px;
+  min-width: 44px;
+}
+/* Kichik badge / icon tugmalar bundan mustasno */
+button.tv-icon-btn, .tv-icon-btn {
+  min-height: 28px;
+  min-width: 28px;
+}
+
+/* Overfow-scroll — horizontal scroll desktop da, mobile da yo'q */
+@media (max-width: 767px) {
+  .tv-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Modal full-screen on mobile */
+  .tv-modal-wrap {
+    align-items: flex-end !important;
+  }
+  .tv-modal-inner {
+    border-radius: 20px 20px 0 0 !important;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+  /* Compact padding on mobile */
+  .tv-page-pad {
+    padding: 12px 12px 80px !important;
+  }
+}
+
+/* Safe area utilities */
+.pb-safe  { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe  { padding-top:    env(safe-area-inset-top,    0px); }
+
+/* Prevent text size change on rotation (iOS) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Remove blue flash on tap (iOS) */
+* {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+
+/* Better focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid #1E3EB4;
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling (desktop) */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+}

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
+import { useResponsive } from '../hooks/useResponsive';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -297,6 +298,7 @@ function ProgBar({ label, val, total, color }: { label: string; val: number; tot
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const { isMobile, isTablet, responsive } = useResponsive();
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: overview } = useQuery({
@@ -401,8 +403,8 @@ export default function DashboardPage() {
         .tv2-link:hover { color: ${C.blueMid} !important; text-decoration: underline; }
       `}</style>
 
-      <div className="tv2-page" style={{ background: C.bg, minHeight: 'calc(100vh - 56px)', padding: '20px 24px 32px' }}>
-        <div style={{ maxWidth: 1360, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="tv2-page" style={{ background: C.bg, minHeight: 'calc(100vh - 56px)', padding: isMobile ? '14px 12px 24px' : '20px 24px 32px' }}>
+        <div style={{ maxWidth: 1360, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 16 }}>
 
           {/* ── Page title ── */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -430,7 +432,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ══ ROW 1: 4 KPI karta ══ */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: responsive('repeat(2,1fr)', 'repeat(4,1fr)', 'repeat(4, 1fr)'), gap: isMobile ? 10 : 14 }}>
             <StatCard
               label="Jonivorlar"
               value={totalAnimals > 0 ? String(totalAnimals) : '—'}
@@ -475,7 +477,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ══ ROW 2: Tur donut + ADI ring + Holat ══ */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px 300px', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: responsive('1fr', '1fr', '1fr 320px 300px'), gap: isMobile ? 10 : 14 }}>
 
             {/* Jonivor turlari — gorizontal bar */}
             <Card className="tv2-rise" style={{ animationDelay: '280ms' }}>
@@ -560,7 +562,7 @@ export default function DashboardPage() {
           </div>
 
           {/* ══ ROW 3: Grafik + Diqqat talab qiladiganlar ══ */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 10 : 14 }}>
 
             {/* Vazn + ADI trend grafigi */}
             <Card className="tv2-rise" style={{ animationDelay: '460ms' }}>

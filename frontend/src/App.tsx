@@ -3,10 +3,8 @@
  *
  * NAV: Logo | Dashboard | [Jonivorlar▾] [Monitoring▾] [Boshqaruv▾] | Soat | User
  *
- * Muammo (oldin): 14 item bir qatorda → overflow hidden → yarmi yo'qoldi
- * Yechim: 3 ta dropdown guruh → nav hech qachon to'lmaydi
- *
- * Sprint 25-26: BreedingPage qo'shildi — Baby ikoni lucide-react dan import qilindi
+ * PWA Q1: usePWA hook, PWAInstallBanner, SWUpdateBanner, OfflineBanner qo'shildi.
+ * Sprint 25-26: BreedingPage qo'shildi — Baby ikoni lucide-react dan import qilindi.
  */
 
 import {
@@ -18,8 +16,9 @@ import {
   BarChart2, Video, FileText, Stethoscope,
   Bell, Camera, Users, Cpu, ClipboardList, Wheat,
   LogOut, ChevronDown, MoreHorizontal, X, Radio, Coins, Shield, Building2, Scale,
-  Baby,                                             // Sprint 25-26 — Nasl & Zotchilik
-  Briefcase,                                        // Hodimlar moduli
+  Baby,
+  Briefcase,
+  WifiOff,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -27,6 +26,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { WebSocketProvider } from './context/WebSocketContext';
 import { SystemLoadingScreen } from './components/SystemLoadingScreen';
+import { PWAInstallBanner } from './components/PWAInstallBanner';
+import { SWUpdateBanner }   from './components/SWUpdateBanner';
+import { usePWA }           from './hooks/usePWA';
 import { apiFetch } from './utils/apiFetch';
 import './App.css';
 
@@ -515,6 +517,35 @@ function NavDropdown({ group }: { group: NavGroup }) {
 // =============================================================================
 // MOBILE BOTTOM NAV
 // =============================================================================
+
+/** Notification badge — BottomNav bell uchun */
+function NotifBadge() {
+  const { user } = useAuth();
+  const { data } = useQuery<{ unread_count: number }>({
+    queryKey:        ['notifications', 'count'],
+    queryFn:         () => apiFetch('/api/v1/notifications/count'),
+    enabled:         !!user,
+    refetchInterval: 30_000,
+    staleTime:       20_000,
+    retry:           false,
+  });
+  const count = data?.unread_count ?? 0;
+  if (!count) return null;
+  return (
+    <span style={{
+      position: 'absolute', top: 2, right: 'calc(50% - 18px)',
+      minWidth: 15, height: 15, borderRadius: 8,
+      background: '#DC2626', color: '#fff',
+      fontSize: 8, fontWeight: 800,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '0 3px', border: '1.5px solid var(--surface)',
+      fontFamily: "'JetBrains Mono', monospace", lineHeight: 1,
+    }}>
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 function BottomNav() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
@@ -532,6 +563,7 @@ function BottomNav() {
       {BOTTOM_MAIN.map(item => {
         const isAlso = item.also?.some(p => location.pathname === p || location.pathname.startsWith(p)) ?? false;
         const Icon = item.icon;
+        const isAlerts = item.to === '/alerts';
         return (
           <NavLink key={item.to} to={item.to} end={item.end}
             style={({ isActive }) => ({
@@ -545,7 +577,10 @@ function BottomNav() {
               const active = isActive || isAlso;
               return (<>
                 {active && <span style={{position:'absolute',top:0,left:'50%',transform:'translateX(-50%)',width:24,height:2,background:'#1E3EB4',borderRadius:'0 0 2px 2px'}}/>}
-                <Icon size={17}/>
+                <div style={{ position: 'relative' }}>
+                  <Icon size={17}/>
+                  {isAlerts && <NotifBadge />}
+                </div>
                 <span style={{fontSize:9,fontWeight:active?600:400,fontFamily:"'Outfit',sans-serif"}}>{item.label}</span>
               </>);
             }}
@@ -616,9 +651,38 @@ function BottomNav() {
 }
 
 // =============================================================================
+// OFFLINE BANNER
+// =============================================================================
+function OfflineBanner({ isOnline }: { isOnline: boolean }) {
+  if (isOnline) return null;
+  return (
+    <div style={{
+      position:'fixed', top:0, left:0, right:0, zIndex:9200,
+      background:'#1F2937', color:'#fff',
+      padding:'9px 16px',
+      paddingTop:'calc(9px + env(safe-area-inset-top, 0px))',
+      display:'flex', alignItems:'center', gap:10,
+      fontSize:13, fontFamily:"'Outfit',sans-serif",
+      boxShadow:'0 2px 12px rgba(0,0,0,0.3)',
+      animation:'tv-slide-down .3s ease',
+    }}>
+      <WifiOff size={15} color="#F87171"/>
+      <span style={{flex:1, fontWeight:500}}>
+        Internet aloqasi yo'q — oxirgi ma'lumotlar ko'rsatilmoqda
+      </span>
+      <span style={{
+        background:'rgba(255,255,255,0.1)', borderRadius:6,
+        padding:'2px 8px', fontSize:11, fontWeight:600,
+      }}>OFFLINE</span>
+    </div>
+  );
+}
+
+// =============================================================================
 // LAYOUT
 // =============================================================================
 function Layout({ children }: { children: React.ReactNode }) {
+  const pwa = usePWA();
   return (
     <div style={{minHeight:'100vh',background:'var(--bg)'}}>
 
@@ -712,6 +776,11 @@ function Layout({ children }: { children: React.ReactNode }) {
 
       {/* MOBILE */}
       <div className="tv-mobile-nav"><BottomNav/></div>
+
+      {/* PWA BANNERS */}
+      <OfflineBanner     isOnline={pwa.isOnline} />
+      <SWUpdateBanner    pwa={pwa} />
+      <PWAInstallBanner  pwa={pwa} />
     </div>
   );
 }
@@ -741,6 +810,8 @@ export default function App() {
             @keyframes tv-drop    { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:translateY(0); } }
             @keyframes tv-fade-in { from { opacity:0; } to { opacity:1; } }
             @keyframes tv-blink   { 0%,100% { opacity:0.4; } 50% { opacity:1; } }
+            @keyframes tv-slide-up   { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+            @keyframes tv-slide-down { from { transform:translateY(-100%); } to { transform:translateY(0); } }
 
             .tv-group-btn:hover { color: var(--text-secondary) !important; background: rgba(0,0,0,0.02) !important; }
             .tv-dropdown-item:hover { background: rgba(30,62,180,0.05) !important; color: var(--text-primary) !important; }

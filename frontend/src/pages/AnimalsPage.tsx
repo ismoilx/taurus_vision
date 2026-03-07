@@ -30,6 +30,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
 import { queryKeys } from '../lib/queryClient';
 import config from '../config';
+import { useIsMobile } from '../hooks/useResponsive';
 
 // =============================================================================
 // TYPES
@@ -764,6 +765,7 @@ function CsvImportModal({ onClose, onImported }: CsvImportModalProps) {
 export default function AnimalsPage() {
   const navigate    = useNavigate();
   const qClient     = useQueryClient();
+  const isMobile    = useIsMobile();
 
   // State
   const [page, setPage]                 = useState(0);
@@ -1005,49 +1007,114 @@ export default function AnimalsPage() {
           </div>
         ) : (
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50/80 border-b border-gray-200">
-                  <tr>
-                    <SortHeader field="tag_id"           label="Tag ID"           current={sortBy} order={sortOrder} onSort={handleSort} />
-                    <SortHeader field="species"          label="Tur"              current={sortBy} order={sortOrder} onSort={handleSort} />
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Jins</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Zot</th>
-                    <SortHeader field="status"           label="Holat"            current={sortBy} order={sortOrder} onSort={handleSort} />
-                    <SortHeader field="total_detections" label="Aniqlash"         current={sortBy} order={sortOrder} onSort={handleSort} />
-                    <SortHeader field="last_detected_at" label="Oxirgi ko'rinish" current={sortBy} order={sortOrder} onSort={handleSort} />
-                    <th className="px-4 py-3 w-24" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {animals.map(a => (
-                    <tr
+            {/* MOBILE: Card ko'rinishi */}
+            {isMobile ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {animals.map((a, idx) => {
+                  const STATUS_CFG: Record<string, { bg: string; color: string; label: string }> = {
+                    active:   { bg: '#ECFDF5', color: '#059669', label: 'Faol'       },
+                    inactive: { bg: '#F3F4F6', color: '#6B7280', label: 'Nofaol'     },
+                    sold:     { bg: '#EFF6FF', color: '#3B82F6', label: 'Sotilgan'   },
+                    deceased: { bg: '#FEF2F2', color: '#DC2626', label: 'Vafot etdi' },
+                  };
+                  const sc = STATUS_CFG[a.status] ?? STATUS_CFG.inactive;
+                  return (
+                    <div
                       key={a.id}
                       onClick={() => navigate(`/animals/${a.id}`)}
-                      className="hover:bg-blue-50/30 cursor-pointer transition-colors group"
+                      style={{
+                        padding: '13px 14px',
+                        borderBottom: idx < animals.length - 1 ? '1px solid #F3F4F6' : 'none',
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                      }}
                     >
-                      <td className="px-4 py-3.5">
-                        <span className="font-mono font-semibold text-gray-900 text-sm">{a.tag_id}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-gray-600 capitalize">{a.species}</td>
-                      <td className="px-4 py-3.5 text-sm text-gray-600 capitalize">{a.gender}</td>
-                      <td className="px-4 py-3.5 text-sm text-gray-500">{a.breed || '—'}</td>
-                      <td className="px-4 py-3.5"><StatusBadge status={a.status} /></td>
-                      <td className="px-4 py-3.5">
-                        <span className={`text-sm font-semibold tabular-nums ${a.total_detections > 0 ? 'text-gray-900' : 'text-gray-300'}`}>
-                          {a.total_detections.toLocaleString()}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-sm text-gray-500 whitespace-nowrap">
-                        {formatDate(a.last_detected_at)}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={e => { e.stopPropagation(); navigate(`/animals/${a.id}`); }}
-                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg"
-                            title="Ko'rish"
-                          >
+                      {/* Avatar */}
+                      <div style={{
+                        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+                        background: '#EEF2FF', display: 'grid', placeItems: 'center',
+                        fontSize: 18,
+                      }}>
+                        {a.species === 'cattle' ? '🐄' : a.species === 'sheep' ? '🐑' : a.species === 'goat' ? '🐐' : '🐾'}
+                      </div>
+
+                      {/* Info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: '#0D1117', fontFamily: 'monospace' }}>
+                            {a.tag_id}
+                          </span>
+                          <span style={{
+                            fontSize: 10, fontWeight: 600,
+                            padding: '1px 7px', borderRadius: 20,
+                            background: sc.bg, color: sc.color,
+                          }}>
+                            {sc.label}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Outfit, sans-serif' }}>
+                          {a.species} · {a.gender}{a.breed ? ` · ${a.breed}` : ''}
+                        </div>
+                      </div>
+
+                      {/* Oxirgi ko'rinish */}
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'Outfit, sans-serif' }}>
+                          {a.total_detections > 0 ? `${a.total_detections.toLocaleString()} marta` : '—'}
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="2" style={{ marginTop: 2 }}>
+                          <path d="m9 18 6-6-6-6"/>
+                        </svg>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* DESKTOP: Jadval */
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50/80 border-b border-gray-200">
+                    <tr>
+                      <SortHeader field="tag_id"           label="Tag ID"           current={sortBy} order={sortOrder} onSort={handleSort} />
+                      <SortHeader field="species"          label="Tur"              current={sortBy} order={sortOrder} onSort={handleSort} />
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Jins</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Zot</th>
+                      <SortHeader field="status"           label="Holat"            current={sortBy} order={sortOrder} onSort={handleSort} />
+                      <SortHeader field="total_detections" label="Aniqlash"         current={sortBy} order={sortOrder} onSort={handleSort} />
+                      <SortHeader field="last_detected_at" label="Oxirgi ko'rinish" current={sortBy} order={sortOrder} onSort={handleSort} />
+                      <th className="px-4 py-3 w-24" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {animals.map(a => (
+                      <tr
+                        key={a.id}
+                        onClick={() => navigate(`/animals/${a.id}`)}
+                        className="hover:bg-blue-50/30 cursor-pointer transition-colors group"
+                      >
+                        <td className="px-4 py-3.5">
+                          <span className="font-mono font-semibold text-gray-900 text-sm">{a.tag_id}</span>
+                        </td>
+                        <td className="px-4 py-3.5 text-sm text-gray-600 capitalize">{a.species}</td>
+                        <td className="px-4 py-3.5 text-sm text-gray-600 capitalize">{a.gender}</td>
+                        <td className="px-4 py-3.5 text-sm text-gray-500">{a.breed || '—'}</td>
+                        <td className="px-4 py-3.5"><StatusBadge status={a.status} /></td>
+                        <td className="px-4 py-3.5">
+                          <span className={`text-sm font-semibold tabular-nums ${a.total_detections > 0 ? 'text-gray-900' : 'text-gray-300'}`}>
+                            {a.total_detections.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-sm text-gray-500 whitespace-nowrap">
+                          {formatDate(a.last_detected_at)}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={e => { e.stopPropagation(); navigate(`/animals/${a.id}`); }}
+                              className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg"
+                              title="Ko'rish"
+                            >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
                           <button
@@ -1071,6 +1138,7 @@ export default function AnimalsPage() {
                 </tbody>
               </table>
             </div>
+            )} {/* end isMobile ? ... : ... */}
 
             {/* Pagination */}
             {total > PAGE_SIZE && (

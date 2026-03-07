@@ -392,38 +392,247 @@ async def generate_health_report(
 
 
 # =============================================================================
-# REPORT PREVIEW (Optional - for future)
+# REPORT PREVIEW — Hisobot yaratishdan oldin ma'lumot tekshiruvi
 # =============================================================================
+
+_VALID_REPORT_TYPES = {"animal", "farm", "health"}
+
 
 @router.get(
     "/preview/{report_type}",
-    summary="Preview report metadata",
-    description="""
-    Get metadata about what would be included in a report
-    without actually generating it.
-    
-    Useful for:
-    - Estimating report size before generation
-    - Checking data availability
-    - UI progress indicators
-    
-    **Note:** This endpoint is optional and not yet fully implemented.
-    """
+    summary="Hisobot oldindan ko'rish metadatasi",
+    description=(
+        "Hisobot generatsiya qilmasdan avval ma'lumot mavjudligini va hajmini tekshiradi. "
+        "Frontend da 'Hisobot yaratish' tugmasini faollashtirish/o'chirish uchun ishlatiladi. "
+        "\n\n**report_type:** animal | farm | health"
+        "\n\n**animal** uchun `animal_id` query parametri talab qilinadi."
+    ),
 )
 async def preview_report(
     report_type: str,
-    db: AsyncSession = Depends(get_db)
+    animal_id:   Optional[int] = None,
+    days:        int           = 30,
+    db:          AsyncSession  = Depends(get_db),
+    current_user = Depends(get_current_active_user),
 ) -> dict:
     """
-    Preview report metadata.
-    
-    This is a placeholder for future functionality to preview
-    report contents before generating the full PDF.
+    Hisobot metadatasi — generatsiya qilmasdan ma'lumot tekshiruvi.
+
+    Qaytariladi:
+        - available: Hisobot yaratilishi mumkinmi
+        - reason:    Agar yo'q bo'lsa — sababı
+        - stats:     Ma'lumot ko'rsatkichlari (qancha yozuv bor)
+        - estimated_pages: Taxminiy sahifalar soni
+        - date_range: Ma'lumot oraliq sanasi
+        - report_type: So'ralgan tur
+
+    Raises:
+        400: Noto'g'ri report_type
+        400: animal hisoboti uchun animal_id yo'q
+        404: Jonivor topilmadi
     """
-    logger.info(f"API call: GET /reports/preview/{report_type}")
-    
-    return {
-        "message": "Report preview not yet implemented",
-        "report_type": report_type,
-        "status": "coming_soon"
-    }
+    from datetime import timedelta, timezone
+    from sqlalchemy import select, func, and_
+    from app.models.animal import Animal, AnimalStatus
+    from app.models.detection import Detection
+    from app.models.weight_measurement import WeightMeasurement
+    from app.models.alert import Alert, AlertStatus
+    from app.models.health_record import HealthRecord
+    from app.models.health_prediction import HealthPrediction
+    from app.models.adi_log import ADILog
+
+    logger.info(f"Report preview: type={report_type}, animal_id={animal_id}, days={days}")
+
+    # ── Validatsiya ───────────────────────────────────────────────────────────
+    if report_type not in _VALID_REPORT_TYPES:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail=f"Noto'g'ri report_type: '{report_type}'. "
+                   f"To'g'ri qiymatlar: {sorted(_VALID_REPORT_TYPES)}",
+        )
+
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+    date_to   = datetime.now(timezone.utc)
+
+    # ── ANIMAL REPORT ─────────────────────────────────────────────────────────
+    if report_type == "animal":
+        if not animal_id:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="animal hisoboti uchun animal_id parametri talab qilinadi.",
+            )
+
+        animal_result = await db.execute(
+            select(Animal).where(Animal.id == animal_id)
+        )
+        animal = animal_result.scalar_one_or_none()
+        if not animal:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Jonivor #{animal_id} topilmadi")
+
+        # Ma'lumot soni
+        det_count = await db.scalar(
+            select(func.count(Detection.id)).where(
+                Detection.animal_id  == animal_id,
+                Detection.timestamp  >= date_from,
+            )
+        ) or 0
+
+        weight_count = await db.scalar(
+            select(func.count(WeightMeasurement.id)).where(
+                WeightMeasurement.animal_id  == animal_id,
+                WeightMeasurement.measured_at >= date_from,
+            )
+        ) or 0
+
+        health_count = await db.scalar(
+            select(func.count(HealthRecord.id)).where(
+                HealthRecord.animal_id == animal_id,
+            )
+        ) or 0
+
+        adi_count = await db.scalar(
+            select(func.count(ADILog.id)).where(
+                ADILog.animal_id == animal_id,
+                ADILog.date      >= date_from.date(),
+            )
+        ) or 0
+
+        has_data    = det_count > 0 or weight_count > 0
+        est_pages   = 2 + (1 if weight_count > 0 else 0) + (1 if det_count > 0 else 0)
+
+        return {
+            "available":       has_data or health_count > 0,
+            "reason":          None if has_data else "Bu jonivor uchun ma'lumot topilmadi",
+            "report_type":     report_type,
+            "animal_id":       animal_id,
+            "animal_tag":      animal.tag_id,
+            "animal_name":     animal.name or animal.tag_id,
+            "date_range": {
+                "from":  date_from.strftime("%Y-%m-%d"),
+                "to":    date_to.strftime("%Y-%m-%d"),
+                "days":  days,
+            },
+            "stats": {
+                "detections":    det_count,
+                "weight_records": weight_count,
+                "health_records": health_count,
+                "adi_records":    adi_count,
+            },
+            "estimated_pages": est_pages,
+            "sections": [
+                {"name": "Asosiy ma'lumotlar",    "available": True},
+                {"name": "Og'irlik tarixi",        "available": weight_count > 0},
+                {"name": "Deteksiya statistikasi", "available": det_count > 0},
+                {"name": "Sog'liq yozuvlari",      "available": health_count > 0},
+            ],
+        }
+
+    # ── FARM REPORT ───────────────────────────────────────────────────────────
+    elif report_type == "farm":
+        total_animals = await db.scalar(
+            select(func.count(Animal.id)).where(
+                Animal.status == AnimalStatus.ACTIVE
+            )
+        ) or 0
+
+        recent_detections = await db.scalar(
+            select(func.count(Detection.id)).where(
+                Detection.timestamp >= date_from
+            )
+        ) or 0
+
+        open_alerts = await db.scalar(
+            select(func.count(Alert.id)).where(
+                Alert.status == AlertStatus.OPEN
+            )
+        ) or 0
+
+        weight_records = await db.scalar(
+            select(func.count(WeightMeasurement.id)).where(
+                WeightMeasurement.measured_at >= date_from
+            )
+        ) or 0
+
+        has_data  = total_animals > 0
+        est_pages = 3 + (1 if recent_detections > 0 else 0) + (1 if open_alerts > 0 else 0)
+
+        return {
+            "available":   has_data,
+            "reason":      None if has_data else "Fermada hali jonivorlar yo'q",
+            "report_type": report_type,
+            "date_range": {
+                "from": date_from.strftime("%Y-%m-%d"),
+                "to":   date_to.strftime("%Y-%m-%d"),
+                "days": days,
+            },
+            "stats": {
+                "active_animals":    total_animals,
+                "recent_detections": recent_detections,
+                "open_alerts":       open_alerts,
+                "weight_records":    weight_records,
+            },
+            "estimated_pages": est_pages,
+            "sections": [
+                {"name": "Ferma xulosasi",         "available": True},
+                {"name": "Jonivorlar ro'yxati",    "available": total_animals > 0},
+                {"name": "Deteksiya statistikasi", "available": recent_detections > 0},
+                {"name": "Aktiv ogohlantirishlar",  "available": open_alerts > 0},
+                {"name": "Og'irlik trendlari",     "available": weight_records > 0},
+            ],
+        }
+
+    # ── HEALTH REPORT ─────────────────────────────────────────────────────────
+    else:  # health
+        total_animals = await db.scalar(
+            select(func.count(Animal.id)).where(Animal.status == AnimalStatus.ACTIVE)
+        ) or 0
+
+        critical_alerts = await db.scalar(
+            select(func.count(Alert.id)).where(
+                Alert.status   == AlertStatus.OPEN,
+                Alert.severity == "critical",
+            )
+        ) or 0
+
+        health_records = await db.scalar(
+            select(func.count(HealthRecord.id)).where(
+                HealthRecord.created_at >= date_from
+            )
+        ) or 0
+
+        predictions = await db.scalar(
+            select(func.count(HealthPrediction.id)).where(
+                HealthPrediction.created_at >= date_from
+            )
+        ) or 0
+
+        has_data  = total_animals > 0
+        est_pages = 3 + (1 if critical_alerts > 0 else 0) + (1 if predictions > 0 else 0)
+
+        return {
+            "available":   has_data,
+            "reason":      None if has_data else "Fermada hali jonivorlar yo'q",
+            "report_type": report_type,
+            "date_range": {
+                "from": date_from.strftime("%Y-%m-%d"),
+                "to":   date_to.strftime("%Y-%m-%d"),
+                "days": days,
+            },
+            "stats": {
+                "total_animals":   total_animals,
+                "critical_alerts": critical_alerts,
+                "health_records":  health_records,
+                "predictions":     predictions,
+            },
+            "estimated_pages": est_pages,
+            "sections": [
+                {"name": "Sog'liq xulosasi",     "available": True},
+                {"name": "Kritik holat hayvonlar","available": critical_alerts > 0},
+                {"name": "Veterinar yozuvlari",  "available": health_records > 0},
+                {"name": "ML bashoratlari",       "available": predictions > 0},
+                {"name": "Tavsiyalar",            "available": True},
+            ],
+        }

@@ -14,6 +14,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { apiFetch } from "../utils/apiFetch";
 import config from "../config";
+import { useIsMobile } from "../hooks/useResponsive";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -548,6 +549,7 @@ export default function AnimalDetailPage() {
   const nav      = useNavigate();
   const qc       = useQueryClient();
   const numId    = Number(id);
+  const isMobile = useIsMobile();
 
   const [tab, setTab]           = useState<"overview"|"adi"|"weight"|"health"|"photos">("overview");
   const [picker, setPicker]     = useState<"profile"|"muzzle"|null>(null);
@@ -759,7 +761,7 @@ export default function AnimalDetailPage() {
 
   return (
     <div style={{
-      maxWidth: 1120, margin: "0 auto", padding: "28px 20px 72px",
+      maxWidth: 1120, margin: "0 auto", padding: isMobile ? "14px 12px 80px" : "28px 20px 72px",
       fontFamily: "'Outfit', system-ui, sans-serif", color: "#0F172A",
     }}>
       <style>{`
@@ -973,7 +975,9 @@ export default function AnimalDetailPage() {
       {/* ═══════════════════ Tabs ═══════════════════ */}
       <div style={{
         display: "flex", gap: 2, marginBottom: 18,
-        background: "#F1F5F9", borderRadius: 12, padding: 4, width: "fit-content",
+        background: "#F1F5F9", borderRadius: 12, padding: 4,
+        width: isMobile ? "100%" : "fit-content",
+        overflowX: isMobile ? "auto" : "visible",
       }}>
         {(["overview", "adi", "weight", "health", "photos"] as const).map(t => (
           <button
@@ -994,7 +998,7 @@ export default function AnimalDetailPage() {
 
       {/* ═══════════════════ OVERVIEW ═══════════════════ */}
       {tab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, animation: "fadein .25s" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16, animation: "fadein .25s" }}>
           <div style={card}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px" }}>Asosiy Ma'lumotlar</h3>
             {([

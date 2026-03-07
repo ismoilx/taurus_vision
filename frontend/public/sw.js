@@ -205,6 +205,14 @@ function offlineFallback() {
   );
 }
 
+// ─── Message Handler — SKIP_WAITING ──────────────────────────────────────────
+// usePWA hook dan keladi: "Yangilash" tugmasi bosilganda
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // ─── Push Notifications ───────────────────────────────────────────────────────
 self.addEventListener('push', (event) => {
   if (!event.data) return;

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow, format, isPast } from 'date-fns';
 import { apiFetch } from '../utils/apiFetch';
+import { useIsMobile } from '../hooks/useResponsive';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -530,6 +531,7 @@ function CreateModal({
 
 export default function TasksPage() {
   const qc = useQueryClient();
+  const isMobile = useIsMobile();
 
   const [statusFilter,   setStatusFilter]   = useState<string>('open');
   const [typeFilter,     setTypeFilter]     = useState<string>('');
@@ -623,17 +625,19 @@ export default function TasksPage() {
   const tasks = tasksQuery.data?.items ?? [];
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 20px' }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: isMobile ? '14px 12px 80px' : '24px 20px' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#0D1117' }}>
+          <h1 style={{ margin: 0, fontSize: isMobile ? 18 : 22, fontWeight: 700, color: '#0D1117' }}>
             Farm Vazifalari
           </h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
-            Emlash, ko'rik, parvarishlash va boshqa ferma vazifalari
-          </p>
+          {!isMobile && (
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
+              Emlash, ko'rik, parvarishlash va boshqa ferma vazifalari
+            </p>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button
@@ -665,7 +669,7 @@ export default function TasksPage() {
 
       {/* Stat cards */}
       {stats && (
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: 10, marginBottom: 20 }}>
           <StatCard label="Ochiq"          value={stats.total_open}            color="#2563EB" bg="#EFF6FF"/>
           <StatCard label="Muddati o'tdi"  value={stats.total_overdue}         color="#DC2626" bg="#FEF2F2"/>
           <StatCard label="Bugun"          value={stats.total_today}           color="#D97706" bg="#FFFBEB"/>

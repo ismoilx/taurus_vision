@@ -58,6 +58,11 @@ from app.models.employee         import (                             # Xodimlar
     WorkerTaskType,
     VerificationStatus,
 )
+from app.models.notification     import (                             # In-app bildirishnomalar
+    Notification,
+    NotificationType,
+    NotificationEntityType,
+)
 
 __all__ = [
     # Base
