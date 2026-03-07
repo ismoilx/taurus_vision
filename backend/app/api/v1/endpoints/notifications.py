@@ -254,3 +254,118 @@ async def send_bulk_emails(
     except Exception as exc:
         logger.warning(f"Celery bulk: {exc}")
     return {"queued": queued, "alert_ids": ids}
+
+# =============================================================================
+# TELEGRAM ENDPOINTS
+# =============================================================================
+
+class TelegramSettingsResponse(PydanticModel):
+    configured:          bool
+    bot_token_set:       bool
+    bot_token_masked:    str
+    chat_ids:            list[str]
+    total_chats:         int
+    severity_rules:      dict = {
+        "critical": "✅ Telegram yuboriladi",
+        "high":     "✅ Telegram yuboriladi",
+        "medium":   "✅ Telegram yuboriladi",
+        "low":      "❌ Telegram yuborilmaydi",
+    }
+
+
+class TelegramTestRequest(PydanticModel):
+    chat_id: str = Field(..., description="Test Telegram chat ID")
+
+
+class TelegramSendRequest(PydanticModel):
+    chat_ids: Optional[list[str]] = None
+
+
+@router.get(
+    "/telegram/settings",
+    response_model=TelegramSettingsResponse,
+    summary="Telegram bot sozlamalarini ko'rish",
+)
+async def get_telegram_settings(current_user: CurrentUser = ...) -> TelegramSettingsResponse:
+    """Hozirgi Telegram bot sozlamalarini qaytaradi."""
+    from app.services.telegram_service import get_telegram_service
+    return TelegramSettingsResponse(**get_telegram_service().get_settings_info())
+
+
+@router.post("/telegram/test", summary="Test Telegram xabari yuborish")
+async def send_test_telegram(
+    body: TelegramTestRequest,
+    current_user: CurrentManager = ...,
+) -> dict:
+    """
+    Berilgan chat_id ga test xabari yuboradi.
+    Sozlamalarni tekshirish uchun.
+    """
+    from app.services.telegram_service import get_telegram_service
+    svc = get_telegram_service()
+    result = await svc.send_test_message(body.chat_id)
+    return result
+
+
+@router.post("/telegram/send/{alert_id}", summary="Alert Telegram xabari")
+async def send_telegram_alert(
+    alert_id: int,
+    body:     TelegramSendRequest,
+    current_user: CurrentManager = ...,
+    db:           AsyncSession   = Depends(get_db),
+) -> dict:
+    """
+    Berilgan alert uchun Telegram xabari yuboradi.
+    chat_ids bo'sh bo'lsa settings dagi chat_ids ishlatiladi.
+    """
+    from app.services.telegram_service import get_telegram_service
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert  = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"Alert #{alert_id} topilmadi")
+
+    animal_tag = None
+    if alert.animal_id:
+        r = await db.execute(select(Animal.tag_id).where(Animal.id == alert.animal_id))
+        row = r.fetchone()
+        animal_tag = row[0] if row else None
+
+    svc = get_telegram_service()
+    res = await svc.send_alert(
+        alert      = alert,
+        animal_tag = animal_tag,
+        chat_ids   = body.chat_ids,
+    )
+    return {**res, "alert_id": alert_id}
+
+
+@router.post("/telegram/send-bulk", summary="Ko'plab alert Telegram xabarlari")
+async def send_bulk_telegram(
+    severity:     Optional[str] = None,
+    current_user: CurrentManager = ...,
+    db:           AsyncSession   = Depends(get_db),
+) -> dict:
+    """
+    Ochiq alertlar uchun Telegram xabarlari yuboradi.
+    severity filtri: critical, high, medium, low
+    """
+    from app.models.alert import AlertStatus
+    from app.services.telegram_service import get_telegram_service
+
+    stmt = select(Alert).where(Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]))
+    if severity:
+        stmt = stmt.where(Alert.severity == severity)
+    alerts = list((await db.execute(stmt.limit(50))).scalars().all())
+
+    svc = get_telegram_service()
+    sent, total = 0, len(alerts)
+
+    for a in alerts:
+        try:
+            res = await svc.send_alert(a)
+            if res.get("sent"):
+                sent += 1
+        except Exception as exc:
+            logger.warning(f"Telegram bulk xato: alert #{a.id}: {exc}")
+
+    return {"total": total, "sent": sent, "skipped": total - sent}

@@ -14,7 +14,7 @@ from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.integration import APIKey, Webhook
+from app.models.integration import APIKey, Webhook, WebhookDeliveryLog
 from app.core.exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
@@ -193,3 +193,122 @@ class WebhookRepository:
             await self.db.flush()
         except Exception as exc:
             raise DatabaseError(f"Webhook o'chirishda xato: {exc}") from exc
+    async def add_delivery_log(
+        self,
+        webhook_id:      int,
+        event_type:      str,
+        success:         bool,
+        status_code:     Optional[int]  = None,
+        latency_ms:      Optional[int]  = None,
+        error_message:   Optional[str]  = None,
+        payload_preview: Optional[str]  = None,
+        delivery_id:     Optional[str]  = None,
+    ) -> None:
+        """
+        Webhook yuborish natijasini loglaydi.
+
+        Oxirgi 200 ta yozuv saqlanadi — eskisi avtomatik o'chiriladi.
+
+        Args:
+            webhook_id:      Webhook ID
+            event_type:      Voqea turi
+            success:         Muvaffaqiyatlimi?
+            status_code:     HTTP status
+            latency_ms:      So'rov vaqti (ms)
+            error_message:   Xato matni
+            payload_preview: So'rov mazmunidan dastlabki 500 belgi
+            delivery_id:     UUID delivery identifikatori
+        """
+        try:
+            log = WebhookDeliveryLog(
+                webhook_id      = webhook_id,
+                event_type      = event_type,
+                success         = success,
+                status_code     = status_code,
+                latency_ms      = latency_ms,
+                error_message   = error_message,
+                payload_preview = payload_preview[:500] if payload_preview else None,
+                delivery_id     = delivery_id,
+            )
+            self.db.add(log)
+            await self.db.flush()
+
+            # Eski yozuvlarni o'chirish (webhook uchun max 200 ta)
+            subq = (
+                select(WebhookDeliveryLog.id)
+                .where(WebhookDeliveryLog.webhook_id == webhook_id)
+                .order_by(WebhookDeliveryLog.created_at.desc())
+                .offset(200)
+            )
+            delete_stmt = (
+                WebhookDeliveryLog.__table__.delete()
+                .where(WebhookDeliveryLog.id.in_(subq))
+            )
+            await self.db.execute(delete_stmt)
+
+        except Exception as exc:
+            logger.warning(f"Delivery log yozishda xato: {exc}")
+
+    async def get_delivery_logs(
+        self,
+        webhook_id: int,
+        limit:      int = 50,
+        offset:     int = 0,
+        success:    Optional[bool] = None,
+    ) -> tuple[list[WebhookDeliveryLog], int]:
+        """
+        Webhook delivery loglarini qaytaradi.
+
+        Args:
+            webhook_id: Webhook ID
+            limit:      Nechta qaytarish
+            offset:     Qayerdan boshlash
+            success:    None=hammasi, True=muvaffaqiyatli, False=xatoliklar
+
+        Returns:
+            (logs, total) — yozuvlar va umumiy son
+        """
+        stmt = (
+            select(WebhookDeliveryLog)
+            .where(WebhookDeliveryLog.webhook_id == webhook_id)
+        )
+        if success is not None:
+            stmt = stmt.where(WebhookDeliveryLog.success == success)
+
+        total_stmt = select(func.count()).select_from(stmt.subquery())
+        total      = await self.db.scalar(total_stmt) or 0
+
+        stmt = stmt.order_by(WebhookDeliveryLog.created_at.desc()).limit(limit).offset(offset)
+        rows = list((await self.db.execute(stmt)).scalars().all())
+
+        return rows, total
+
+    async def get_delivery_stats(self, webhook_id: int) -> dict:
+        """
+        Webhook delivery statistikasini qaytaradi.
+
+        Returns:
+            {total, success_count, failure_count, success_rate, avg_latency_ms}
+        """
+        stmt = select(
+            func.count(WebhookDeliveryLog.id).label("total"),
+            func.count(WebhookDeliveryLog.id).filter(WebhookDeliveryLog.success == True).label("success_count"),  # noqa: E712
+            func.avg(WebhookDeliveryLog.latency_ms).label("avg_latency"),
+        ).where(WebhookDeliveryLog.webhook_id == webhook_id)
+
+        row = (await self.db.execute(stmt)).one_or_none()
+        if not row or row.total == 0:
+            return {
+                "total": 0, "success_count": 0,
+                "failure_count": 0, "success_rate": 0.0, "avg_latency_ms": None,
+            }
+
+        total   = row.total or 0
+        success = row.success_count or 0
+        return {
+            "total":          total,
+            "success_count":  success,
+            "failure_count":  total - success,
+            "success_rate":   round((success / total) * 100, 1) if total > 0 else 0.0,
+            "avg_latency_ms": round(row.avg_latency) if row.avg_latency else None,
+        }

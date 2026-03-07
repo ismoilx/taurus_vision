@@ -456,7 +456,7 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose: ()
 // MAIN PAGE
 // =============================================================================
 
-type Tab = 'keys' | 'webhooks';
+type Tab = 'keys' | 'webhooks' | 'logs';
 
 export default function IntegrationsPage() {
   const [tab,       setTab]       = useState<Tab>('keys');
@@ -466,6 +466,7 @@ export default function IntegrationsPage() {
   const [deleteId,  setDeleteId]  = useState<{ type: 'key' | 'wh'; id: number } | null>(null);
   const [testId,    setTestId]    = useState<number | null>(null);
   const [testResult, setTestResult] = useState<WebhookTestResult | null>(null);
+  const [logsWhId,  setLogsWhId]  = useState<number | null>(null);
 
   const qc = useQueryClient();
 
@@ -544,7 +545,7 @@ export default function IntegrationsPage() {
           </p>
         </div>
         <button
-          onClick={() => tab === 'keys' ? setKeyModal(true) : setWhModal({ open: true, wh: null })}
+          onClick={() => tab === 'keys' ? setKeyModal(true) : tab === 'webhooks' ? setWhModal({ open: true, wh: null }) : undefined}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '9px 18px', borderRadius: 10, border: 'none',
@@ -552,7 +553,7 @@ export default function IntegrationsPage() {
             fontSize: 13, fontWeight: 600, fontFamily: "'Outfit', sans-serif",
           }}>
           <Plus size={15} />
-          {tab === 'keys' ? 'Yangi kalit' : 'Yangi webhook'}
+          {tab === 'keys' ? 'Yangi kalit' : tab === 'webhooks' ? 'Yangi webhook' : null}
         </button>
       </div>
 
@@ -581,6 +582,9 @@ export default function IntegrationsPage() {
         </button>
         <button onClick={() => setTab('webhooks')} style={tabBtn('webhooks')}>
           <Webhook size={13} /> Webhooklar
+        </button>
+        <button onClick={() => setTab('logs')} style={tabBtn('logs')}>
+          <Activity size={13} /> Delivery Logs
         </button>
       </div>
 
@@ -765,6 +769,15 @@ export default function IntegrationsPage() {
         </Overlay>
       )}
 
+      {/* ═══ DELIVERY LOGS TAB ═══ */}
+      {tab === 'logs' && (
+        <DeliveryLogsTab
+          webhooks={webhooks?.items ?? []}
+          selectedId={logsWhId}
+          onSelect={setLogsWhId}
+        />
+      )}
+
       {/* ═══ DELETE CONFIRM ═══ */}
       {deleteId && (
         <Overlay onClose={() => setDeleteId(null)}>
@@ -791,6 +804,226 @@ export default function IntegrationsPage() {
             </div>
           </div>
         </Overlay>
+      )}
+    </div>
+  );
+}
+// =============================================================================
+// DELIVERY LOGS COMPONENT
+// =============================================================================
+
+interface DeliveryLog {
+  id:              number;
+  event_type:      string;
+  success:         boolean;
+  status_code:     number | null;
+  latency_ms:      number | null;
+  error_message:   string | null;
+  payload_preview: string | null;
+  delivery_id:     string | null;
+  created_at:      string;
+}
+
+interface DeliveryLogsResponse {
+  webhook_id:   number;
+  webhook_name: string;
+  stats: {
+    total:          number;
+    success_count:  number;
+    failure_count:  number;
+    success_rate:   number;
+    avg_latency_ms: number | null;
+  };
+  total: number;
+  items: DeliveryLog[];
+}
+
+function DeliveryLogsTab({
+  webhooks, selectedId, onSelect,
+}: {
+  webhooks:   WebhookResponse[];
+  selectedId: number | null;
+  onSelect:   (id: number | null) => void;
+}) {
+  const [filterSuccess, setFilterSuccess] = useState<string>('all');
+
+  const whId = selectedId ?? webhooks[0]?.id ?? null;
+
+  const { data, isLoading, refetch } = useQuery<DeliveryLogsResponse>({
+    queryKey: ['integrations', 'delivery-logs', whId, filterSuccess],
+    queryFn:  () => {
+      if (!whId) return Promise.resolve(null as any);
+      const s = filterSuccess === 'all' ? '' : `&success=${filterSuccess === 'success'}`;
+      return apiFetch<DeliveryLogsResponse>(
+        `/api/v1/integrations/webhooks/${whId}/deliveries?limit=50${s}`
+      );
+    },
+    enabled: !!whId,
+    refetchInterval: 30_000,
+  });
+
+  const card: React.CSSProperties = {
+    background: '#fff', border: '1px solid #E4E7ED',
+    borderRadius: 12, padding: '16px 18px', marginBottom: 10,
+  };
+
+  return (
+    <div>
+      {/* Webhook selector */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {webhooks.map(wh => (
+            <button key={wh.id} onClick={() => onSelect(wh.id)} style={{
+              padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              border: '1px solid', cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
+              background: (selectedId ?? webhooks[0]?.id) === wh.id ? '#EFF6FF' : '#fff',
+              borderColor: (selectedId ?? webhooks[0]?.id) === wh.id ? '#93C5FD' : '#E4E7ED',
+              color: (selectedId ?? webhooks[0]?.id) === wh.id ? '#1D4ED8' : '#374151',
+            }}>
+              {wh.name}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          {['all', 'success', 'error'].map(f => (
+            <button key={f} onClick={() => setFilterSuccess(f)} style={{
+              padding: '5px 12px', borderRadius: 7, fontSize: 11, fontWeight: 600,
+              border: '1px solid', cursor: 'pointer', fontFamily: 'Outfit, sans-serif',
+              background: filterSuccess === f ? '#1E3EB4' : '#fff',
+              borderColor: filterSuccess === f ? '#1E3EB4' : '#E4E7ED',
+              color: filterSuccess === f ? '#fff' : '#6B7280',
+            }}>
+              {f === 'all' ? 'Hammasi' : f === 'success' ? '✅ Muvaffaqiyatli' : '❌ Xatolar'}
+            </button>
+          ))}
+          <button onClick={() => refetch()} style={{
+            padding: '5px 10px', border: '1px solid #E4E7ED',
+            borderRadius: 7, background: '#fff', cursor: 'pointer',
+          }}>
+            <RefreshCw size={13} color="#6B7280" />
+          </button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      {data?.stats && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+          {[
+            { label: 'Jami',            value: data.stats.total,          color: '#1E3EB4', bg: '#EFF6FF' },
+            { label: 'Muvaffaqiyatli',  value: data.stats.success_count,  color: '#059669', bg: '#ECFDF5' },
+            { label: 'Xatolar',         value: data.stats.failure_count,  color: '#DC2626', bg: '#FEF2F2' },
+            { label: 'O\'rtacha',       value: data.stats.avg_latency_ms ? `${data.stats.avg_latency_ms}ms` : '—', color: '#D97706', bg: '#FFFBEB' },
+          ].map(({ label, value, color, bg }) => (
+            <div key={label} style={{ ...card, marginBottom: 0, background: bg, border: 'none', padding: '12px 16px', textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color }}>{value}</div>
+              <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Success rate bar */}
+      {data?.stats && data.stats.total > 0 && (
+        <div style={{ ...card, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: '#6B7280' }}>Muvaffaqiyat darajasi</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: data.stats.success_rate >= 90 ? '#059669' : data.stats.success_rate >= 70 ? '#D97706' : '#DC2626' }}>
+              {data.stats.success_rate}%
+            </span>
+          </div>
+          <div style={{ height: 6, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 3,
+              width: `${data.stats.success_rate}%`,
+              background: data.stats.success_rate >= 90 ? '#10B981' : data.stats.success_rate >= 70 ? '#F59E0B' : '#EF4444',
+              transition: 'width .4s ease',
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Logs list */}
+      {isLoading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF' }}>Yuklanmoqda...</div>
+      ) : !data?.items.length ? (
+        <div style={{ ...card, textAlign: 'center', padding: '40px 20px' }}>
+          <Activity size={32} color="#D1D5DB" style={{ margin: '0 auto 12px', display: 'block' }} />
+          <p style={{ color: '#9CA3AF', margin: 0 }}>
+            {webhooks.length === 0
+              ? 'Hech qanday webhook yo\'q. Avval webhook qo\'shing.'
+              : 'Delivery log yo\'q. Webhook ishga tushganda bu yerda ko\'rinadi.'}
+          </p>
+        </div>
+      ) : (
+        data.items.map(log => (
+          <div key={log.id} style={{
+            ...card,
+            borderLeft: `3px solid ${log.success ? '#10B981' : '#EF4444'}`,
+            display: 'grid', gridTemplateColumns: '28px 1fr auto', gap: 12, alignItems: 'start',
+          }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8,
+              background: log.success ? '#ECFDF5' : '#FEF2F2',
+              display: 'grid', placeItems: 'center',
+            }}>
+              {log.success
+                ? <CheckCircle size={14} color="#10B981" />
+                : <XCircle    size={14} color="#EF4444" />}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontSize: 12, fontWeight: 700,
+                  background: '#F3F4F6', padding: '2px 8px', borderRadius: 5,
+                  fontFamily: 'JetBrains Mono, monospace', color: '#374151',
+                }}>
+                  {log.event_type}
+                </span>
+                {log.status_code && (
+                  <span style={{
+                    fontSize: 11, padding: '2px 8px', borderRadius: 5, fontWeight: 600,
+                    background: log.success ? '#ECFDF5' : '#FEF2F2',
+                    color: log.success ? '#059669' : '#DC2626',
+                  }}>
+                    HTTP {log.status_code}
+                  </span>
+                )}
+                {log.latency_ms && (
+                  <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+                    ⏱ {log.latency_ms}ms
+                  </span>
+                )}
+              </div>
+              {log.error_message && (
+                <div style={{
+                  fontSize: 12, color: '#DC2626',
+                  background: '#FEF2F2', borderRadius: 6,
+                  padding: '4px 8px', marginBottom: 4,
+                }}>
+                  {log.error_message}
+                </div>
+              )}
+              {log.payload_preview && (
+                <details style={{ fontSize: 11, color: '#6B7280' }}>
+                  <summary style={{ cursor: 'pointer' }}>Payload ko'rish</summary>
+                  <pre style={{
+                    margin: '6px 0 0', padding: '8px',
+                    background: '#F8FAFC', borderRadius: 6,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: 11, overflowX: 'auto', whiteSpace: 'pre-wrap',
+                  }}>
+                    {log.payload_preview}
+                  </pre>
+                </details>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'right', whiteSpace: 'nowrap' }}>
+              {new Date(log.created_at).toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              <br />
+              {new Date(log.created_at).toLocaleDateString('uz-UZ', { day: '2-digit', month: 'short' })}
+            </div>
+          </div>
+        ))
       )}
     </div>
   );

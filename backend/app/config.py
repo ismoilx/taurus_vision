@@ -205,6 +205,30 @@ class Settings(BaseSettings):
         return [e.strip() for e in self.NOTIFICATION_EMAILS.split(",") if e.strip()]
 
     # =========================================================================
+    # TELEGRAM NOTIFICATIONS
+    # =========================================================================
+
+    # Telegram Bot token: @BotFather → /newbot → token
+    TELEGRAM_BOT_TOKEN: str = ""
+
+    # Vergul bilan ajratilgan Telegram chat IDlar
+    # Bot bilan /start yozgach: https://api.telegram.org/bot{TOKEN}/getUpdates
+    # Misol: "123456789,987654321"
+    TELEGRAM_CHAT_IDS: str = ""
+
+    @property
+    def telegram_chat_ids(self) -> list[str]:
+        """Telegram chat ID ro'yxati (tozalangan)."""
+        if not self.TELEGRAM_CHAT_IDS:
+            return []
+        return [c.strip() for c in self.TELEGRAM_CHAT_IDS.split(",") if c.strip()]
+
+    @property
+    def telegram_configured(self) -> bool:
+        """Telegram bot sozlanganmi?"""
+        return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_IDS)
+
+    # =========================================================================
     # LOGGING
     # =========================================================================
 

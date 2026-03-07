@@ -38,6 +38,7 @@ from app.models.training_run     import TrainingRun, TrainingStatus  # ✅ TUZAT
 from app.models.integration      import (                             # Q5 Integration Module
     APIKey,
     Webhook,
+    WebhookDeliveryLog,
     APIKeyScope,
     WebhookEvent,
 )
@@ -150,6 +151,7 @@ __all__ = [
     # Integration Module (Q5)
     "APIKey",
     "Webhook",
+    "WebhookDeliveryLog",
     "APIKeyScope",
     "WebhookEvent",
     # Nasl va Zotchilik (Sprint 25-26)

@@ -1,8 +1,9 @@
 /**
  * AuthContext — Global autentifikatsiya holati
  *
- * Token localStorage da saqlanadi.
- * Barcha himoyalangan sahifalar shu context orqali tekshiriladi.
+ * Tokenlar tokenStore orqali saqlanadi:
+ *   - In-memory (har doim ishlaydi)
+ *   - localStorage fallback (sessiyalar orasida tiklanish uchun)
  */
 
 import {
@@ -14,6 +15,7 @@ import {
   type ReactNode,
 } from 'react';
 import config from '../config';
+import { tokenStore } from '../utils/tokenStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,14 +40,6 @@ interface AuthContextValue extends AuthState {
   logout: () => Promise<void>;
 }
 
-// ─── Storage keys ─────────────────────────────────────────────────────────────
-
-const STORAGE_KEYS = {
-  ACCESS_TOKEN:  'tv_access_token',
-  REFRESH_TOKEN: 'tv_refresh_token',
-  USER:          'tv_user',
-} as const;
-
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,24 +51,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user:            null,
     accessToken:     null,
     isAuthenticated: false,
-    isLoading:       true,   // localStorage tekshirilguncha true
+    isLoading:       true,   // tokenStore tekshirilguncha true
   });
 
-  // Sahifa yuklanganda localStorage dan tiklash
+  // Sahifa yuklanganda tokenStore dan tiklash (localStorage → in-memory)
   useEffect(() => {
-    const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
-    const raw   = localStorage.getItem(STORAGE_KEYS.USER);
+    const { accessToken, user: rawUser } = tokenStore.hydrate();
 
-    if (token && raw) {
+    if (accessToken && rawUser) {
       try {
-        const user: AuthUser = JSON.parse(raw);
-        setState({ user, accessToken: token, isAuthenticated: true, isLoading: false });
+        const user: AuthUser = JSON.parse(rawUser);
+        setState({ user, accessToken, isAuthenticated: true, isLoading: false });
         return;
       } catch {
         // Buzilgan ma'lumot — tozalash
-        localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.USER);
+        tokenStore.clear();
       }
     }
 
@@ -103,10 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await res.json();
 
-    // Saqlash
-    localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN,  data.access_token);
-    localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, data.refresh_token);
-    localStorage.setItem(STORAGE_KEYS.USER,          JSON.stringify(data.user));
+    // Saqlash — in-memory + localStorage
+    tokenStore.set('ACCESS',  data.access_token);
+    tokenStore.set('REFRESH', data.refresh_token);
+    tokenStore.set('USER',    JSON.stringify(data.user));
 
     setState({
       user:            data.user,
@@ -119,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Logout ────────────────────────────────────────────────────────────────
 
   const logout = useCallback(async () => {
-    const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+    const token = tokenStore.get('ACCESS');
 
     // Backend ga logout xabari (token bekor qilish)
     if (token) {
@@ -129,9 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});  // Network xato bo'lsa ham local state tozalanadi
     }
 
-    localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.USER);
+    tokenStore.clear();
 
     setState({ user: null, accessToken: null, isAuthenticated: false, isLoading: false });
   }, []);

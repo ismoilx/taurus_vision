@@ -716,7 +716,7 @@ export default function NotificationsPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
 
-  const [activeTab,   setActiveTab]   = useState<'inapp' | 'email'>('inapp');
+  const [activeTab,   setActiveTab]   = useState<'inapp' | 'email' | 'telegram'>('inapp');
   const [filter,      setFilter]      = useState<'all' | 'unread'>('all');
   const [showCreate,  setShowCreate]  = useState(false);
   const [page,        setPage]        = useState(0);
@@ -775,7 +775,7 @@ export default function NotificationsPage() {
             Bildirishnomalar
           </h1>
           <p style={{ fontSize: 14, color: '#6B7280', margin: '4px 0 0' }}>
-            In-app xabarlar va email sozlamalari
+            In-app xabarlar, email va Telegram sozlamalari
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -807,8 +807,9 @@ export default function NotificationsPage() {
         marginBottom: 24, width: 'fit-content',
       }}>
         {([
-          { key: 'inapp', label: 'In-App', icon: Bell,  badge: unread },
-          { key: 'email', label: 'Email',  icon: Mail,  badge: 0 },
+          { key: 'inapp',    label: 'In-App',   icon: Bell,     badge: unread },
+          { key: 'email',    label: 'Email',    icon: Mail,     badge: 0 },
+          { key: 'telegram', label: 'Telegram', icon: Activity, badge: 0 },
         ] as const).map(({ key, label, icon: Icon, badge }) => (
           <button
             key={key}
@@ -972,6 +973,9 @@ export default function NotificationsPage() {
       {/* EMAIL TAB */}
       {activeTab === 'email' && <EmailTab />}
 
+      {/* TELEGRAM TAB */}
+      {activeTab === 'telegram' && <TelegramTab />}
+
       {/* Create Modal */}
       {showCreate && (
         <CreateNotifModal
@@ -983,6 +987,272 @@ export default function NotificationsPage() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
+    </div>
+  );
+}
+
+// =============================================================================
+// TELEGRAM TAB
+// =============================================================================
+
+interface TelegramSettings {
+  configured:          boolean;
+  bot_token_set:       boolean;
+  bot_token_masked:    string;
+  chat_ids:            string[];
+  total_chats:         number;
+  severity_rules:      Record<string, string>;
+}
+
+function TelegramTab() {
+  const [testChatId,  setTestChatId]  = useState('');
+  const [testResult,  setTestResult]  = useState<{ ok: boolean; message: string } | null>(null);
+  const [alertId,     setAlertId]     = useState('');
+  const [sendResult,  setSendResult]  = useState<any>(null);
+  const [showGuide,   setShowGuide]   = useState(false);
+
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['notifications', 'telegram-settings'],
+    queryFn:  () => apiFetch<TelegramSettings>('/api/v1/notifications/telegram/settings'),
+  });
+
+  const testMut = useMutation({
+    mutationFn: () => apiFetch<any>('/api/v1/notifications/telegram/test', {
+      method: 'POST',
+      body:   JSON.stringify({ chat_id: testChatId }),
+    }),
+    onSuccess: r  => setTestResult({ ok: r.ok, message: r.message }),
+    onError:   e  => setTestResult({ ok: false, message: (e as Error).message }),
+  });
+
+  const sendMut = useMutation({
+    mutationFn: () => apiFetch<any>(`/api/v1/notifications/telegram/send/${alertId}`, {
+      method: 'POST', body: JSON.stringify({ chat_ids: null }),
+    }),
+    onSuccess: setSendResult,
+    onError:   e => setSendResult({ sent: false, error: (e as Error).message }),
+  });
+
+  const envExample =
+    `TELEGRAM_BOT_TOKEN=7123456789:AABcDeFgHiJkLmNoPqRsTuVwXyZ\nTELEGRAM_CHAT_IDS=123456789,987654321`;
+
+  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#9CA3AF' }}>Yuklanmoqda...</div>;
+
+  const ok = settings?.configured ?? false;
+
+  const btn: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '9px 18px',
+    background: '#1E3EB4', color: '#fff',
+    border: 'none', borderRadius: 8,
+    fontSize: 13, fontWeight: 700, cursor: 'pointer',
+    fontFamily: 'Outfit, sans-serif',
+  };
+
+  return (
+    <div>
+      {/* Status banner */}
+      <div style={{
+        padding: '14px 18px', marginBottom: 20,
+        background: ok ? '#F0FDF4' : '#EFF6FF',
+        border: `1px solid ${ok ? '#A7F3D0' : '#BFDBFE'}`,
+        borderRadius: 12,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <span style={{ fontSize: 22 }}>{ok ? '🤖' : '📱'}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: ok ? '#065F46' : '#1E40AF' }}>
+            {ok
+              ? `Telegram Bot ulangan — ${settings?.total_chats} ta chat`
+              : 'Telegram Bot sozlanmagan'}
+          </div>
+          <div style={{ fontSize: 11, color: ok ? '#059669' : '#3B82F6', marginTop: 2 }}>
+            {ok
+              ? `Chat IDlar: ${settings?.chat_ids.join(', ')}`
+              : 'TELEGRAM_BOT_TOKEN va TELEGRAM_CHAT_IDS kerak'}
+          </div>
+        </div>
+        {!ok && (
+          <button onClick={() => setShowGuide(v => !v)} style={{
+            padding: '5px 14px', background: '#1E3EB4', color: '#fff',
+            border: 'none', borderRadius: 7,
+            fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'Outfit, sans-serif',
+          }}>
+            Qo'llanma
+          </button>
+        )}
+      </div>
+
+      {/* Setup guide */}
+      {showGuide && (
+        <div style={{
+          background: '#F8FAFC', border: '1px solid #E4E7ED',
+          borderRadius: 12, padding: 20, marginBottom: 20,
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 12px', color: '#0D1117' }}>
+            🤖 Telegram Bot ulash — Qo'llanma
+          </h3>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#374151', lineHeight: 2 }}>
+            <li>Telegramda <strong>@BotFather</strong> ga yozing: <code>/newbot</code></li>
+            <li>Bot nomini bering → <strong>Bot Token</strong> olasiz</li>
+            <li>Bot bilan <code>/start</code> yozing</li>
+            <li>
+              Chat ID ni toping:{' '}
+              <code style={{ fontSize: 11, background: '#E5E7EB', padding: '2px 6px', borderRadius: 4 }}>
+                https://api.telegram.org/bot&#123;TOKEN&#125;/getUpdates
+              </code>
+            </li>
+            <li>
+              <code>backend/.env</code> fayliga qo'shing:
+              <pre style={{
+                background: '#1E293B', color: '#E2E8F0', borderRadius: 8,
+                padding: '12px 16px', margin: '8px 0', fontSize: 12,
+                fontFamily: 'JetBrains Mono, monospace', overflowX: 'auto',
+              }}>{envExample}</pre>
+            </li>
+            <li>Backendni qayta ishga tushiring: <code>docker-compose restart backend</code></li>
+          </ol>
+        </div>
+      )}
+
+      {/* Info cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+        {/* Bot info */}
+        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0D1117', marginBottom: 12 }}>
+            🤖 Bot Ma'lumotlari
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              { label: 'Token', value: settings?.bot_token_masked || '—' },
+              { label: "Chat'lar soni", value: String(settings?.total_chats ?? 0) },
+              { label: 'Holat', value: ok ? '✅ Ulangan' : '❌ Sozlanmagan' },
+            ].map(({ label, value }) => (
+              <div key={label} style={{
+                display: 'flex', justifyContent: 'space-between',
+                padding: '6px 10px', background: '#F9FAFB',
+                borderRadius: 7, fontSize: 12,
+              }}>
+                <span style={{ color: '#6B7280' }}>{label}</span>
+                <span style={{ fontWeight: 600, color: '#0D1117', fontFamily: 'monospace' }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Severity rules */}
+        <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#0D1117', marginBottom: 12 }}>
+            🔔 Severity Qoidalari
+          </div>
+          {[
+            { s: 'critical', l: 'KRITIK',  e: '🔴', send: true },
+            { s: 'high',     l: 'YUQORI',  e: '🟠', send: true },
+            { s: 'medium',   l: "O'RTA",   e: '🟡', send: true },
+            { s: 'low',      l: 'PAST',    e: '🟢', send: false },
+          ].map(({ s, l, e, send }) => (
+            <div key={s} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '7px 10px', marginBottom: 6,
+              background: '#F9FAFB', border: '1px solid #F3F4F6', borderRadius: 7,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span>{e}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#0D1117' }}>{l}</span>
+              </div>
+              <span style={{ fontSize: 11, color: send ? '#059669' : '#9CA3AF', fontWeight: 600 }}>
+                {send ? '✅ Telegram' : "❌ Yo'q"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Test message */}
+      <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 20, marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117', marginBottom: 14 }}>
+          📱 Test Xabari
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            type="text" value={testChatId}
+            onChange={e => setTestChatId(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && testChatId.trim() && testMut.mutate()}
+            placeholder="Chat ID (masalan: 123456789)"
+            style={{
+              flex: 1, padding: '9px 12px',
+              border: '1px solid #D1D5DB', borderRadius: 8,
+              fontSize: 13, outline: 'none', fontFamily: 'monospace',
+            }}
+          />
+          <button
+            onClick={() => testMut.mutate()}
+            disabled={testMut.isPending || !testChatId.trim()}
+            style={{
+              ...btn,
+              background: (testMut.isPending || !testChatId.trim()) ? '#9CA3AF' : '#1E3EB4',
+            }}>
+            {testMut.isPending ? <RefreshCw size={13} /> : <Send size={13} />}
+            {testMut.isPending ? 'Yuborilmoqda...' : 'Yuborish'}
+          </button>
+        </div>
+        {testResult && (
+          <div style={{
+            marginTop: 10, padding: '8px 12px',
+            background: testResult.ok ? '#F0FDF4' : '#FEF2F2',
+            border: `1px solid ${testResult.ok ? '#A7F3D0' : '#FECACA'}`,
+            borderRadius: 8, fontSize: 12,
+            color: testResult.ok ? '#065F46' : '#DC2626',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {testResult.ok ? <CheckCircle size={13} /> : <XCircle size={13} />}
+            {testResult.message}
+          </div>
+        )}
+      </div>
+
+      {/* Manual send */}
+      <div style={{ background: '#fff', border: '1px solid #E4E7ED', borderRadius: 12, padding: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#0D1117', marginBottom: 14 }}>
+          ✉️ Alert Telegram Xabari
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            type="number" value={alertId}
+            onChange={e => setAlertId(e.target.value)}
+            placeholder="Alert ID (masalan: 42)"
+            style={{
+              flex: 1, padding: '9px 12px',
+              border: '1px solid #D1D5DB', borderRadius: 8,
+              fontSize: 13, outline: 'none', fontFamily: 'monospace',
+            }}
+          />
+          <button
+            onClick={() => sendMut.mutate()}
+            disabled={sendMut.isPending || !alertId.trim()}
+            style={{
+              ...btn,
+              background: (sendMut.isPending || !alertId.trim()) ? '#9CA3AF' : '#059669',
+            }}>
+            {sendMut.isPending ? <RefreshCw size={13} /> : <Send size={13} />}
+            {sendMut.isPending ? 'Yuborilmoqda...' : 'Yuborish'}
+          </button>
+        </div>
+        {sendResult && (
+          <div style={{
+            marginTop: 10, padding: '10px 14px',
+            background: sendResult.sent ? '#F0FDF4' : '#FEF2F2',
+            border: `1px solid ${sendResult.sent ? '#A7F3D0' : '#FECACA'}`,
+            borderRadius: 8, fontSize: 12,
+            color: sendResult.sent ? '#065F46' : '#DC2626',
+          }}>
+            {sendResult.sent
+              ? `✅ Yuborildi — ${sendResult.results?.length ?? 0} ta chatga`
+              : `❌ Xato: ${sendResult.error}`}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

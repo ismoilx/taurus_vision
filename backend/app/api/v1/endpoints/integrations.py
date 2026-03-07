@@ -333,3 +333,62 @@ async def external_list_alerts(
             for a in alerts
         ],
     }
+
+# =============================================================================
+# WEBHOOK DELIVERY LOGS
+# =============================================================================
+
+@router.get(
+    "/webhooks/{webhook_id}/deliveries",
+    summary="Webhook delivery tarixi",
+)
+async def get_webhook_deliveries(
+    webhook_id: int,
+    limit:      int = Query(50, ge=1, le=200),
+    offset:     int = Query(0, ge=0),
+    success:    Optional[bool] = Query(None, description="None=hammasi, true=muvaffaqiyatli, false=xato"),
+    user:       CurrentManager = ...,
+    db:         DB = ...,
+) -> dict:
+    """
+    Webhook delivery loglarini qaytaradi.
+
+    Oxirgi 200 ta yozuv saqlanadi.
+    """
+    from app.repositories.integration_repository import IntegrationRepository
+    repo = IntegrationRepository(db)
+
+    wh = await repo.get_webhook_by_id(webhook_id)
+    if not wh:
+        from fastapi import HTTPException
+        from fastapi import status as http_status
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"Webhook #{webhook_id} topilmadi")
+
+    logs, total = await repo.get_delivery_logs(
+        webhook_id = webhook_id,
+        limit      = limit,
+        offset     = offset,
+        success    = success,
+    )
+    stats = await repo.get_delivery_stats(webhook_id)
+
+    return {
+        "webhook_id":   webhook_id,
+        "webhook_name": wh.name,
+        "stats":        stats,
+        "total":        total,
+        "items": [
+            {
+                "id":              log.id,
+                "event_type":      log.event_type,
+                "success":         log.success,
+                "status_code":     log.status_code,
+                "latency_ms":      log.latency_ms,
+                "error_message":   log.error_message,
+                "payload_preview": log.payload_preview,
+                "delivery_id":     log.delivery_id,
+                "created_at":      str(log.created_at),
+            }
+            for log in logs
+        ],
+    }

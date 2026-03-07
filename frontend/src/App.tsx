@@ -261,18 +261,12 @@ function AlertBell() {
 // FARM SWITCHER
 // =============================================================================
 
-const FARM_STORAGE_KEY = 'tv_current_farm';
-
 function FarmSwitcher() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [currentFarmId, setCurrentFarmId] = useState<number | null>(() => {
-    try { const r = localStorage.getItem(FARM_STORAGE_KEY); return r ? parseInt(r) : null; } catch { return null; }
-  });
-  const [currentFarmName, setCurrentFarmName] = useState<string>(() => {
-    try { return localStorage.getItem('tv_current_farm_name') ?? 'Ferma'; } catch { return 'Ferma'; }
-  });
+  const [currentFarmId,   setCurrentFarmId]   = useState<number | null>(null);
+  const [currentFarmName, setCurrentFarmName] = useState<string>('Ferma');
 
   const { data } = useQuery({
     queryKey: ['farms-nav'],
@@ -284,10 +278,6 @@ function FarmSwitcher() {
     mutationFn: (id: number) =>
       apiFetch<{ farm_id: number; farm_name: string }>(`/api/v1/farms/${id}/switch`, { method: 'POST' }),
     onSuccess: (res) => {
-      try {
-        localStorage.setItem(FARM_STORAGE_KEY, String(res.farm_id));
-        localStorage.setItem('tv_current_farm_name', res.farm_name);
-      } catch { /* ignore */ }
       setCurrentFarmId(res.farm_id);
       setCurrentFarmName(res.farm_name);
       setOpen(false);

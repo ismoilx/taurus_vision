@@ -431,6 +431,14 @@ class Webhook(BaseModel):
         lazy="noload",
     )
 
+    delivery_logs: Mapped[list["WebhookDeliveryLog"]] = relationship(  # type: ignore[name-defined]
+        "WebhookDeliveryLog",
+        back_populates="webhook",
+        lazy="noload",
+        cascade="all, delete-orphan",
+        order_by="WebhookDeliveryLog.created_at.desc()",
+    )
+
     # ------------------------------------------------------------------
     # Indekslar
     # ------------------------------------------------------------------
@@ -463,3 +471,91 @@ class Webhook(BaseModel):
         if self.failure_count == 0 and self.success_count > 0:
             return "healthy"
         return "unknown"
+
+# =============================================================================
+# WEBHOOK DELIVERY LOG
+# =============================================================================
+
+class WebhookDeliveryLog(BaseModel):
+    """
+    Webhook yuborish tarixi.
+
+    Har bir webhook POST so'rovining natijasini saqlaydi.
+    Oxirgi 200 ta yozuv saqlanadi (eski yozuvlar avtomatik o'chiriladi).
+
+    Bu model debugging va monitoring uchun ishlatiladi.
+    """
+
+    __tablename__ = "webhook_delivery_logs"
+
+    webhook_id: Mapped[int] = mapped_column(
+        ForeignKey("webhooks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Qaysi webhook",
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Voqea turi (masalan: alert.critical)",
+    )
+
+    success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        comment="Muvaffaqiyatlimi?",
+    )
+
+    status_code: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="HTTP status kodi",
+    )
+
+    latency_ms: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="So'rov vaqti (ms)",
+    )
+
+    error_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Xato xabari",
+    )
+
+    payload_preview: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="So'rov mazmunidan dastlabki 500 belgi",
+    )
+
+    delivery_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+        comment="UUID delivery identifikatori",
+    )
+
+    webhook: Mapped["Webhook"] = relationship(   # type: ignore[name-defined]
+        "Webhook",
+        foreign_keys=[webhook_id],
+        back_populates="delivery_logs",
+        lazy="noload",
+    )
+
+    __table_args__ = (
+        Index("ix_wdl_webhook_id",  "webhook_id"),
+        Index("ix_wdl_created_at",  "created_at"),
+        Index("ix_wdl_success",     "success"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WebhookDeliveryLog(id={self.id}, "
+            f"webhook_id={self.webhook_id}, "
+            f"event='{self.event_type}', "
+            f"success={self.success}, "
+            f"status={self.status_code})>"
+        )

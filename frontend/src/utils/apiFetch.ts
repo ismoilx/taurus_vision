@@ -7,20 +7,19 @@
  *   - Refresh ham ishlamasa → login sahifasiga yo'naltirish
  *   - JSON parse xatolarni ushlab olish
  *
+ * TOKEN STORAGE:
+ *   tokenStore orqali (in-memory + localStorage fallback)
+ *   localStorage o'chirilgan muhitlarda ham ishlaydi
+ *
  * TOKEN REFRESH OQIMI:
  *   1. API so'rovi → 401
  *   2. Refresh token mavjudmi? → POST /auth/refresh
  *   3. Yangi tokenlar saqlandi → asl so'rovni qayta yuborish
- *   4. Refresh ham 401 → localStorage tozalash → /login
+ *   4. Refresh ham 401 → tokenlarni tozalash → /login
  */
 
 import config from '../config';
-
-const STORAGE = {
-  ACCESS:  'tv_access_token',
-  REFRESH: 'tv_refresh_token',
-  USER:    'tv_user',
-} as const;
+import { tokenStore } from './tokenStore';
 
 // Bir vaqtda faqat bitta refresh so'rovi bo'lishi uchun
 let isRefreshing = false;
@@ -45,7 +44,7 @@ function notifySubscribers(token: string) {
  *   Error — refresh muvaffaqiyatsiz bo'lsa (foydalanuvchi logout bo'ladi)
  */
 async function refreshAccessToken(): Promise<string> {
-  const refreshToken = localStorage.getItem(STORAGE.REFRESH);
+  const refreshToken = tokenStore.get('REFRESH');
 
   if (!refreshToken) {
     throw new Error('No refresh token available');
@@ -64,10 +63,10 @@ async function refreshAccessToken(): Promise<string> {
   const data = await res.json();
 
   // Yangi tokenlarni saqlash
-  localStorage.setItem(STORAGE.ACCESS,  data.access_token);
-  localStorage.setItem(STORAGE.REFRESH, data.refresh_token);
+  tokenStore.set('ACCESS',  data.access_token);
+  tokenStore.set('REFRESH', data.refresh_token);
   if (data.user) {
-    localStorage.setItem(STORAGE.USER, JSON.stringify(data.user));
+    tokenStore.set('USER', JSON.stringify(data.user));
   }
 
   return data.access_token;
@@ -77,9 +76,7 @@ async function refreshAccessToken(): Promise<string> {
  * Foydalanuvchini tizimdan chiqarish va login sahifasiga yo'naltirish.
  */
 function forceLogout(): void {
-  localStorage.removeItem(STORAGE.ACCESS);
-  localStorage.removeItem(STORAGE.REFRESH);
-  localStorage.removeItem(STORAGE.USER);
+  tokenStore.clear();
   window.location.href = '/login';
 }
 
@@ -114,7 +111,7 @@ export async function apiFetch<T>(
   };
 
   // Birinchi urinish
-  const currentToken = localStorage.getItem(STORAGE.ACCESS);
+  const currentToken = tokenStore.get('ACCESS');
   let res = await makeRequest(currentToken);
 
   // 401 → token refresh urinish
