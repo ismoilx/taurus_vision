@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Taurus Vision — AI Ferma Monitoring Tizimi</title>
+<meta name="description" content="Sun'iy intellekt yordamida chorvachilik fermalarini real vaqtda kuzatish tizimi.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F8FA;--surface:#FFFFFF;--border:#E5E7EB;--border2:#F3F4F6;
+  --text:#111827;--text2:#374151;--muted:#6B7280;--muted2:#9CA3AF;
+  --blue:#1E3EB4;--blue-mid:#0ea5e9;--blue-bg:#EFF6FF;--blue-bd:#BFDBFE;
+  --green:#10b981;--green-bg:#ECFDF5;--green-bd:#A7F3D0;
+  --amber:#f59e0b;--amber-bg:#FFFBEB;--amber-bd:#FDE68A;
+  --red:#ef4444;--red-bg:#FEF2F2;--red-bd:#FECACA;
+  --purple:#8b5cf6;--indigo:#6366f1;
+  --r:10px;--rl:16px;
+  --sh:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
+  --shm:0 4px 16px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
+  --shl:0 12px 40px rgba(0,0,0,.1),0 4px 8px rgba(0,0,0,.05);
+  --font:'Outfit',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;-webkit-font-smoothing:antialiased}
+a{text-decoration:none}
+nav{position:sticky;top:0;z-index:100;background:rgba(247,248,250,.93);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.nav-inner{max-width:1200px;margin:0 auto;padding:0 32px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.nav-logo{display:flex;align-items:center;gap:10px;color:var(--text);font-size:1.05rem;font-weight:700;letter-spacing:-.01em;flex-shrink:0}
+.logo-mark{width:34px;height:34px;background:var(--blue);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.nav-links{display:flex;gap:2px;flex:1;justify-content:center}
+.nav-links a{font-size:.875rem;color:var(--muted);font-weight:500;padding:6px 13px;border-radius:8px;transition:color .15s,background .15s;white-space:nowrap}
+.nav-links a:hover{color:var(--text);background:var(--border2)}
+.nav-right{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.lang-sw{display:flex;gap:2px;background:var(--border2);border-radius:8px;padding:3px}
+.lang-btn{padding:4px 10px;border:none;background:transparent;font-size:.75rem;font-weight:600;cursor:pointer;border-radius:6px;color:var(--muted);transition:all .15s;font-family:var(--font);letter-spacing:.03em}
+.lang-btn.active{background:var(--surface);color:var(--text);box-shadow:var(--sh)}
+.btn-nav-cta{background:var(--blue);color:#fff;font-size:.875rem;font-weight:600;padding:9px 20px;border-radius:var(--r);transition:background .15s,transform .15s;white-space:nowrap}
+.btn-nav-cta:hover{background:#1a35a0;transform:translateY(-1px)}
+.container{max-width:1200px;margin:0 auto;padding:0 32px}
+.section{padding:96px 0}
+.label{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);margin-bottom:14px}
+.sec-title{font-size:clamp(1.8rem,3.5vw,2.75rem);font-weight:800;line-height:1.1;letter-spacing:-.025em;color:var(--text)}
+.sec-title .hl{color:var(--blue)}
+.sec-title .hg{color:var(--green)}
+.sec-sub{font-size:1rem;color:var(--muted);margin-top:14px;max-width:520px;line-height:1.7;font-weight:400}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:100px;letter-spacing:.02em}
+.bb{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-bd)}
+.bg{background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)}
+.ba{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-bd)}
+.br{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
+/* HERO */
+#hero{padding:80px 0 96px;background:var(--surface);border-bottom:1px solid var(--border)}
+.hero-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+.hero-tag{display:inline-flex;align-items:center;gap:7px;background:var(--blue-bg);border:1px solid var(--blue-bd);padding:5px 12px;border-radius:100px;font-size:.78rem;font-weight:600;color:var(--blue);margin-bottom:24px}
+.hero-dot{width:6px;height:6px;background:var(--blue);border-radius:50%;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-title{font-size:clamp(2.2rem,4.5vw,3.5rem);font-weight:800;line-height:1.08;letter-spacing:-.03em;margin-bottom:20px}
+.hero-title .hl{color:var(--blue)}
+.hero-desc{font-size:1.05rem;color:var(--muted);line-height:1.7;font-weight:400;margin-bottom:32px;max-width:480px}
+.hero-btns{display:flex;gap:12px;flex-wrap:wrap}
+.btn-pri{display:inline-flex;align-items:center;gap:8px;background:var(--blue);color:#fff;font-size:.9rem;font-weight:600;padding:11px 24px;border-radius:var(--r);transition:background .15s,transform .15s}
+.btn-pri:hover{background:#1a35a0;transform:translateY(-1px)}
+.btn-sec{display:inline-flex;align-items:center;gap:8px;background:var(--surface);color:var(--text2);font-size:.9rem;font-weight:500;padding:11px 24px;border-radius:var(--r);border:1px solid var(--border);transition:border-color .15s,transform .15s}
+.btn-sec:hover{border-color:#9CA3AF;transform:translateY(-1px)}
+.hero-stats{display:flex;gap:32px;margin-top:40px;padding-top:40px;border-top:1px solid var(--border)}
+.hs-num{font-family:var(--mono);font-size:1.7rem;font-weight:600;color:var(--text);line-height:1}
+.hs-lbl{font-size:.78rem;color:var(--muted);margin-top:4px}
+.hvisual{background:var(--bg);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;box-shadow:var(--shl)}
+.hvtop{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:10px}
+.hvdots{display:flex;gap:5px}
+.hvd{width:10px;height:10px;border-radius:50%}
+.hvbar-title{font-size:.78rem;color:var(--muted);font-weight:500}
+.hvbody{padding:14px;display:flex;flex-direction:column;gap:10px}
+.hvrow{display:flex;gap:10px}
+.hvc{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;flex:1}
+.hvc-lbl{font-size:.68rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.hvc-val{font-family:var(--mono);font-size:1.2rem;font-weight:600;margin-top:2px}
+.hvc-val.cb{color:var(--blue)}.hvc-val.cg{color:var(--green)}.hvc-val.ca{color:var(--amber)}
+.hvbars{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:9px}
+.hvbr{display:flex;align-items:center;gap:10px}
+.hvbr-name{font-size:.7rem;color:var(--muted2);width:72px;flex-shrink:0}
+.hvbr-track{flex:1;height:5px;background:var(--border2);border-radius:3px;overflow:hidden}
+.hvbr-fill{height:100%;border-radius:3px}
+.hvbr-num{font-family:var(--mono);font-size:.7rem;color:var(--text2);width:28px;text-align:right}
+.hvalert{background:var(--red-bg);border:1px solid var(--red-bd);border-radius:8px;padding:9px 12px;display:flex;align-items:center;gap:8px}
+.hvalert-txt{font-size:.76rem;color:var(--red);font-weight:500}
+/* METRICS BAR */
+#metrics{background:var(--blue);padding:18px 0}
+.met-row{display:flex;justify-content:center;flex-wrap:wrap}
+.met-item{padding:8px 40px;border-right:1px solid rgba(255,255,255,.2);text-align:center}
+.met-item:last-child{border-right:none}
+.met-num{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:#fff;line-height:1}
+.met-lbl{font-size:.7rem;color:rgba(255,255,255,.65);margin-top:3px}
+/* HOW */
+#how{background:var(--bg)}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:48px;background:var(--border);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden}
+.step{background:var(--surface);padding:28px 24px;position:relative;transition:background .2s}
+.step:hover{background:#FAFBFF}
+.step-num{font-family:var(--mono);font-size:.7rem;font-weight:600;color:var(--muted2);letter-spacing:.08em;margin-bottom:14px}
+.step-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.step-title{font-size:.95rem;font-weight:700;margin-bottom:8px;letter-spacing:-.01em}
+.step-desc{font-size:.82rem;color:var(--muted);line-height:1.65}
+/* FEATURES */
+#features{background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.bento{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin-top:48px}
+.bento2{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.fc{background:var(--bg);border:1px solid var(--border);border-radius:var(--rl);padding:26px;transition:all .2s}
+.fc:hover{border-color:#CBD5E1;box-shadow:var(--shm);transform:translateY(-1px)}
+.fc.ab{border-top:3px solid var(--blue)}
+.fc.ag{border-top:3px solid var(--green)}
+.fc.aa{border-top:3px solid var(--amber)}
+.fc.ar{border-top:3px solid var(--red)}
+.fc-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.fc-title{font-size:1.05rem;font-weight:700;letter-spacing:-.01em;margin-bottom:8px}
+.fc-desc{font-size:.84rem;color:var(--muted);line-height:1.65}
+.fc-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:14px}
+.fc-tag{font-size:.7rem;color:var(--muted2);background:var(--surface);border:1px solid var(--border);padding:2px 9px;border-radius:100px}
+.fc-vis{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px}
+/* ADI */
+#adi{background:var(--bg)}
+.adi-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+.adi-cats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px}
+.adi-cat{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px;display:flex;align-items:flex-start;gap:10px}
+.adi-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.adi-cat-label{font-size:.85rem;font-weight:700;margin-bottom:2px}
+.adi-cat-range{font-size:.73rem;color:var(--muted);font-family:var(--mono)}
+.adi-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;box-shadow:var(--shm)}
+.adi-ph{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.adi-ph-title{font-size:.85rem;font-weight:700}
+.adi-pb{padding:20px;display:flex;flex-direction:column;gap:14px}
+.adi-row{display:flex;flex-direction:column;gap:6px}
+.adi-rt{display:flex;justify-content:space-between;align-items:center}
+.adi-rname{font-size:.8rem;color:var(--text2);font-weight:500}
+.adi-rnum{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
+.adi-track{height:6px;background:var(--border2);border-radius:3px;overflow:hidden}
+.adi-fill{height:100%;border-radius:3px;transition:width 1.2s .3s ease;width:0}
+/* TECH */
+#tech{background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.tech-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:40px}
+.tc{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:20px;transition:all .2s}
+.tc:hover{border-color:#CBD5E1;box-shadow:var(--sh)}
+.tc-icon{margin-bottom:12px}
+.tc-name{font-size:.9rem;font-weight:700;letter-spacing:-.01em;margin-bottom:4px}
+.tc-desc{font-size:.78rem;color:var(--muted);line-height:1.55}
+/* CONTACT */
+#contact{background:var(--bg)}
+.con-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:start}
+.clinks{display:flex;flex-direction:column;gap:10px;margin-top:28px}
+.clink{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 18px;color:var(--text);transition:all .2s}
+.clink:hover{border-color:#CBD5E1;box-shadow:var(--sh);transform:translateX(3px)}
+.clink-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.clink-type{font-size:.68rem;color:var(--muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.clink-val{font-size:.88rem;font-weight:600;margin-top:1px}
+.clink-arr{margin-left:auto;color:var(--muted2);transition:transform .2s}
+.clink:hover .clink-arr{transform:translateX(3px);color:var(--blue)}
+.form-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:28px}
+.form-ttl{font-size:1.1rem;font-weight:700;margin-bottom:20px;letter-spacing:-.01em}
+.fg{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.fl{font-size:.73rem;font-weight:600;color:var(--muted2);letter-spacing:.04em;text-transform:uppercase}
+.fi,.fta{background:var(--bg);border:1.5px solid var(--border);border-radius:var(--r);padding:10px 14px;font-family:var(--font);font-size:.9rem;color:var(--text);outline:none;transition:border-color .15s}
+.fi:focus,.fta:focus{border-color:var(--blue);background:var(--surface)}
+.fta{min-height:100px;resize:vertical}
+.fbtn{background:var(--blue);color:#fff;font-size:.9rem;font-weight:600;padding:11px 24px;border-radius:var(--r);border:none;font-family:var(--font);cursor:pointer;transition:background .15s,transform .15s;display:inline-flex;align-items:center;gap:8px}
+.fbtn:hover{background:#1a35a0;transform:translateY(-1px)}
+footer{background:var(--surface);border-top:1px solid var(--border);padding:32px 0}
+.ft-inner{max-width:1200px;margin:0 auto;padding:0 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.ft-logo{display:flex;align-items:center;gap:8px;color:var(--text);font-weight:700;font-size:.95rem}
+.ft-copy{font-size:.8rem;color:var(--muted)}
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .55s ease,transform .55s ease}
+.reveal.visible{opacity:1;transform:translateY(0)}
+.d1{transition-delay:.1s}.d2{transition-delay:.2s}.d3{transition-delay:.3s}
+hr.div{border:none;border-top:1px solid var(--border);margin:0}
+@media(max-width:1024px){.tech-grid{grid-template-columns:repeat(2,1fr)}.steps{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:900px){.hero-grid,.adi-grid,.con-grid,.bento{grid-template-columns:1fr}.bento2{grid-template-columns:1fr 1fr}.hvisual{display:none}.hero-stats{gap:20px}.nav-links{display:none}}
+@media(max-width:600px){.bento2,.adi-cats,.tech-grid{grid-template-columns:1fr}.steps{grid-template-columns:1fr}.met-item{padding:8px 20px}}
+@media(max-width:768px){.nav-links,.btn-nav-cta{display:none}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="#">
+      <div class="logo-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="13" rx="2.5" stroke="white" stroke-width="1.8"/><circle cx="12" cy="12" r="3.5" stroke="white" stroke-width="1.8"/><path d="M8 6L9.5 3h5L16 6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      Taurus Vision
+    </a>
+    <div class="nav-links">
+      <a href="#how" data-i18n="nav.how">Qanday ishlaydi</a>
+      <a href="#features" data-i18n="nav.feat">Imkoniyatlar</a>
+      <a href="#adi">ADI</a>
+      <a href="#tech" data-i18n="nav.tech">Texnologiya</a>
+      <a href="#contact" data-i18n="nav.con">Bog'lanish</a>
+    </div>
+    <div class="nav-right">
+      <div class="lang-sw">
+        <button class="lang-btn active" data-lang="uz">UZ</button>
+        <button class="lang-btn" data-lang="ru">RU</button>
+        <button class="lang-btn" data-lang="en">EN</button>
+      </div>
+      <a class="btn-nav-cta" href="#contact" data-i18n="nav.cta">Demo so'rash</a>
+    </div>
+  </div>
+</nav>
+
+<section id="hero">
+  <div class="container">
+    <div class="hero-grid">
+      <div>
+        <div class="hero-tag"><span class="hero-dot"></span><span data-i18n="hero.tag">AI · Ferma Monitoring · O'zbekiston</span></div>
+        <h1 class="hero-title"><span data-i18n="hero.t1">Aqlli ferma —</span><br><span class="hl" data-i18n="hero.t2">real vaqt kuzatuvi</span></h1>
+        <p class="hero-desc" data-i18n="hero.desc">Kamera oynasidan poda holatini to'liq ko'ring. Taurus Vision har bir hayvonni taniydi, sog'lig'ini kuzatadi va muammolarni oldini oladi.</p>
+        <div class="hero-btns">
+          <a href="#contact" class="btn-pri">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+            <span data-i18n="hero.c1">Demo so'rash</span>
+          </a>
+          <a href="#how" class="btn-sec">
+            <span data-i18n="hero.c2">Qanday ishlaydi</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+        <div class="hero-stats">
+          <div><div class="hs-num">99%</div><div class="hs-lbl" data-i18n="s.acc">Aniqlash aniqligi</div></div>
+          <div><div class="hs-num">24/7</div><div class="hs-lbl" data-i18n="s.mon">Monitoring</div></div>
+          <div><div class="hs-num">&lt;1s</div><div class="hs-lbl" data-i18n="s.res">Javob vaqti</div></div>
+          <div><div class="hs-num">30+</div><div class="hs-lbl" data-i18n="s.mod">Modullar</div></div>
+        </div>
+      </div>
+      <div class="hvisual">
+        <div class="hvtop">
+          <div class="hvdots"><div class="hvd" style="background:#ef4444"></div><div class="hvd" style="background:#f59e0b"></div><div class="hvd" style="background:#10b981"></div></div>
+          <span class="hvbar-title">Taurus Vision — Dashboard</span>
+        </div>
+        <div class="hvbody">
+          <div class="hvrow">
+            <div class="hvc"><div class="hvc-lbl" data-i18n="m.an">Jonivorlar</div><div class="hvc-val cb">248</div></div>
+            <div class="hvc"><div class="hvc-lbl">ADI</div><div class="hvc-val cg">78.4</div></div>
+            <div class="hvc"><div class="hvc-lbl" data-i18n="m.al">Alertlar</div><div class="hvc-val ca">3</div></div>
+          </div>
+          <div class="hvbars">
+            <div class="hvbr"><span class="hvbr-name" data-i18n="m.act">Faollik</span><div class="hvbr-track"><div class="hvbr-fill" style="background:var(--blue);width:82%"></div></div><span class="hvbr-num">82%</span></div>
+            <div class="hvbr"><span class="hvbr-name" data-i18n="m.feed">Yem</span><div class="hvbr-track"><div class="hvbr-fill" style="background:var(--green);width:74%"></div></div><span class="hvbr-num">74%</span></div>
+            <div class="hvbr"><span class="hvbr-name" data-i18n="m.wt">Og'irlik</span><div class="hvbr-track"><div class="hvbr-fill" style="background:var(--indigo);width:90%"></div></div><span class="hvbr-num">90%</span></div>
+            <div class="hvbr"><span class="hvbr-name" data-i18n="m.hl">Sog'liq</span><div class="hvbr-track"><div class="hvbr-fill" style="background:var(--amber);width:61%"></div></div><span class="hvbr-num">61%</span></div>
+          </div>
+          <div class="hvalert"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span class="hvalert-txt" data-i18n="m.atxt">#B-07 — ADI 24 · Kritik holat</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="metrics">
+  <div class="container">
+    <div class="met-row">
+      <div class="met-item"><div class="met-num">99%</div><div class="met-lbl" data-i18n="mt.1">Aniqlash aniqligi</div></div>
+      <div class="met-item"><div class="met-num">24/7</div><div class="met-lbl" data-i18n="mt.2">Uzluksiz monitoring</div></div>
+      <div class="met-item"><div class="met-num">&lt;1s</div><div class="met-lbl" data-i18n="mt.3">Real vaqt javob</div></div>
+      <div class="met-item"><div class="met-num">30+</div><div class="met-lbl" data-i18n="mt.4">Modul va funksiya</div></div>
+      <div class="met-item"><div class="met-num">3</div><div class="met-lbl" data-i18n="mt.5">AI modeli ensemble</div></div>
+    </div>
+  </div>
+</div>
+
+<section id="how" class="section">
+  <div class="container">
+    <div class="label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span data-i18n="how.lbl">Jarayon</span></div>
+    <h2 class="sec-title reveal" data-i18n="how.title">Kameradan qarorga — <span class="hl">4 qadam</span></h2>
+    <p class="sec-sub reveal" data-i18n="how.sub">Tizim to'liq avtomatik. Siz faqat natijani ko'rasiz.</p>
+    <div class="steps reveal">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="step-icon" style="background:var(--blue-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><circle cx="12" cy="12" r="3.5"/><path d="M8 6L9.5 3h5L16 6"/></svg></div>
+        <div class="step-title" data-i18n="s1t">Kamera yozadi</div>
+        <p class="step-desc" data-i18n="s1d">IP, USB yoki RTSP kameralar 24/7 ishlaydi. Bir vaqtda ko'plab kameralar qo'llab-quvvatlanadi.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="step-icon" style="background:var(--green-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+        <div class="step-title" data-i18n="s2t">YOLO26 aniqlaydi</div>
+        <p class="step-desc" data-i18n="s2d">Har bir kadrda hayvonlar real vaqtda aniqlanadi. So'ngra burun izi orqali shaxsi aniqlanadi.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="step-icon" style="background:var(--amber-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+        <div class="step-title" data-i18n="s3t">ADI hisoblanadi</div>
+        <p class="step-desc" data-i18n="s3d">Har kuni har bir hayvon uchun 0–100 ballik indeks. Harakat, yem, og'irlik va sensor asosida.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <div class="step-icon" style="background:var(--red-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+        <div class="step-title" data-i18n="s4t">Alert va tavsiya</div>
+        <p class="step-desc" data-i18n="s4d">Muammo bo'lsa — darhol ogohlantirish. AI bashorat qiladi va veterinar tavsiyasi beradi.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<section id="features" class="section">
+  <div class="container">
+    <div class="label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span data-i18n="feat.lbl">Imkoniyatlar</span></div>
+    <h2 class="sec-title reveal" data-i18n="feat.title">Boshqa tizimlar <span class="hl">qilmaydigan</span> narsa</h2>
+    <div class="bento">
+      <div class="fc ab reveal">
+        <span class="badge bb" data-i18n="f1b">AI · Identifikatsiya</span>
+        <div class="fc-vis" style="margin-top:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:.7rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase" data-i18n="f1vt">Burun izi profili</span><span class="badge bg" data-i18n="f1vm">Tasdiqlandi · 0.91</span></div>
+          <div style="display:flex;gap:8px"><div style="flex:1;height:44px;background:var(--blue-bg);border-radius:6px;border:1px solid var(--blue-bd);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div><div style="flex:3;display:flex;flex-direction:column;gap:5px;justify-content:center"><div style="height:5px;background:linear-gradient(90deg,var(--blue),var(--blue-mid));border-radius:3px;width:75%"></div><div style="height:5px;background:var(--border2);border-radius:3px;width:90%"></div><div style="height:5px;background:var(--border2);border-radius:3px;width:60%"></div></div></div>
+        </div>
+        <div class="fc-icon" style="background:var(--blue-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <div class="fc-title" data-i18n="f1t">Burun izi orqali aniq tanish</div>
+        <p class="fc-desc" data-i18n="f1d">Har bir hayvon burun iziga qarab taniladi — barmoq izi kabi noyob. MobileNetV2 128-o'lchamli embedding yaratadi. Cosine similarity 0.85 dan oshsa tasdiqlaydi.</p>
+        <div class="fc-tags"><span class="fc-tag">MobileNetV2</span><span class="fc-tag">128-dim Embedding</span><span class="fc-tag">Cosine Similarity</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="fc ag reveal d1">
+          <span class="badge bg">IoT</span>
+          <div class="fc-icon" style="background:var(--green-bg);margin-top:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg></div>
+          <div class="fc-title" data-i18n="f2t">Real vaqt sensorlar</div>
+          <p class="fc-desc" data-i18n="f2d">Harorat, namlik, CO₂ — har 30 soniyada yangilanadi. Anomaliya bo'lsa darhol alert.</p>
+          <div class="fc-tags"><span class="fc-tag">Temperature</span><span class="fc-tag">CO₂</span><span class="fc-tag">Humidity</span></div>
+        </div>
+        <div class="fc aa reveal d2">
+          <span class="badge ba" data-i18n="f3b">ML Ensemble</span>
+          <div class="fc-icon" style="background:var(--amber-bg);margin-top:10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+          <div class="fc-title" data-i18n="f3t">Sog'liq bashorati</div>
+          <p class="fc-desc" data-i18n="f3d">3 model ensemble: RuleEngine + RandomForest + IsolationForest. 30 kunlik xavf trendi.</p>
+          <div class="fc-tags"><span class="fc-tag">Random Forest</span><span class="fc-tag">IsolationForest</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="bento2 reveal">
+      <div class="fc ab">
+        <div class="fc-icon" style="background:var(--blue-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <div class="fc-title" data-i18n="f4t">To'liq ferma boshqaruvi</div>
+        <p class="fc-desc" data-i18n="f4d">Xodimlar, vazifalar, yem ombori, moliya, nasl — hammasi bitta tizimda. 3 rol: VIEWER, MANAGER, ADMIN.</p>
+        <div class="fc-tags"><span class="fc-tag" data-i18n="tg.e">Xodimlar</span><span class="fc-tag" data-i18n="tg.f">Yem</span><span class="fc-tag" data-i18n="tg.fi">Moliya</span><span class="fc-tag" data-i18n="tg.b">Nasl</span></div>
+      </div>
+      <div class="fc ag">
+        <div class="fc-icon" style="background:var(--green-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
+        <div class="fc-title" data-i18n="f5t">PDF, Excel, CSV eksport</div>
+        <p class="fc-desc" data-i18n="f5d">Professional hisobotlar bir tugma bilan. Ko'p varaqli Excel, PDF, CSV — hammasini yuklab olish mumkin.</p>
+      </div>
+      <div class="fc ar">
+        <div class="fc-icon" style="background:var(--red-bg)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M8.46 8.46a5 5 0 0 0 0 7.07"/></svg></div>
+        <div class="fc-title" data-i18n="f6t">Custom YOLO o'qitish</div>
+        <p class="fc-desc" data-i18n="f6d">Kameralar o'z-o'zidan dataset yig'adi. Ferma uchun maxsus YOLO modeli o'qitiladi va deploy qilinadi.</p>
+        <div class="fc-tags"><span class="fc-tag">Auto Dataset</span><span class="fc-tag">YOLO26</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="adi" class="section">
+  <div class="container">
+    <div class="adi-grid">
+      <div class="reveal">
+        <div class="label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>ADI — Animal Daily Index</div>
+        <h2 class="sec-title" data-i18n="adi.title">Har bir hayvon uchun <span class="hg">kunlik baho</span></h2>
+        <p class="sec-sub" data-i18n="adi.desc">ADI — Taurus Vision ning asosiy ko'rsatkichi. Har kecha avtomatik hisoblangan 0–100 ballik indeks. 8 omil asosida: faollik, ovqatlanish, o'sish, harakat, ijtimoiy, suv, sensor, veterinariya.</p>
+        <div class="adi-cats">
+          <div class="adi-cat"><div class="adi-dot" style="background:var(--green)"></div><div><div class="adi-cat-label" style="color:var(--green)" data-i18n="ac1">Sog'lom</div><div class="adi-cat-range">75 – 100</div></div></div>
+          <div class="adi-cat"><div class="adi-dot" style="background:var(--blue-mid)"></div><div><div class="adi-cat-label" style="color:var(--blue-mid)" data-i18n="ac2">Yaxshi</div><div class="adi-cat-range">60 – 74</div></div></div>
+          <div class="adi-cat"><div class="adi-dot" style="background:var(--amber)"></div><div><div class="adi-cat-label" style="color:var(--amber)" data-i18n="ac3">Diqqat</div><div class="adi-cat-range">30 – 59</div></div></div>
+          <div class="adi-cat"><div class="adi-dot" style="background:var(--red)"></div><div><div class="adi-cat-label" style="color:var(--red)" data-i18n="ac4">Kritik</div><div class="adi-cat-range">0 – 29</div></div></div>
+        </div>
+      </div>
+      <div class="adi-panel reveal d2">
+        <div class="adi-ph"><span class="adi-ph-title" data-i18n="adi.ph">Poda ADI holati</span><span class="badge bg">78 — <span data-i18n="adi.good">Yaxshi</span></span></div>
+        <div class="adi-pb">
+          <div class="adi-row"><div class="adi-rt"><span class="adi-rname" data-i18n="adi.a">Faollik (20%)</span><span class="adi-rnum">82</span></div><div class="adi-track"><div class="adi-fill" style="background:var(--indigo)" data-w="82"></div></div></div>
+          <div class="adi-row"><div class="adi-rt"><span class="adi-rname" data-i18n="adi.f">Ovqatlanish (20%)</span><span class="adi-rnum">74</span></div><div class="adi-track"><div class="adi-fill" style="background:var(--green)" data-w="74"></div></div></div>
+          <div class="adi-row"><div class="adi-rt"><span class="adi-rname" data-i18n="adi.g">O'sish (20%)</span><span class="adi-rnum">90</span></div><div class="adi-track"><div class="adi-fill" style="background:var(--blue)" data-w="90"></div></div></div>
+          <div class="adi-row"><div class="adi-rt"><span class="adi-rname" data-i18n="adi.m">Harakat (15%)</span><span class="adi-rnum">61</span></div><div class="adi-track"><div class="adi-fill" style="background:var(--amber)" data-w="61"></div></div></div>
+          <div class="adi-row"><div class="adi-rt"><span class="adi-rname" data-i18n="adi.v">Veterinariya (5%)</span><span class="adi-rnum">95</span></div><div class="adi-track"><div class="adi-fill" style="background:var(--green)" data-w="95"></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<section id="tech" class="section">
+  <div class="container">
+    <div class="label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="7" height="7"/><rect x="15" y="3" width="7" height="7"/><rect x="2" y="14" width="7" height="7"/><rect x="15" y="14" width="7" height="7"/></svg><span data-i18n="tech.lbl">Texnologiya</span></div>
+    <h2 class="sec-title reveal" data-i18n="tech.title">Enterprise <span class="hl">texnologiyalar</span> asosida</h2>
+    <p class="sec-sub reveal" data-i18n="tech.sub">Tizim production-grade arxitektura ustiga qurilgan.</p>
+    <div class="tech-grid">
+      <div class="tc reveal"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div><div class="tc-name">FastAPI</div><div class="tc-desc" data-i18n="t1">Asinxron Python framework. Async SQLAlchemy 2.0.</div></div>
+      <div class="tc reveal d1"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue-mid)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><div class="tc-name">PostgreSQL 15</div><div class="tc-desc" data-i18n="t2">Asosiy ma'lumotlar bazasi. 25+ Alembic migratsiya.</div></div>
+      <div class="tc reveal d2"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div><div class="tc-name">Redis 7</div><div class="tc-desc" data-i18n="t3">Cache va Celery message broker.</div></div>
+      <div class="tc reveal d3"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div><div class="tc-name">YOLO26</div><div class="tc-desc" data-i18n="t4">Real-time hayvon aniqlash modeli.</div></div>
+      <div class="tc reveal"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div class="tc-name">MobileNetV2</div><div class="tc-desc" data-i18n="t5">128-dim embedding. Burun izi identifikatsiya.</div></div>
+      <div class="tc reveal d1"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue-mid)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div><div class="tc-name">Celery Beat</div><div class="tc-desc" data-i18n="t6">Scheduled tasklar. Har kecha ADI hisoblash.</div></div>
+      <div class="tc reveal d2"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg></div><div class="tc-name">React 18</div><div class="tc-desc" data-i18n="t7">TypeScript + TailwindCSS + React Query.</div></div>
+      <div class="tc reveal d3"><div class="tc-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue-mid)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div><div class="tc-name">Docker</div><div class="tc-desc" data-i18n="t8">Konteyner va orchestration.</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="contact" class="section">
+  <div class="container">
+    <div class="con-grid">
+      <div class="reveal">
+        <div class="label"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span data-i18n="con.lbl">Bog'lanish</span></div>
+        <h2 class="sec-title" data-i18n="con.title">Demo ko'rishni <span class="hl">xohlaysizmi?</span></h2>
+        <p class="sec-sub" data-i18n="con.sub">Fermaingiz uchun Taurus Vision qanchalik mos ekanini birgalikda ko'ramiz. Bepul va majburiyatsiz.</p>
+        <div class="clinks">
+          <a class="clink" href="https://t.me/taurusvision_ai" target="_blank" rel="noopener">
+            <div class="clink-icon" style="background:var(--blue-bg)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg></div>
+            <div><div class="clink-type">Telegram</div><div class="clink-val">@taurusvision_ai</div></div>
+            <svg class="clink-arr" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+          <a class="clink" href="https://instagram.com/taurusvision.ai" target="_blank" rel="noopener">
+            <div class="clink-icon" style="background:#FDF2F8"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#E11D74" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></div>
+            <div><div class="clink-type">Instagram</div><div class="clink-val">taurusvision.ai</div></div>
+            <svg class="clink-arr" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+          <a class="clink" href="mailto:taurusvision.ai@gmail.com">
+            <div class="clink-icon" style="background:var(--green-bg)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+            <div><div class="clink-type">Email</div><div class="clink-val">taurusvision.ai@gmail.com</div></div>
+            <svg class="clink-arr" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+        </div>
+      </div>
+      <div class="reveal d2">
+        <div class="form-card">
+          <div class="form-ttl" data-i18n="form.t">Demo so'rash</div>
+          <div class="fg"><label class="fl" data-i18n="form.n">Ismingiz</label><input class="fi" type="text" placeholder="Aziz Karimov"></div>
+          <div class="fg"><label class="fl" data-i18n="form.p">Telefon</label><input class="fi" type="tel" placeholder="+998 90 123 45 67"></div>
+          <div class="fg"><label class="fl" data-i18n="form.a">Ferma haqida</label><textarea class="fta" placeholder="Ferma hajmi, hayvonlar soni..."></textarea></div>
+          <button class="fbtn" id="fbtn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+            <span data-i18n="form.b">Yuborish</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="ft-inner">
+    <a class="ft-logo" href="#">
+      <div class="logo-mark" style="width:28px;height:28px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="20" height="13" rx="2.5" stroke="white" stroke-width="1.8"/><circle cx="12" cy="12" r="3.5" stroke="white" stroke-width="1.8"/><path d="M8 6L9.5 3h5L16 6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      Taurus Vision
+    </a>
+    <p class="ft-copy" data-i18n="ft.c">© 2025 Taurus Vision. Barcha huquqlar himoyalangan.</p>
+    <p class="ft-copy" data-i18n="ft.m">O'zbekiston uchun yaratildi</p>
+  </div>
+</footer>
+
+<script>
+const T={
+uz:{"nav.how":"Qanday ishlaydi","nav.feat":"Imkoniyatlar","nav.tech":"Texnologiya","nav.con":"Bog'lanish","nav.cta":"Demo so'rash","hero.tag":"AI · Ferma Monitoring · O'zbekiston","hero.t1":"Aqlli ferma —","hero.t2":"real vaqt kuzatuvi","hero.desc":"Kamera oynasidan poda holatini to'liq ko'ring. Taurus Vision har bir hayvonni taniydi, sog'lig'ini kuzatadi va muammolarni oldini oladi.","hero.c1":"Demo so'rash","hero.c2":"Qanday ishlaydi","s.acc":"Aniqlash aniqligi","s.mon":"Monitoring","s.res":"Javob vaqti","s.mod":"Modullar","m.an":"Jonivorlar","m.al":"Alertlar","m.act":"Faollik","m.feed":"Yem","m.wt":"Og'irlik","m.hl":"Sog'liq","m.atxt":"#B-07 — ADI 24 · Kritik holat","mt.1":"Aniqlash aniqligi","mt.2":"Uzluksiz monitoring","mt.3":"Real vaqt javob","mt.4":"Modul va funksiya","mt.5":"AI modeli ensemble","how.lbl":"Jarayon","how.title":"Kameradan qarorga — 4 qadam","how.sub":"Tizim to'liq avtomatik. Siz faqat natijani ko'rasiz.","s1t":"Kamera yozadi","s1d":"IP, USB yoki RTSP kameralar 24/7 ishlaydi. Bir vaqtda ko'plab kameralar qo'llab-quvvatlanadi.","s2t":"YOLO26 aniqlaydi","s2d":"Har bir kadrda hayvonlar real vaqtda aniqlanadi. So'ngra burun izi orqali shaxsi aniqlanadi.","s3t":"ADI hisoblanadi","s3d":"Har kuni har bir hayvon uchun 0–100 ballik indeks. Harakat, yem, og'irlik va sensor asosida.","s4t":"Alert va tavsiya","s4d":"Muammo bo'lsa — darhol ogohlantirish. AI bashorat qiladi va veterinar tavsiyasi beradi.","feat.lbl":"Imkoniyatlar","feat.title":"Boshqa tizimlar qilmaydigan narsa","f1b":"AI · Identifikatsiya","f1vt":"Burun izi profili","f1vm":"Tasdiqlandi · 0.91","f1t":"Burun izi orqali aniq tanish","f1d":"Har bir hayvon burun iziga qarab taniladi — barmoq izi kabi noyob. MobileNetV2 128-o'lchamli embedding yaratadi. Cosine similarity 0.85 dan oshsa tasdiqlaydi.","f2t":"Real vaqt sensorlar","f2d":"Harorat, namlik, CO₂ — har 30 soniyada yangilanadi. Anomaliya bo'lsa darhol alert.","f3b":"ML Ensemble","f3t":"Sog'liq bashorati","f3d":"3 model ensemble: RuleEngine + RandomForest + IsolationForest. 30 kunlik xavf trendi.","f4t":"To'liq ferma boshqaruvi","f4d":"Xodimlar, vazifalar, yem ombori, moliya, nasl — hammasi bitta tizimda. 3 rol: VIEWER, MANAGER, ADMIN.","f5t":"PDF, Excel, CSV eksport","f5d":"Professional hisobotlar bir tugma bilan. Ko'p varaqli Excel, PDF, CSV — hammasini yuklab olish mumkin.","f6t":"Custom YOLO o'qitish","f6d":"Kameralar o'z-o'zidan dataset yig'adi. Ferma uchun maxsus YOLO modeli o'qitiladi va deploy qilinadi.","tg.e":"Xodimlar","tg.f":"Yem","tg.fi":"Moliya","tg.b":"Nasl","adi.title":"Har bir hayvon uchun kunlik baho","adi.desc":"ADI — Taurus Vision ning asosiy ko'rsatkichi. Har kecha avtomatik hisoblangan 0–100 ballik indeks. 8 omil asosida: faollik, ovqatlanish, o'sish, harakat, ijtimoiy, suv, sensor, veterinariya.","ac1":"Sog'lom","ac2":"Yaxshi","ac3":"Diqqat","ac4":"Kritik","adi.ph":"Poda ADI holati","adi.good":"Yaxshi","adi.a":"Faollik (20%)","adi.f":"Ovqatlanish (20%)","adi.g":"O'sish (20%)","adi.m":"Harakat (15%)","adi.v":"Veterinariya (5%)","tech.lbl":"Texnologiya","tech.title":"Enterprise texnologiyalar asosida","tech.sub":"Tizim production-grade arxitektura ustiga qurilgan.","t1":"Asinxron Python framework. Async SQLAlchemy 2.0.","t2":"Asosiy ma'lumotlar bazasi. 25+ Alembic migratsiya.","t3":"Cache va Celery message broker.","t4":"Real-time hayvon aniqlash modeli.","t5":"128-dim embedding. Burun izi identifikatsiya.","t6":"Scheduled tasklar. Har kecha ADI hisoblash.","t7":"TypeScript + TailwindCSS + React Query.","t8":"Konteyner va orchestration.","con.lbl":"Bog'lanish","con.title":"Demo ko'rishni xohlaysizmi?","con.sub":"Fermaingiz uchun Taurus Vision qanchalik mos ekanini birgalikda ko'ramiz. Bepul va majburiyatsiz.","form.t":"Demo so'rash","form.n":"Ismingiz","form.p":"Telefon","form.a":"Ferma haqida","form.b":"Yuborish","ft.c":"© 2025 Taurus Vision. Barcha huquqlar himoyalangan.","ft.m":"O'zbekiston uchun yaratildi"},
+ru:{"nav.how":"Как работает","nav.feat":"Возможности","nav.tech":"Технологии","nav.con":"Контакты","nav.cta":"Запросить демо","hero.tag":"ИИ · Мониторинг фермы · Узбекистан","hero.t1":"Умная ферма —","hero.t2":"мониторинг в реальном времени","hero.desc":"Видите состояние стада прямо с камеры. Taurus Vision распознаёт каждое животное, следит за здоровьем и предотвращает проблемы.","hero.c1":"Запросить демо","hero.c2":"Как работает","s.acc":"Точность обнаружения","s.mon":"Мониторинг","s.res":"Время отклика","s.mod":"Модули","m.an":"Животных","m.al":"Алерты","m.act":"Активность","m.feed":"Корм","m.wt":"Вес","m.hl":"Здоровье","m.atxt":"#B-07 — ADI 24 · Критично","mt.1":"Точность обнаружения","mt.2":"Непрерывный мониторинг","mt.3":"Ответ в реальном времени","mt.4":"Модули и функции","mt.5":"Моделей в ансамбле","how.lbl":"Процесс","how.title":"От камеры до решения — 4 шага","how.sub":"Система полностью автоматическая. Вы видите только результат.","s1t":"Камера снимает","s1d":"IP, USB или RTSP камеры работают 24/7. Одновременно поддерживается несколько камер.","s2t":"YOLO26 обнаруживает","s2d":"Животные обнаруживаются в каждом кадре. Затем идентифицируются по носу.","s3t":"Рассчитывается ADI","s3d":"Ежедневный индекс 0–100 для каждого животного. На основе движения, корма, веса и сенсоров.","s4t":"Алерт и рекомендация","s4d":"При проблеме — мгновенное уведомление. ИИ прогнозирует и даёт ветеринарные рекомендации.","feat.lbl":"Возможности","feat.title":"То, чего не делают другие системы","f1b":"ИИ · Идентификация","f1vt":"Профиль носа","f1vm":"Подтверждено · 0.91","f1t":"Точное распознавание по носу","f1d":"Каждое животное распознаётся по носу — уникально как отпечаток. MobileNetV2 создаёт 128-мерный эмбеддинг. Подтверждается при similarity выше 0.85.","f2t":"Сенсоры в реальном времени","f2d":"Температура, влажность, CO₂ — обновляется каждые 30 секунд. Мгновенный алерт при аномалии.","f3b":"ML Ансамбль","f3t":"Прогноз здоровья","f3d":"3 модели: RuleEngine + RandomForest + IsolationForest. 30-дневный тренд риска.","f4t":"Полное управление фермой","f4d":"Сотрудники, задачи, склад корма, финансы, разведение — всё в одной системе.","f5t":"PDF, Excel, CSV экспорт","f5d":"Профессиональные отчёты одной кнопкой. Многолистовой Excel, PDF, CSV.","f6t":"Custom YOLO обучение","f6d":"Камеры автоматически собирают датасет. Специальная модель обучается и деплоится для вашей фермы.","tg.e":"Сотрудники","tg.f":"Корм","tg.fi":"Финансы","tg.b":"Разведение","adi.title":"Ежедневная оценка каждого животного","adi.desc":"ADI — главный показатель Taurus Vision. Индекс 0–100, рассчитываемый автоматически каждую ночь. 8 факторов: активность, питание, рост, движение, социальное, вода, сенсор, ветеринария.","ac1":"Здоров","ac2":"Хорошо","ac3":"Внимание","ac4":"Критично","adi.ph":"Состояние стада ADI","adi.good":"Хорошо","adi.a":"Активность (20%)","adi.f":"Питание (20%)","adi.g":"Рост (20%)","adi.m":"Движение (15%)","adi.v":"Ветеринария (5%)","tech.lbl":"Технологии","tech.title":"На основе enterprise технологий","tech.sub":"Система построена на production-grade архитектуре.","t1":"Асинхронный Python фреймворк. Async SQLAlchemy 2.0.","t2":"Основная база данных. 25+ миграций Alembic.","t3":"Кэш и брокер Celery.","t4":"Модель обнаружения животных в реальном времени.","t5":"128-dim эмбеддинг. Идентификация по носу.","t6":"Плановые задачи. Расчёт ADI каждую ночь.","t7":"TypeScript + TailwindCSS + React Query.","t8":"Контейнеры и оркестрация.","con.lbl":"Контакты","con.title":"Хотите посмотреть демо?","con.sub":"Посмотрим вместе, насколько Taurus Vision подходит для вашей фермы. Бесплатно и без обязательств.","form.t":"Запросить демо","form.n":"Ваше имя","form.p":"Телефон","form.a":"О ферме","form.b":"Отправить","ft.c":"© 2025 Taurus Vision. Все права защищены.","ft.m":"Создано для Узбекистана"},
+en:{"nav.how":"How it works","nav.feat":"Features","nav.tech":"Technology","nav.con":"Contact","nav.cta":"Request Demo","hero.tag":"AI · Farm Monitoring · Uzbekistan","hero.t1":"Smart farm —","hero.t2":"real-time monitoring","hero.desc":"See your entire herd through the camera. Taurus Vision recognises every animal, monitors health and prevents problems before they occur.","hero.c1":"Request Demo","hero.c2":"How it works","s.acc":"Detection accuracy","s.mon":"Monitoring","s.res":"Response time","s.mod":"Modules","m.an":"Animals","m.al":"Alerts","m.act":"Activity","m.feed":"Feed","m.wt":"Weight","m.hl":"Health","m.atxt":"#B-07 — ADI 24 · Critical","mt.1":"Detection accuracy","mt.2":"Continuous monitoring","mt.3":"Real-time response","mt.4":"Modules & features","mt.5":"AI model ensemble","how.lbl":"Process","how.title":"From camera to decision — 4 steps","how.sub":"The system is fully automatic. You only see the result.","s1t":"Camera records","s1d":"IP, USB or RTSP cameras run 24/7. Multiple cameras supported simultaneously.","s2t":"YOLO26 detects","s2d":"Animals are detected in every frame in real time. Then identified by muzzle print.","s3t":"ADI is calculated","s3d":"Daily 0–100 score for each animal. Based on movement, feed, weight and sensor data.","s4t":"Alert & recommendation","s4d":"Instant alert on problems. AI predicts and gives veterinary recommendations.","feat.lbl":"Features","feat.title":"What other systems don't do","f1b":"AI · Identification","f1vt":"Muzzle profile","f1vm":"Confirmed · 0.91","f1t":"Precise muzzle recognition","f1d":"Every animal is recognised by its muzzle — unique like a fingerprint. MobileNetV2 creates a 128-dim embedding. Confirmed when similarity exceeds 0.85.","f2t":"Real-time sensors","f2d":"Temperature, humidity, CO₂ — updated every 30 seconds. Instant alert on anomaly.","f3b":"ML Ensemble","f3t":"Health prediction","f3d":"3-model ensemble: RuleEngine + RandomForest + IsolationForest. 30-day risk trend.","f4t":"Full farm management","f4d":"Employees, tasks, feed inventory, finance, breeding — all in one system. 3 roles: VIEWER, MANAGER, ADMIN.","f5t":"PDF, Excel, CSV export","f5d":"Professional reports in one click. Multi-sheet Excel, PDF, CSV — all downloadable.","f6t":"Custom YOLO training","f6d":"Cameras automatically collect datasets. A custom YOLO model is trained and deployed for your farm.","tg.e":"Employees","tg.f":"Feed","tg.fi":"Finance","tg.b":"Breeding","adi.title":"Daily score for every animal","adi.desc":"ADI is Taurus Vision's core metric. A 0–100 index calculated automatically every night. 8 factors: activity, feeding, growth, movement, social, water, sensor, veterinary.","ac1":"Healthy","ac2":"Good","ac3":"Warning","ac4":"Critical","adi.ph":"Herd ADI Status","adi.good":"Good","adi.a":"Activity (20%)","adi.f":"Feeding (20%)","adi.g":"Growth (20%)","adi.m":"Movement (15%)","adi.v":"Veterinary (5%)","tech.lbl":"Technology","tech.title":"Built on enterprise technologies","tech.sub":"The system is built on production-grade architecture.","t1":"Async Python framework with SQLAlchemy 2.0.","t2":"Primary database. 25+ Alembic migrations.","t3":"Cache and Celery message broker.","t4":"Real-time animal detection model.","t5":"128-dim embedding. Muzzle identification.","t6":"Scheduled tasks. Nightly ADI calculation.","t7":"TypeScript + TailwindCSS + React Query.","t8":"Container orchestration.","con.lbl":"Contact","con.title":"Want to see a demo?","con.sub":"Let's see how Taurus Vision fits your farm. Free and no obligation.","form.t":"Request a demo","form.n":"Your name","form.p":"Phone","form.a":"About your farm","form.b":"Send","ft.c":"© 2025 Taurus Vision. All rights reserved.","ft.m":"Built for Uzbekistan"}
+};
+let lang='uz';
+function applyLang(l){
+  lang=l;const d=T[l];
+  document.querySelectorAll('[data-i18n]').forEach(el=>{const k=el.getAttribute('data-i18n');if(d[k]!==undefined)el.textContent=d[k];});
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.toggle('active',b.getAttribute('data-lang')===l));
+  document.documentElement.lang=l;
+}
+document.querySelectorAll('.lang-btn').forEach(b=>b.addEventListener('click',()=>applyLang(b.getAttribute('data-lang'))));
+const obs=new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      e.target.classList.add('visible');
+      e.target.querySelectorAll('.adi-fill').forEach(f=>f.style.width=f.getAttribute('data-w')+'%');
+    }
+  });
+},{threshold:0.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+const adiObs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){document.querySelectorAll('.adi-fill').forEach(f=>f.style.width=f.getAttribute('data-w')+'%');adiObs.disconnect();}});},{threshold:0.2});
+const adiS=document.getElementById('adi');if(adiS)adiObs.observe(adiS);
+document.getElementById('fbtn').addEventListener('click',function(){
+  const sp=this.querySelector('span');
+  const msg=lang==='uz'?'Yuborildi!':lang==='ru'?'Отправлено!':'Sent!';
+  sp.textContent=msg;this.style.background='#16a34a';
+  setTimeout(()=>{sp.textContent=T[lang]['form.b'];this.style.background='';},3000);
+});
+</script>
+</body>
+</html>
