@@ -93,6 +93,28 @@ async def get_animal_milk_summary(
 # ── FERMA XULOSASI ────────────────────────────────────────────────────────────
 
 @router.get(
+    "/farm/animals",
+    summary="Jonivorlar bo'yicha oylik sut statistikasi",
+)
+async def get_farm_animal_milk_stats(
+    date_from: Optional[date] = Query(None, description="Boshlanish sanasi"),
+    date_to: Optional[date] = Query(None, description="Tugash sanasi"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+) -> list[dict]:
+    """
+    Har bir jonivor uchun davr ichidagi sut statistikasi.
+
+    Javob: [{ animal_id, tag_id, name, species,
+              month_kg, today_kg, avg_daily_kg,
+              avg_fat_percent, days_recorded, last_record_date }]
+    """
+    svc = MilkService(db)
+    return await svc.get_farm_animal_stats(date_from=date_from, date_to=date_to)
+
+
+
+@router.get(
     "/farm/summary",
     response_model=FarmMilkSummary,
     summary="Ferma bo'yicha sut xulosasi",

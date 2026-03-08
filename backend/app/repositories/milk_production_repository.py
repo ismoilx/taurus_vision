@@ -169,6 +169,69 @@ class MilkProductionRepository:
         result = await self.db.scalar(q)
         return round(result or 0, 2)
 
+    async def get_per_animal_monthly_stats(
+        self,
+        *,
+        date_from: date,
+        date_to: date,
+    ) -> list[dict]:
+        """
+        Har bir jonivor uchun davr ichidagi sut statistikasi.
+
+        Returns:
+            animal_id, month_kg, today_kg, avg_daily_kg,
+            avg_fat_percent, days_recorded, last_record_date
+        """
+        # Oylik stats
+        monthly_q = (
+            select(
+                MilkProduction.animal_id,
+                func.sum(MilkProduction.milk_kg).label("month_kg"),
+                func.avg(MilkProduction.milk_kg).label("avg_daily_kg"),
+                func.avg(MilkProduction.fat_percent).label("avg_fat"),
+                func.count(MilkProduction.id).label("days_recorded"),
+                func.max(MilkProduction.record_date).label("last_record_date"),
+            )
+            .where(
+                and_(
+                    MilkProduction.record_date >= date_from,
+                    MilkProduction.record_date <= date_to,
+                )
+            )
+            .group_by(MilkProduction.animal_id)
+            .order_by(desc("month_kg"))
+        )
+        monthly_result = await self.db.execute(monthly_q)
+        monthly_rows = monthly_result.all()
+
+        # Bugungi stats (animal_id → today_kg)
+        today_q = (
+            select(
+                MilkProduction.animal_id,
+                func.sum(MilkProduction.milk_kg).label("today_kg"),
+            )
+            .where(MilkProduction.record_date == date.today())
+            .group_by(MilkProduction.animal_id)
+        )
+        today_result = await self.db.execute(today_q)
+        today_map: dict[int, float] = {
+            row.animal_id: round(row.today_kg or 0, 2)
+            for row in today_result.all()
+        }
+
+        return [
+            {
+                "animal_id": row.animal_id,
+                "month_kg": round(row.month_kg or 0, 2),
+                "today_kg": today_map.get(row.animal_id, 0.0),
+                "avg_daily_kg": round(row.avg_daily_kg or 0, 2),
+                "avg_fat_percent": round(row.avg_fat, 2) if row.avg_fat else None,
+                "days_recorded": row.days_recorded,
+                "last_record_date": str(row.last_record_date),
+            }
+            for row in monthly_rows
+        ]
+
     # ── UPDATE ────────────────────────────────────────────────────────
 
     async def update(

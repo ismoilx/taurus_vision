@@ -185,3 +185,58 @@ class MilkService:
             top_producers=[],
             daily_trend=daily_trend,
         )
+    async def get_farm_animal_stats(
+        self,
+        *,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> list[dict]:
+        """
+        Har bir jonivor uchun sut statistikasi + jonivor nomi/tegi.
+
+        Returns:
+            List[dict] — animal_id, tag_id, name, species,
+                         month_kg, today_kg, avg_daily_kg,
+                         avg_fat_percent, days_recorded, last_record_date
+        """
+        from app.models.animal import Animal
+        from sqlalchemy import select
+
+        today = date.today()
+        if date_from is None:
+            date_from = today.replace(day=1)
+        if date_to is None:
+            date_to = today
+
+        rows = await self.repo.get_per_animal_monthly_stats(
+            date_from=date_from, date_to=date_to
+        )
+        if not rows:
+            return []
+
+        # Jonivor ma'lumotlarini bir DB query bilan olish (N+1 muammo yo'q)
+        animal_ids = [r["animal_id"] for r in rows]
+        result = await self.db.execute(
+            select(Animal.id, Animal.tag_id, Animal.name, Animal.species)
+            .where(Animal.id.in_(animal_ids))
+        )
+        animal_map: dict[int, dict] = {
+            row.id: {
+                "tag_id": row.tag_id,
+                "name": row.name or "",
+                "species": row.species,
+            }
+            for row in result.all()
+        }
+
+        enriched = []
+        for row in rows:
+            animal = animal_map.get(row["animal_id"], {})
+            enriched.append({
+                **row,
+                "tag_id": animal.get("tag_id", f"#{row['animal_id']}"),
+                "name": animal.get("name", ""),
+                "species": animal.get("species", ""),
+            })
+
+        return enriched
