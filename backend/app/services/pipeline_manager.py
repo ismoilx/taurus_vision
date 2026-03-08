@@ -327,6 +327,53 @@ class PipelineManager:
             self._pipelines.pop(camera_id, None)
             return False, f"Pipeline xatosi: {error_msg}"
 
+    async def start_colab_pipeline(
+        self,
+        camera_id: str,
+        pipeline:  "Any",  # ColabPipeline instance
+    ) -> tuple[bool, str]:
+        """
+        Tayyor ColabPipeline ni ishga tushiradi.
+
+        start_camera dan farqi: pipeline tashqaridan beriladi,
+        camera va Colab URL allaqachon sozlangan.
+        """
+        if self.is_running(camera_id):
+            return False, f"Pipeline '{camera_id}' allaqachon ishlayapti."
+
+        can_start, reason = self._balancer.can_start(len(self._pipelines))
+        if not can_start:
+            return False, reason
+
+        try:
+            await pipeline.camera.initialize()
+
+            pipeline._running = True
+            pipeline.stats.reset()
+            pipeline.stats.started_at = datetime.now(timezone.utc)
+
+            task = asyncio.create_task(
+                pipeline._run_loop(),
+                name=f"colab-pipeline-{camera_id}",
+            )
+
+            self._pipelines[camera_id] = PipelineEntry(
+                camera_id      = camera_id,
+                camera_type    = "colab_gpu",
+                camera_config  = {"mode": "colab_gpu", "colab_url": pipeline.colab_url},
+                camera_service = pipeline.camera,
+                pipeline       = pipeline,
+                task           = task,
+            )
+
+            await self._ensure_watchdog_running()
+            logger.info(f"ColabPipeline ishga tushirildi | camera={camera_id} | url={pipeline.colab_url}")
+            return True, ""
+
+        except Exception as exc:
+            self._pipelines.pop(camera_id, None)
+            return False, f"ColabPipeline xatosi: {exc}"
+
     # ================================================================
     # STOP
     # ================================================================
