@@ -68,7 +68,6 @@ class TrainingRun(BaseModel):
         String(20),
         nullable=False,
         default=TrainingStatus.PENDING,
-        index=True,
         comment="pending | collecting | building | training | evaluating | completed | failed | deployed",
     )
 

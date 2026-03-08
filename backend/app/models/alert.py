@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, Text, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON as JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -30,6 +30,8 @@ class AlertType(str, enum.Enum):
     # ADI asosida
     ADI_CRITICAL           = "adi_critical"
     ADI_RAPID_DECLINE      = "adi_rapid_decline"
+    ADI_SHARP_DROP         = "adi_sharp_drop"
+    ADI_WARNING            = "adi_warning"
     FEEDING_PROBLEM        = "feeding_problem"
 
     # Kamera / tizim

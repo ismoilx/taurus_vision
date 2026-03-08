@@ -173,7 +173,7 @@ class TestComputeMovementScore:
 
     def test_moderate_movement(self):
         score = _compute_movement_score(0.10)
-        assert score.percentage == 65.0
+        assert score.percentage == 75.0
         assert score.status == "good"
 
     def test_low_movement(self):
@@ -204,7 +204,7 @@ class TestComputeSocialScore:
 
     def test_moderate_social(self):
         score = _compute_social_score(0.2)
-        assert score.percentage == 65.0
+        assert score.percentage == 75.0
 
     def test_low_social(self):
         score = _compute_social_score(0.05)

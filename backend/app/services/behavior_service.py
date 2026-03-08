@@ -188,7 +188,7 @@ def _compute_movement_score(std_cx: float) -> BehaviorScore:
         pct = 90.0
         desc = f"Faol harakat (std={std_cx:.3f})"
     elif std_cx >= 0.08:
-        pct = 65.0
+        pct = 75.0
         desc = f"O'rtacha harakat (std={std_cx:.3f})"
     elif std_cx >= _MOVEMENT_INACTIVE:
         pct = 40.0

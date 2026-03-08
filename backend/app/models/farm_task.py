@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import String, Text, ForeignKey, Index, DateTime
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON as JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel

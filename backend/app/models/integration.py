@@ -66,7 +66,7 @@ from sqlalchemy import (
     String, Text, Integer, Boolean,
     ForeignKey, Index, DateTime,
 )
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+from sqlalchemy import JSON as JSONB; from sqlalchemy import JSON as ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel

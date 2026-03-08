@@ -106,6 +106,11 @@ def mock_db_with_animals(registered_embedding, different_animal_embedding):
     mock_result.fetchall.return_value = rows
     db.execute = AsyncMock(return_value=mock_result)
 
+    # db.scalar — animal ni qaytaradi (tag_id uchun)
+    mock_animal = MagicMock()
+    mock_animal.tag_id = "JNV-001"
+    db.scalar = AsyncMock(return_value=mock_animal)
+
     return db
 
 

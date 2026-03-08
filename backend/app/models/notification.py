@@ -32,7 +32,7 @@ from sqlalchemy import (
     String, Text, Boolean, Index, Integer,
     ForeignKey, Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON as JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -168,11 +168,11 @@ class Notification(BaseModel):
     # ── Indekslar ─────────────────────────────────────────────────────────────
     __table_args__ = (
         Index("ix_notification_user_unread",  "user_id",  "is_read",
-              postgresql_where=~is_dismissed),
+              ),
         Index("ix_notification_user_created", "user_id",  "created_at"),
         Index("ix_notification_type_created", "n_type",   "created_at"),
         Index("ix_notification_broadcast",    "is_read",  "created_at",
-              postgresql_where=user_id.is_(None)),
+              ),
     )
 
     def __repr__(self) -> str:
