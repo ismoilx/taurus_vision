@@ -681,12 +681,14 @@ async def upload_animal_photo(
     animal_id: int,
     file: UploadFile = File(..., description="Rasm fayli (jpg/png/webp, max 10MB)"),
     set_as_profile: bool = Query(default=False, description="Profil rasmi sifatida belgilash"),
+    photo_type: str = Query(default="body", description="Rasm turi: muzzle | face | body"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
     Jonivorga rasm yuklaydi.
 
-    - Rasm fayli serverga saqlanadi (data/images/animals/)
+    - photo_type=muzzle yoki face bo'lsa → avtomatik AI embedding yaratiladi
+    - photo_type=body bo'lsa → faqat galereya rasmi (embedding yo'q)
     - set_as_profile=True bo'lsa — profil rasmi sifatida tanlanadi
     """
     import os, uuid
@@ -735,6 +737,54 @@ async def upload_animal_photo(
     if set_as_profile:
         animal.profile_image = file_path
 
+    # Muzzle rasmi bo'lsa — muzzle_image ni yangilash
+    if photo_type == "muzzle":
+        animal.muzzle_image = file_path
+
+    await db.flush()
+
+    # ── Avtomatik embedding yaratish (muzzle yoki face) ──────────────────
+    embedding_result = None
+    if photo_type in ("muzzle", "face"):
+        try:
+            from app.utils.image_utils import decode_frame_bytes, extract_muzzle_region
+            from app.services.identification_service import IdentificationService
+
+            frame = decode_frame_bytes(content)
+            if frame is not None:
+                if photo_type == "muzzle":
+                    # Pastki qismdan burun/og'iz zonasini kesib olish
+                    crop = extract_muzzle_region(
+                        frame, bbox_x=0.5, bbox_y=0.5,
+                        bbox_w=1.0, bbox_h=1.0, normalized=True,
+                    ) or frame
+                else:
+                    # Face: butun rasmni ishlatamiz (yuz to'liq ko'rinadi)
+                    crop = frame
+
+                svc = IdentificationService(db)
+                existing = await svc.get_animal_embedding_count(animal_id)
+                emb = await svc.add_embedding(
+                    animal_id=animal_id,
+                    muzzle_crop=crop,
+                    is_reference=(existing == 0),
+                    source=photo_type,          # "muzzle" yoki "face"
+                    quality_score=None,
+                    photo_path=file_path,
+                )
+                await db.flush()
+                embedding_result = {
+                    "embedding_id":    emb.id,
+                    "embedding_count": existing + 1,
+                    "source":          photo_type,
+                }
+        except Exception as e:
+            # Embedding xatosi rasm yuklashni to'xtatmasin
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Auto-embedding failed for animal {animal_id}: {e}"
+            )
+
     await db.commit()
     await db.refresh(photo)
 
@@ -745,6 +795,8 @@ async def upload_animal_photo(
         "file_size":   photo.file_size,
         "url":         f"/api/v1/animals/photos/file/{photo.id}",
         "is_profile":  set_as_profile,
+        "photo_type":  photo_type,
+        "embedding":   embedding_result,
         "created_at":  photo.created_at.isoformat(),
     }
 

@@ -65,6 +65,7 @@ from app.services.adi_service import ADIService
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.api.v1.websocket import ConnectionManager
+from app.services.ai.cattle_tracker import CattleTracker
 from app.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.animal import Animal
@@ -183,6 +184,11 @@ class DetectionPipeline:
         self._task:   Optional[asyncio.Task] = None
         self.stats    = PipelineStats()
 
+        # ── Multi-Object Tracker ─────────────────────────────────────
+        # Har kamera uchun alohida tracker instansi.
+        # Kalman filter + Hungarian algorithm + dual identification.
+        self._tracker = CattleTracker()
+
         # Sprint 15-16: disk I/O uchun alohida thread pool
         self._io_executor = ThreadPoolExecutor(
             max_workers        = 1,
@@ -232,6 +238,7 @@ class DetectionPipeline:
         self._io_executor.shutdown(wait=False)
 
         await self.camera.stop()
+        self._tracker.reset()
         logger.info(f"Pipeline stopped | stats={self.stats.to_dict()}")
 
     @property
@@ -308,17 +315,74 @@ class DetectionPipeline:
             return
 
         # ── Sprint 15-16: Training kadrlarini yig'ish ─────────────────────
-        # Blocking disk I/O → ThreadPoolExecutor orqali (event loop bloklanmaydi)
         await self._collect_training_frame(frame.frame, detections)
 
+        # ── TRACKER: Kalman + Hungarian + Dual Identification ─────────────
+        # Har kadrda detectionlarni trackerlarga ulash.
+        # Tracker ichida: predict → associate → update → identification urinish
         async with AsyncSessionLocal() as db:
-            for det in detections:
-                await self._process_single_detection(
-                    db           = db,
-                    detection    = det,
-                    frame        = frame,
-                    inference_ms = inference_ms,
-                )
+            active_tracks = await self._tracker.update(
+                detections=detections,
+                frame=frame.frame,
+                db=db,
+            )
+
+            # Har bir aktiv track uchun DB yozuv va WebSocket broadcast
+            for track in active_tracks:
+                # Faqat tasdiqlangan tracklar uchun DB ga yozamiz
+                # (TENTATIVE tracklar hali tasdiqlanmagan — DB ni to'ldirmaymiz)
+                if track.state.value in ("unidentified", "identified"):
+                    try:
+                        saved_det, _ = await self._save_detection_from_track(
+                            db=db,
+                            track=track,
+                            inference_ms=inference_ms,
+                        )
+                        self.stats.db_writes += 1
+
+                        if track.animal_id:
+                            self.stats.identified   += 1
+                            await self._handle_adi_integration(db, track.animal_id)
+                            self.stats.alert_checks += 1
+                        else:
+                            self.stats.unidentified += 1
+
+                    except Exception as e:
+                        logger.error(f"Track save failed T#{track.track_id}: {e}")
+                        self.stats.errors += 1
+
+            # WebSocket broadcast — barcha aktiv tracklar (TENTATIVE ham)
+            if self.ws_manager and active_tracks:
+                try:
+                    await self._broadcast_tracks(active_tracks)
+                except Exception as e:
+                    logger.warning(f"WebSocket broadcast failed: {e}")
+
+            # Pipeline manager overlay yangilash (MJPEG stream uchun)
+            if active_tracks:
+                try:
+                    from app.services.pipeline_manager import get_pipeline_manager
+                    pm = get_pipeline_manager()
+                    for track in active_tracks:
+                        bbox = track.kalman.bbox
+                        pm.update_latest_detection(
+                            camera_id  = self.camera.camera_id,
+                            bbox       = {
+                                "x": float(bbox[0]),
+                                "y": float(bbox[1]),
+                                "w": float(bbox[2]),
+                                "h": float(bbox[3]),
+                            },
+                            animal_tag = track.tag_id or f"T#{track.track_id}",
+                            confidence = track.detection_confidence,
+                            class_name = "cow",
+                        )
+                except Exception:
+                    pass
+
+        # Tracker stats ni pipeline stats ga qo'shish
+        tracker_stats = self._tracker.get_stats()
+        self.stats.identified   = tracker_stats["total_identifications"]
 
     async def _collect_training_frame(
         self,
@@ -424,8 +488,97 @@ class DetectionPipeline:
             except Exception:
                 pass
 
+    async def _save_detection_from_track(
+        self,
+        db,
+        track,           # CattleTrack
+        inference_ms: float,
+    ) -> tuple:
+        """
+        CattleTrack dan Detection DB yozuvi yaratish.
+
+        _save_detection dan farqi: track_id ham saqlanadi,
+        bbox Kalman filtered pozitsiyadan olinadi.
+        """
+        from app.services.ai.cattle_tracker import CattleTrack
+        import json
+
+        now  = datetime.utcnow()
+        bbox = track.kalman.bbox   # [cx, cy, w, h] normalized
+
+        bbox_dict = {
+            "x": round(float(bbox[0]), 4),
+            "y": round(float(bbox[1]), 4),
+            "w": round(float(bbox[2]), 4),
+            "h": round(float(bbox[3]), 4),
+        }
+
+        estimated_weight_kg = round(
+            max(150.0, min(700.0, 200.0 + (bbox[2] * bbox[3] * 1800))), 1
+        )
+
+        det_record = Detection(
+            animal_id         = track.animal_id,
+            camera_id         = self.camera.camera_id,
+            timestamp         = now,
+            confidence        = round(track.detection_confidence, 4),
+            class_id          = 19,   # COCO: cow
+            class_name        = "cow",
+            bbox              = bbox_dict,
+            estimated_weight  = estimated_weight_kg,
+            inference_time_ms = round(inference_ms, 1),
+        )
+        db.add(det_record)
+
+        if track.animal_id:
+            result = await db.execute(
+                select(Animal).where(Animal.id == track.animal_id)
+            )
+            animal = result.scalar_one_or_none()
+            if animal:
+                animal.mark_detected(now)
+
+                if track.detection_confidence >= WEIGHT_CONFIDENCE_THRESHOLD:
+                    db.add(WeightMeasurement(
+                        animal_id           = track.animal_id,
+                        timestamp           = now,
+                        estimated_weight_kg = estimated_weight_kg,
+                        confidence_score    = round(track.detection_confidence, 4),
+                        camera_id           = self.camera.camera_id,
+                        raw_ai_data         = {
+                            "track_id":     track.track_id,
+                            "id_score":     round(track.id_score, 4),
+                            "bbox":         bbox_dict,
+                            "source":       "cattle_tracker",
+                        },
+                    ))
+
+        await db.commit()
+        await db.refresh(det_record)
+        return det_record, track.tag_id
+
+    async def _broadcast_tracks(self, active_tracks: list) -> None:
+        """
+        Barcha aktiv tracklar uchun WebSocket broadcast.
+
+        Har track:
+          - track_id (vaqtincha ID)
+          - state: tentative | unidentified | identified
+          - bbox_color: orange | red | green
+          - animal_id, tag_id (faqat IDENTIFIED da)
+        """
+        import json
+
+        message = json.dumps({
+            "type":   "tracked_detections",
+            "camera": self.camera.camera_id,
+            "tracks": [t.to_websocket_dict() for t in active_tracks],
+            "stats":  self._tracker.get_stats(),
+        })
+        await self.ws_manager.broadcast(message)
+
     # ================================================================ #
-    # IDENTIFICATION                                                     #
+    # IDENTIFICATION (eski — tracker ishlatiladi, bu legacy)            #
     # ================================================================ #
 
     async def _identify_animal(

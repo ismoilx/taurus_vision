@@ -54,10 +54,12 @@ interface AllPipelinesStatus {
 
 interface DetectionEvent {
   camera_id:           string;
+  track_id:            number | null;
   animal_tag_id:       string;
+  state:               'unidentified' | 'identified';
+  bbox_color:          'red' | 'green' | 'orange';
   confidence:          number;
-  estimated_weight_kg: number;
-  identified:          boolean;
+  id_score:            number;
   timestamp:           string;
 }
 
@@ -352,13 +354,17 @@ function DetectionPanel({ events }: { events: DetectionEvent[] }) {
         <Activity size={13} color="#1E3EB4"/>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#374151',
           letterSpacing: '.04em', textTransform: 'uppercase' }}>
-          Detection Log
+          Tracker Log
         </span>
         {events.length > 0 && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
             <span style={{ fontSize: 10, padding: '1px 7px',
               background: '#ECFDF5', color: '#059669', borderRadius: 20, fontWeight: 600 }}>
-              {events.filter(e => e.identified).length} ID
+              {events.filter(e => e.state === 'identified').length} ID
+            </span>
+            <span style={{ fontSize: 10, padding: '1px 7px',
+              background: '#FEF2F2', color: '#DC2626', borderRadius: 20, fontWeight: 600 }}>
+              {events.filter(e => e.state === 'unidentified').length} ?
             </span>
             <span style={{ fontSize: 10, padding: '1px 7px',
               background: '#F3F4F6', color: '#6B7280', borderRadius: 20, fontWeight: 600 }}>
@@ -378,32 +384,46 @@ function DetectionPanel({ events }: { events: DetectionEvent[] }) {
             </p>
           </div>
         ) : events.map((ev, i) => {
-          const accent     = ev.identified ? '#10B981' : '#F59E0B';
-          const confColor  = ev.confidence >= .85 ? '#10B981'
-                           : ev.confidence >= .65 ? '#F59E0B' : '#EF4444';
-          const fresh      = i === 0;
+          const isId    = ev.state === 'identified';
+          const accent  = isId ? '#10B981' : '#EF4444';
+          const bgAccent = isId ? '16,185,129' : '239,68,68';
+          const fresh   = i === 0;
 
           return (
             <div key={`${ev.timestamp}-${i}`} style={{
               padding: '8px 14px',
               borderLeft: `2px solid ${fresh ? accent : 'transparent'}`,
               borderBottom: '1px solid #F9FAFB',
-              background: fresh ? `rgba(${ev.identified ? '16,185,129':'245,158,11'},.04)` : 'transparent',
+              background: fresh ? `rgba(${bgAccent},.04)` : 'transparent',
               transition: 'all .4s',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: accent, flexShrink: 0 }}/>
+                {/* Rang nuqtasi — qizil yoki yashil */}
+                <div style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: accent, flexShrink: 0,
+                  boxShadow: `0 0 5px ${accent}88`,
+                }}/>
                 <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: '#0D1117', flex: 1 }}>
-                  {ev.identified ? ev.animal_tag_id : '— Tanilmadi'}
+                  {isId ? ev.animal_tag_id : `T#${ev.track_id ?? '?'} — Tanilmadi`}
                 </span>
-                <span style={{ fontFamily: 'monospace', fontSize: 10, fontWeight: 700, color: confColor }}>
-                  {(ev.confidence * 100).toFixed(0)}%
+                <span style={{
+                  fontSize: 9, padding: '1px 6px', borderRadius: 10, fontWeight: 700,
+                  background: isId ? '#ECFDF5' : '#FEF2F2',
+                  color: isId ? '#059669' : '#DC2626',
+                }}>
+                  {isId ? 'ID' : '?'}
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 13 }}>
                 <span style={{ fontSize: 10, color: '#6B7280' }}>
-                  {ev.estimated_weight_kg.toFixed(1)} kg
+                  conf: {(ev.confidence * 100).toFixed(0)}%
                 </span>
+                {ev.id_score > 0 && (
+                  <span style={{ fontSize: 10, color: '#6B7280' }}>
+                    sim: {(ev.id_score * 100).toFixed(0)}%
+                  </span>
+                )}
                 <span style={{ fontSize: 9, color: '#9CA3AF', flex: 1, overflow: 'hidden',
                   textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
                   {ev.camera_id}
@@ -424,7 +444,7 @@ function DetectionPanel({ events }: { events: DetectionEvent[] }) {
 
 export default function LiveFeedPage() {
   const token = localStorage.getItem('tv_access_token') ?? '';
-  const { status: wsStatus, liveDetections } = useWebSocketContext();
+  const { status: wsStatus, liveDetections, liveTrackedUpdates } = useWebSocketContext();
   const { isMobile, isTablet } = useResponsive();
 
   const [events, setEvents]           = useState<DetectionEvent[]>([]);
@@ -449,22 +469,47 @@ export default function LiveFeedPage() {
   const enabledCams  = cameras.filter(c => c.enabled);
   const activeCnt    = plData?.running_cameras.length ?? 0;
 
-  // WS detection events
+  // WS tracked detection events (YANGI — CattleTracker)
   useEffect(() => {
-    if (!liveDetections.length) return;
-    const raw = liveDetections[0] as any;
-    if (!raw) return;
-    const key = `${raw.timestamp}-${raw.camera_id}`;
+    if (!liveTrackedUpdates.length) return;
+    const latest = liveTrackedUpdates[0];
+    if (!latest) return;
+    const key = `${latest.timestamp}-${latest.camera_id}-${latest.track_id}`;
     if (key === lastKey.current) return;
     lastKey.current = key;
-    setEvents(prev => [{
-      camera_id:           raw.camera_id          ?? '',
-      animal_tag_id:       raw.animal_tag_id       ?? 'UNKNOWN',
-      confidence:          raw.confidence_score    ?? raw.confidence ?? 0,
-      estimated_weight_kg: raw.estimated_weight_kg ?? 0,
-      identified:          raw.identified          ?? (raw.animal_id !== null),
-      timestamp:           raw.timestamp,
-    }, ...prev].slice(0, 60));
+    const newEvent: DetectionEvent = {
+      camera_id:     latest.camera_id,
+      track_id:      latest.track_id,
+      animal_tag_id: latest.tag_id ?? `T#${latest.track_id}`,
+      state:         latest.state === 'identified' ? 'identified' : 'unidentified',
+      bbox_color:    latest.bbox_color,
+      confidence:    latest.confidence,
+      id_score:      latest.id_score,
+      timestamp:     latest.timestamp,
+    };
+    setEvents(prev => [newEvent, ...prev].slice(0, 60));
+  }, [liveTrackedUpdates]);
+
+  // Legacy detection events (eski pipeline uchun orqaga moslik)
+  useEffect(() => {
+    if (!liveDetections.length) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = liveDetections[0] as any;
+    if (!raw) return;
+    const key = `legacy-${raw.timestamp}-${raw.camera_id}`;
+    if (key === lastKey.current) return;
+    lastKey.current = key;
+    const newEvent: DetectionEvent = {
+      camera_id:     raw.camera_id     ?? '',
+      track_id:      null,
+      animal_tag_id: raw.animal_tag_id ?? 'UNKNOWN',
+      state:         raw.animal_id != null ? 'identified' : 'unidentified',
+      bbox_color:    raw.animal_id != null ? 'green'      : 'red',
+      confidence:    raw.confidence_score ?? raw.confidence ?? 0,
+      id_score:      0,
+      timestamp:     raw.timestamp ?? new Date().toISOString(),
+    };
+    setEvents(prev => [newEvent, ...prev].slice(0, 60));
   }, [liveDetections]);
 
   const handleExpand = useCallback((id: string) => {

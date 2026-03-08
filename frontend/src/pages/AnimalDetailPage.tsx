@@ -559,6 +559,9 @@ export default function AnimalDetailPage() {
   const [lightbox, setLightbox] = useState<number|null>(null);
   const [uploading, setUploading] = useState(0);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const registerRef = useRef<HTMLInputElement>(null);
+  const [registering, setRegistering] = useState(false);
+  const [registerMsg, setRegisterMsg] = useState<{ok: boolean; text: string} | null>(null);
 
   const [showHForm, setShowHForm] = useState(false);
   const [hMsg, setHMsg]           = useState("");
@@ -646,27 +649,50 @@ export default function AnimalDetailPage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const muzzleRef = useRef<HTMLInputElement>(null);
+  const faceRef   = useRef<HTMLInputElement>(null);
+  const bodyRef   = useRef<HTMLInputElement>(null);
+
+  const handleUpload = useCallback(async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    photoType: "muzzle" | "face" | "body" = "body",
+  ) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length || !id) return;
     setUploading(files.length);
+    setRegisterMsg(null);
     try {
-      await Promise.all(files.map(f => {
+      const results = await Promise.all(files.map(async f => {
         const fd = new FormData();
         fd.append("file", f);
-        return fetch(`${config.apiUrl || ""}/api/v1/animals/${id}/photos`, {
+        const url = `${config.apiUrl || ""}/api/v1/animals/${id}/photos?photo_type=${photoType}`;
+        const res = await fetch(url, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("tv_access_token") ?? ""}`,
-          },
+          headers: { Authorization: `Bearer ${localStorage.getItem("tv_access_token") ?? ""}` },
           body: fd,
         });
+        return res.ok ? res.json() : null;
       }));
+
+      // Embedding yaratilganmi?
+      const withEmb = results.filter(r => r?.embedding);
+      if (withEmb.length > 0) {
+        const last = withEmb[withEmb.length - 1];
+        setRegisterMsg({
+          ok: true,
+          text: `✅ ${withEmb.length} ta ${photoType === "muzzle" ? "muzzle" : "yuz"} rasmi yuklandi — embedding #${last.embedding.embedding_id} yaratildi (jami: ${last.embedding.embedding_count})`,
+        });
+        qc.invalidateQueries({ queryKey: ["embeddings", numId] });
+      }
+
       await refetchPhotos();
       qc.invalidateQueries({ queryKey: ["animals", numId] });
     } finally {
       setUploading(0);
       if (uploadRef.current) uploadRef.current.value = "";
+      if (muzzleRef.current) muzzleRef.current.value = "";
+      if (faceRef.current)   faceRef.current.value   = "";
+      if (bodyRef.current)   bodyRef.current.value   = "";
     }
   }, [id, numId, refetchPhotos, qc]);
 
@@ -693,6 +719,35 @@ export default function AnimalDetailPage() {
     await apiFetch(`/api/v1/animals/${id}/photos/${photoId}`, { method: "DELETE" });
     await refetchPhotos(); qc.invalidateQueries({ queryKey: ["animals", numId] });
   };
+
+  const handleRegisterMuzzle = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    setRegistering(true);
+    setRegisterMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("photo", file);
+      fd.append("is_full_body", "false");
+      const res = await fetch(`${(window as any).__API_URL__ || ""}/api/v1/identification/register/${id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("tv_access_token") ?? ""}` },
+        body: fd,
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setRegisterMsg({ ok: true, text: `✅ Muvaffaqiyatli! Embedding #${json.embedding_id} yaratildi. Jami: ${json.embedding_count}` });
+        qc.invalidateQueries({ queryKey: ["embeddings", numId] });
+      } else {
+        setRegisterMsg({ ok: false, text: `❌ Xato: ${json.detail || res.statusText}` });
+      }
+    } catch (err) {
+      setRegisterMsg({ ok: false, text: `❌ Tarmoq xatosi` });
+    } finally {
+      setRegistering(false);
+      if (registerRef.current) registerRef.current.value = "";
+    }
+  }, [id, numId, qc]);
 
   const createHealthMut = useMutation({
     mutationFn: () => apiFetch(`/api/v1/health/animals/${id}/records`, {
@@ -1586,6 +1641,9 @@ export default function AnimalDetailPage() {
                 <div>
                   <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>AI Embedding</div>
                   <div style={{ fontSize: 26, fontWeight: 700, color: embedCount > 0 ? "#16A34A" : "#94A3B8" }}>{embedCount}</div>
+                  <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 2 }}>
+                    {embedCount === 0 ? "Muzzle yoki yuz rasmi yuklang" : "Identifikatsiya tayyor ✓"}
+                  </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1615,29 +1673,60 @@ export default function AnimalDetailPage() {
                 </div>
               </div>
 
-              {/* Upload button */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                <button
-                  onClick={() => uploadRef.current?.click()}
-                  disabled={uploading > 0}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 8,
-                    padding: "10px 22px", borderRadius: 10, border: "none",
-                    background: "#2563EB", color: "#fff", fontSize: 13, fontWeight: 600,
-                    cursor: uploading > 0 ? "not-allowed" : "pointer",
-                    opacity: uploading > 0 ? .7 : 1, fontFamily: "inherit",
-                  }}
-                >
-                  {uploading > 0
-                    ? <><Spinner size={16} color="#fff" /> {uploading} ta yuklanmoqda...</>
-                    : <><Upload size={15} /> Rasm yuklash</>}
-                </button>
-                <span style={{ fontSize: 11, color: "#94A3B8" }}>
-                  💡 Ctrl+Click — bir vaqtda ko'p rasm tanlash
+              {/* Upload buttons */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                {uploading > 0 ? (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 22px",
+                    borderRadius: 10, background: "#E2E8F0", color: "#64748B", fontSize: 13, fontWeight: 600 }}>
+                    <Spinner size={16} /> {uploading} ta yuklanmoqda...
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button onClick={() => muzzleRef.current?.click()} style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "9px 16px", borderRadius: 9, border: "none",
+                      background: "#7C3AED", color: "#fff", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>
+                      👃 Muzzle rasm
+                    </button>
+                    <button onClick={() => faceRef.current?.click()} style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "9px 16px", borderRadius: 9, border: "none",
+                      background: "#0891B2", color: "#fff", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>
+                      🐮 Yuz rasmi
+                    </button>
+                    <button onClick={() => bodyRef.current?.click()} style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "9px 16px", borderRadius: 9, border: "none",
+                      background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}>
+                      <Upload size={13} /> Body rasm
+                    </button>
+                  </div>
+                )}
+                <span style={{ fontSize: 10, color: "#94A3B8" }}>
+                  👃 Muzzle va 🐮 Yuz → AI embedding avtomatik yaratiladi
                 </span>
+                {registerMsg && (
+                  <div style={{
+                    fontSize: 11, padding: "6px 12px", borderRadius: 7, maxWidth: 340, textAlign: "right",
+                    background: registerMsg.ok ? "#F0FDF4" : "#FEF2F2",
+                    color: registerMsg.ok ? "#15803D" : "#DC2626",
+                    border: `1px solid ${registerMsg.ok ? "#BBF7D0" : "#FECACA"}`,
+                  }}>
+                    {registerMsg.text}
+                  </div>
+                )}
               </div>
             </div>
-            <input ref={uploadRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleUpload} />
+            <input ref={muzzleRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "muzzle")} />
+            <input ref={faceRef}   type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "face")}   />
+            <input ref={bodyRef}   type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "body")}   />
+            <input ref={uploadRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "body")}   />
           </div>
 
           {/* Gallery */}

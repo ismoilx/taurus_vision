@@ -227,6 +227,12 @@ class Settings(BaseSettings):
     def telegram_configured(self) -> bool:
         """Telegram bot sozlanganmi?"""
         return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_IDS)
+    
+    # =========================================================================
+    # GOOGLE COLAB GPU INTEGRATION
+    # =========================================================================
+
+    COLAB_SECRET_KEY: Optional[str] = None
 
     # =========================================================================
     # LOGGING
