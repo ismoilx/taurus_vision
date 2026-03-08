@@ -38,6 +38,7 @@ from app.schemas.registration import (
     EmbeddingInfo,
 )
 from app.utils.image_utils import decode_frame_bytes, extract_muzzle_region
+from app.services.ai.muzzle_detector import get_muzzle_detector, crop_muzzle_from_animal
 
 logger = logging.getLogger(__name__)
 
@@ -123,35 +124,61 @@ async def register_animal_muzzle(
             detail="Invalid image file. Upload a valid JPEG or PNG.",
         )
 
-    # Extract muzzle region
+    # Extract muzzle region — detection pipeline bilan bir xil usul
+    # full_frame=True: sigir bbox berilgan → avval sigir cropini olib, best.pt bilan muzzle topish
+    # full_frame=False: rasm allaqachon bosh yoki muzzle → to'g'ridan best.pt bilan muzzle topish
+
     if full_frame:
         if any(v is None for v in [bbox_x, bbox_y, bbox_w, bbox_h]):
             raise HTTPException(
                 status_code=422,
                 detail="full_frame=True requires bbox_x, bbox_y, bbox_w, bbox_h",
             )
-        muzzle_crop = extract_muzzle_region(
+        # Sigir tanasini kesib olish
+        animal_crop = extract_muzzle_region(
             frame, bbox_x, bbox_y, bbox_w, bbox_h, normalized=True
         )
-        if muzzle_crop is None:
+        if animal_crop is None:
             raise HTTPException(
                 status_code=422,
-                detail="Could not extract muzzle region from bounding box. "
-                       "Check that the bounding box is valid.",
+                detail="Could not extract animal region from bounding box.",
             )
     else:
-        # Full head photo — xuddi video pipeline kabi muzzle qismni kesib olamiz
-        # bbox = butun rasm (cx=0.5, cy=0.5, w=1.0, h=1.0)
-        # Bu: pastki 45%, markaziy 60% — burun va og'iz qismi
+        # Rasm = bosh yoki muzzle rasmi → butun rasmni animal_crop sifatida ishlatish
+        animal_crop = frame
+
+    # best.pt bilan muzzle topish — detection pipeline bilan bir xil!
+    muzzle_crop = None
+    try:
+        detector = get_muzzle_detector()
+        import asyncio
+        muzzle_det = await detector.detect_muzzle(animal_crop, confidence_threshold=0.25)
+        if muzzle_det is not None:
+            muzzle_crop = crop_muzzle_from_animal(animal_crop, muzzle_det, padding=0.05)
+            logger.info(
+                f"Muzzle topildi (registration): conf={muzzle_det.confidence:.3f} "
+                f"animal_id={animal_id}"
+            )
+        else:
+            logger.warning(
+                f"best.pt muzzle topa olmadi (animal_id={animal_id}), "
+                "fallback: butun rasmdan heuristik crop"
+            )
+    except RuntimeError:
+        # Agar muzzle detector yuklanmagan bo'lsa (best.pt yo'q) — fallback
+        logger.warning("MuzzleDetector yuklanmagan, heuristik crop ishlatiladi")
+
+    if muzzle_crop is None:
+        # Fallback: heuristik crop (pastki 45%, o'rta 60%)
+        # Bu faqat best.pt bo'lmagan holatda ishlatiladi
         muzzle_crop = extract_muzzle_region(
-            frame,
+            animal_crop,
             bbox_x=0.5, bbox_y=0.5,
             bbox_w=1.0, bbox_h=1.0,
             normalized=True,
         )
         if muzzle_crop is None:
-            # Rasm juda kichik bo'lsa butun rasmni ishlatamiz
-            muzzle_crop = frame
+            muzzle_crop = animal_crop
 
     # Validate muzzle crop is large enough
     h, w = muzzle_crop.shape[:2]

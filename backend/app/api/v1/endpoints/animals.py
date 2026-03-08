@@ -737,30 +737,49 @@ async def upload_animal_photo(
     if set_as_profile:
         animal.profile_image = file_path
 
-    # Muzzle rasmi bo'lsa — muzzle_image ni yangilash
+    # ── Rasm turini profil/muzzle slotlarga avtomatik bog'lash ───────────
+    # muzzle → muzzle_image sloti (AI identifikatsiya uchun)
+    # face   → profile_image sloti (asosiy ko'rinish rasmi)
+    # body   → faqat galereya (hech qanday slot emas)
     if photo_type == "muzzle":
         animal.muzzle_image = file_path
+    elif photo_type == "face" and not set_as_profile:
+        animal.profile_image = file_path
 
     await db.flush()
 
-    # ── Avtomatik embedding yaratish (muzzle yoki face) ──────────────────
+    # ── Avtomatik embedding yaratish — FAQAT muzzle uchun ───────────────
     embedding_result = None
-    if photo_type in ("muzzle", "face"):
+    if photo_type == "muzzle":
         try:
+            import logging
             from app.utils.image_utils import decode_frame_bytes, extract_muzzle_region
             from app.services.identification_service import IdentificationService
+            _log = logging.getLogger(__name__)
 
             frame = decode_frame_bytes(content)
             if frame is not None:
-                if photo_type == "muzzle":
-                    # Pastki qismdan burun/og'iz zonasini kesib olish
+                crop = None
+                # best.pt bilan muzzle topish
+                try:
+                    from app.services.ai.muzzle_detector import (
+                        get_muzzle_detector, crop_muzzle_from_animal,
+                    )
+                    detector = get_muzzle_detector()
+                    muzzle_det = await detector.detect_muzzle(frame, confidence_threshold=0.25)
+                    if muzzle_det is not None:
+                        crop = crop_muzzle_from_animal(frame, muzzle_det, padding=0.05)
+                        _log.info(f"[photo_upload] best.pt muzzle topildi: conf={muzzle_det.confidence:.3f}")
+                    else:
+                        _log.warning(f"[photo_upload] best.pt muzzle topa olmadi, heuristik fallback")
+                except RuntimeError:
+                    _log.warning("[photo_upload] MuzzleDetector yuklanmagan, heuristik ishlatiladi")
+
+                if crop is None:
                     crop = extract_muzzle_region(
                         frame, bbox_x=0.5, bbox_y=0.5,
                         bbox_w=1.0, bbox_h=1.0, normalized=True,
                     ) or frame
-                else:
-                    # Face: butun rasmni ishlatamiz (yuz to'liq ko'rinadi)
-                    crop = frame
 
                 svc = IdentificationService(db)
                 existing = await svc.get_animal_embedding_count(animal_id)
@@ -768,7 +787,7 @@ async def upload_animal_photo(
                     animal_id=animal_id,
                     muzzle_crop=crop,
                     is_reference=(existing == 0),
-                    source=photo_type,          # "muzzle" yoki "face"
+                    source="muzzle",
                     quality_score=None,
                     photo_path=file_path,
                 )
@@ -776,10 +795,9 @@ async def upload_animal_photo(
                 embedding_result = {
                     "embedding_id":    emb.id,
                     "embedding_count": existing + 1,
-                    "source":          photo_type,
+                    "source":          "muzzle",
                 }
         except Exception as e:
-            # Embedding xatosi rasm yuklashni to'xtatmasin
             import logging
             logging.getLogger(__name__).warning(
                 f"Auto-embedding failed for animal {animal_id}: {e}"
@@ -836,6 +854,11 @@ async def list_animal_photos(
                 "url":        f"/api/v1/animals/photos/file/{p.id}",
                 "is_profile": animal.profile_image == p.file_path,
                 "is_muzzle":  animal.muzzle_image  == p.file_path if animal.muzzle_image else False,
+                "photo_type": getattr(p, "photo_type", None) or (
+                    "muzzle" if (animal.muzzle_image and animal.muzzle_image == p.file_path)
+                    else "face" if (animal.profile_image and animal.profile_image == p.file_path)
+                    else "body"
+                ),
                 "created_at": p.created_at.isoformat(),
             }
             for p in photos
@@ -884,10 +907,12 @@ async def set_muzzle_photo(
     photo_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Ko'rsatilgan rasmni jonivorning tumshuq (muzzle) rasmi sifatida belgilaydi."""
+    """Ko'rsatilgan rasmni muzzle sifatida belgilaydi va embeddingini yaratadi."""
     from sqlalchemy import select
     from app.models.animal import Animal
     from app.models.animal_photo import AnimalPhoto
+    import logging
+    _log = logging.getLogger(__name__)
 
     animal = await db.scalar(select(Animal).where(Animal.id == animal_id))
     if not animal:
@@ -900,9 +925,62 @@ async def set_muzzle_photo(
         raise HTTPException(status_code=404, detail="Rasm topilmadi")
 
     animal.muzzle_image = photo.file_path
-    await db.commit()
 
-    return {"success": True, "muzzle_url": f"/api/v1/animals/photos/file/{photo_id}"}
+    # Rasm faylidan embedding yaratish
+    embedding_result = None
+    try:
+        import os
+        from app.utils.image_utils import decode_frame_bytes, extract_muzzle_region
+        from app.services.identification_service import IdentificationService
+
+        if os.path.exists(photo.file_path):
+            with open(photo.file_path, "rb") as f:
+                content = f.read()
+
+            frame = decode_frame_bytes(content)
+            if frame is not None:
+                crop = None
+                try:
+                    from app.services.ai.muzzle_detector import (
+                        get_muzzle_detector, crop_muzzle_from_animal,
+                    )
+                    detector = get_muzzle_detector()
+                    muzzle_det = await detector.detect_muzzle(frame, confidence_threshold=0.25)
+                    if muzzle_det is not None:
+                        crop = crop_muzzle_from_animal(frame, muzzle_det, padding=0.05)
+                except RuntimeError:
+                    pass
+
+                if crop is None:
+                    crop = extract_muzzle_region(
+                        frame, bbox_x=0.5, bbox_y=0.5,
+                        bbox_w=1.0, bbox_h=1.0, normalized=True,
+                    ) or frame
+
+                svc = IdentificationService(db)
+                existing = await svc.get_animal_embedding_count(animal_id)
+                emb = await svc.add_embedding(
+                    animal_id=animal_id,
+                    muzzle_crop=crop,
+                    is_reference=(existing == 0),
+                    source="muzzle",
+                    quality_score=None,
+                    photo_path=photo.file_path,
+                )
+                embedding_result = {
+                    "embedding_id":    emb.id,
+                    "embedding_count": existing + 1,
+                }
+                _log.info(f"[set-muzzle] Embedding yaratildi: animal_id={animal_id} emb_id={emb.id}")
+    except Exception as e:
+        _log.warning(f"[set-muzzle] Embedding yaratishda xato: {e}")
+
+    await db.commit()
+    return {
+        "success": True,
+        "muzzle_url": f"/api/v1/animals/photos/file/{photo_id}",
+        "embedding": embedding_result,
+    }
 
 
 @router.delete(

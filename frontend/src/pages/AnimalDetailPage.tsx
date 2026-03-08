@@ -27,6 +27,7 @@ interface Photo {
   url: string;
   is_profile: boolean;
   is_muzzle: boolean;
+  photo_type?: "face" | "muzzle" | "body";
   created_at: string;
 }
 
@@ -545,6 +546,228 @@ function PhotoCard({
   );
 }
 
+// ─── PhotoSection — Kategoriya bo'yicha rasm bo'limi ─────────────────────────
+
+function PhotoSection({
+  title, subtitle, accentColor, badgeLabel,
+  photos, activePhotoId, uploading, embedCount, photoType,
+  onUpload, onSetActive, onDelete, onZoom,
+}: {
+  title: string; subtitle: string;
+  accentColor: string; badgeLabel: string;
+  photos: Photo[];
+  activePhotoId?: number;
+  uploading: boolean;
+  embedCount: number;
+  photoType: "face" | "muzzle";
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSetActive: (id: number) => void;
+  onDelete: (id: number) => void;
+  onZoom: (id: number) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const isMuzzle = photoType === "muzzle";
+
+  return (
+    <div style={{
+      background: "#fff", border: `1.5px solid ${accentColor}33`,
+      borderRadius: 18, overflow: "hidden",
+      boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
+    }}>
+      {/* Section header */}
+      <div style={{
+        padding: "16px 20px",
+        background: `linear-gradient(135deg, ${accentColor}0a 0%, ${accentColor}05 100%)`,
+        borderBottom: `1px solid ${accentColor}22`,
+        display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap",
+      }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{title}</h3>
+          <p style={{ margin: "3px 0 0", fontSize: 12, color: "#64748B" }}>{subtitle}</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isMuzzle && embedCount > 0 && (
+            <span style={{
+              padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+              background: "#F0FDF4", color: "#16A34A", border: "1px solid #BBF7D0",
+            }}>
+              {embedCount} embedding ✓
+            </span>
+          )}
+          <span style={{
+            padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+            background: `${accentColor}18`, color: accentColor, border: `1px solid ${accentColor}33`,
+          }}>
+            {photos.length} ta rasm
+          </span>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "8px 16px", borderRadius: 9, border: "none",
+              background: uploading ? "#E2E8F0" : accentColor,
+              color: uploading ? "#94A3B8" : "#fff",
+              fontSize: 12, fontWeight: 600, cursor: uploading ? "wait" : "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {uploading ? <><Spinner size={14} color="#94A3B8" /> Yuklanmoqda...</> : <><Upload size={13} /> Rasm qo'shish</>}
+          </button>
+          <input
+            ref={fileRef} type="file" accept="image/*" multiple
+            style={{ display: "none" }}
+            onChange={onUpload}
+          />
+        </div>
+      </div>
+
+      {/* Photos grid */}
+      <div style={{ padding: 20 }}>
+        {photos.length === 0 ? (
+          <div style={{
+            border: "2px dashed #E2E8F0", borderRadius: 14,
+            padding: "48px 24px", textAlign: "center",
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 16,
+              background: `${accentColor}10`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 14px",
+            }}>
+              {isMuzzle ? <Scan size={26} color={accentColor} /> : <Camera size={26} color={accentColor} />}
+            </div>
+            <p style={{ fontSize: 14, fontWeight: 500, color: "#374151", margin: "0 0 6px" }}>
+              {isMuzzle ? "Hali muzzle rasmi yuklanmagan" : "Hali yuz rasmi yuklanmagan"}
+            </p>
+            <p style={{ fontSize: 12, color: "#94A3B8", margin: "0 0 16px" }}>
+              {isMuzzle
+                ? "Yuklangan rasm best.pt bilan avtomatik qayta ishlanadi va embedding yaratiladi"
+                : "Yuklangan rasm avtomatik profil rasmi sifatida saqlanadi"}
+            </p>
+            <button
+              onClick={() => fileRef.current?.click()}
+              style={{
+                padding: "8px 20px", borderRadius: 9, border: `1.5px solid ${accentColor}`,
+                background: "transparent", color: accentColor,
+                fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              Rasm yuklash
+            </button>
+          </div>
+        ) : (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+            gap: 14,
+          }}>
+            {photos.map(photo => {
+              const isActive = photo.id === activePhotoId;
+              const [hovered, setHovered] = useState(false);
+              const [imgErr, setImgErr] = useState(false);
+              return (
+                <div
+                  key={photo.id}
+                  onMouseEnter={() => setHovered(true)}
+                  onMouseLeave={() => setHovered(false)}
+                  style={{
+                    borderRadius: 12, overflow: "hidden",
+                    border: isActive ? `2.5px solid ${accentColor}` : "1.5px solid #E2E8F0",
+                    boxShadow: isActive
+                      ? `0 0 0 3px ${accentColor}22, 0 4px 16px ${accentColor}22`
+                      : hovered ? "0 8px 24px rgba(0,0,0,.1)" : "0 1px 4px rgba(0,0,0,.05)",
+                    transform: hovered && !isActive ? "translateY(-2px)" : "none",
+                    transition: "all .2s",
+                    background: "#fff",
+                  }}
+                >
+                  {/* Image */}
+                  <div style={{ position: "relative", height: 160, background: "#F8FAFC" }}>
+                    {!imgErr ? (
+                      <img
+                        src={photoUrl(photo.id)}
+                        alt={photo.file_name}
+                        onError={() => setImgErr(true)}
+                        style={{
+                          width: "100%", height: "100%", objectFit: "cover", display: "block",
+                          transform: hovered ? "scale(1.05)" : "scale(1)", transition: "transform .3s",
+                        }}
+                      />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#F1F5F9" }}>
+                        <Camera size={28} color="#CBD5E1" />
+                      </div>
+                    )}
+
+                    {/* Active badge */}
+                    {isActive && (
+                      <div style={{
+                        position: "absolute", top: 8, left: 8,
+                        padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                        background: accentColor, color: "#fff",
+                        boxShadow: `0 2px 6px ${accentColor}55`,
+                      }}>
+                        ✓ {badgeLabel}
+                      </div>
+                    )}
+
+                    {/* Hover overlay */}
+                    <div style={{
+                      position: "absolute", inset: 0,
+                      background: "linear-gradient(to top, rgba(0,0,0,.55) 0%, transparent 55%)",
+                      opacity: hovered ? 1 : 0, transition: "opacity .2s",
+                      display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+                      padding: "0 10px 10px",
+                    }}>
+                      <button onClick={() => onZoom(photo.id)} style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "5px 10px", borderRadius: 7, border: "1.5px solid rgba(255,255,255,.7)",
+                        background: "rgba(255,255,255,.15)", color: "#fff", fontSize: 11, cursor: "pointer",
+                      }}>
+                        <ZoomIn size={12} /> Ko'rish
+                      </button>
+                      <button onClick={() => onDelete(photo.id)} style={{
+                        width: 30, height: 30, borderRadius: "50%",
+                        border: "1.5px solid rgba(255,255,255,.7)",
+                        background: "rgba(239,68,68,.7)", display: "grid", placeItems: "center", cursor: "pointer",
+                      }}>
+                        <Trash2 size={12} color="#fff" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bottom action */}
+                  <div style={{
+                    padding: "8px 10px",
+                    background: isActive ? `${accentColor}0d` : "#FAFAFA",
+                    borderTop: `1px solid ${isActive ? accentColor + "22" : "#F1F5F9"}`,
+                  }}>
+                    <button
+                      onClick={() => onSetActive(photo.id)}
+                      style={{
+                        width: "100%", height: 28, borderRadius: 7, border: "none", cursor: "pointer",
+                        background: isActive ? accentColor : `${accentColor}18`,
+                        color: isActive ? "#fff" : accentColor,
+                        fontSize: 11, fontWeight: 600,
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                      }}
+                    >
+                      {isActive
+                        ? <><CheckCircle size={11} /> {badgeLabel} sifatida belgilangan</>
+                        : <><Star size={11} /> {badgeLabel} sifatida belgilash</>}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AnimalDetailPage() {
@@ -558,6 +781,7 @@ export default function AnimalDetailPage() {
   const [picker, setPicker]     = useState<"profile"|"muzzle"|null>(null);
   const [lightbox, setLightbox] = useState<number|null>(null);
   const [uploading, setUploading] = useState(0);
+  const [uploadingType, setUploadingType] = useState<"face"|"muzzle"|null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const registerRef = useRef<HTMLInputElement>(null);
   const [registering, setRegistering] = useState(false);
@@ -660,6 +884,7 @@ export default function AnimalDetailPage() {
     const files = Array.from(e.target.files ?? []);
     if (!files.length || !id) return;
     setUploading(files.length);
+    setUploadingType(photoType === "body" ? null : photoType);
     setRegisterMsg(null);
     try {
       const results = await Promise.all(files.map(async f => {
@@ -674,21 +899,29 @@ export default function AnimalDetailPage() {
         return res.ok ? res.json() : null;
       }));
 
-      // Embedding yaratilganmi?
       const withEmb = results.filter(r => r?.embedding);
-      if (withEmb.length > 0) {
-        const last = withEmb[withEmb.length - 1];
-        setRegisterMsg({
-          ok: true,
-          text: `✅ ${withEmb.length} ta ${photoType === "muzzle" ? "muzzle" : "yuz"} rasmi yuklandi — embedding #${last.embedding.embedding_id} yaratildi (jami: ${last.embedding.embedding_count})`,
-        });
-        qc.invalidateQueries({ queryKey: ["embeddings", numId] });
+      const uploaded = results.filter(Boolean).length;
+
+      if (photoType === "muzzle") {
+        if (withEmb.length > 0) {
+          const last = withEmb[withEmb.length - 1];
+          setRegisterMsg({
+            ok: true,
+            text: `✅ ${uploaded} ta muzzle rasmi yuklandi — embedding #${last.embedding.embedding_id} yaratildi (jami: ${last.embedding.embedding_count})`,
+          });
+          qc.invalidateQueries({ queryKey: ["embeddings", numId] });
+        } else {
+          setRegisterMsg({ ok: true, text: `✅ ${uploaded} ta muzzle rasmi yuklandi` });
+        }
+      } else if (photoType === "face") {
+        setRegisterMsg({ ok: true, text: `✅ ${uploaded} ta yuz rasmi yuklandi va profil sifatida belgilandi` });
       }
 
       await refetchPhotos();
       qc.invalidateQueries({ queryKey: ["animals", numId] });
     } finally {
       setUploading(0);
+      setUploadingType(null);
       if (uploadRef.current) uploadRef.current.value = "";
       if (muzzleRef.current) muzzleRef.current.value = "";
       if (faceRef.current)   faceRef.current.value   = "";
@@ -1627,196 +1860,52 @@ export default function AnimalDetailPage() {
 
       {/* ═══════════════════ PHOTOS ═══════════════════ */}
       {tab === "photos" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 20, animation: "fadein .25s" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, animation: "fadein .25s" }}>
 
-          {/* Upload bar */}
-          <div style={{ ...card, padding: "18px 22px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
-              {/* Stats */}
-              <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>Jami rasmlar</div>
-                  <div style={{ fontSize: 26, fontWeight: 700, color: "#0F172A" }}>{photos.length}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 4 }}>AI Embedding</div>
-                  <div style={{ fontSize: 26, fontWeight: 700, color: embedCount > 0 ? "#16A34A" : "#94A3B8" }}>{embedCount}</div>
-                  <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 2 }}>
-                    {embedCount === 0 ? "Muzzle yoki yuz rasmi yuklang" : "Identifikatsiya tayyor ✓"}
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: profilePhoto ? "#2563EB" : "#E2E8F0" }} />
-                    <span style={{ fontSize: 12, color: profilePhoto ? "#2563EB" : "#9CA3AF" }}>
-                      Profil: {profilePhoto ? "✓ Belgilangan" : "Belgilanmagan"}
-                    </span>
-                    <button onClick={() => setPicker("profile")} style={{
-                      fontSize: 11, color: "#2563EB", background: "none", border: "none",
-                      cursor: "pointer", padding: 0, fontFamily: "inherit",
-                    }}>
-                      Tanlash →
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: muzzlePhoto ? "#7C3AED" : "#E2E8F0" }} />
-                    <span style={{ fontSize: 12, color: muzzlePhoto ? "#7C3AED" : "#9CA3AF" }}>
-                      Muzzle: {muzzlePhoto ? "✓ Belgilangan" : "Belgilanmagan"}
-                    </span>
-                    <button onClick={() => setPicker("muzzle")} style={{
-                      fontSize: 11, color: "#7C3AED", background: "none", border: "none",
-                      cursor: "pointer", padding: 0, fontFamily: "inherit",
-                    }}>
-                      Tanlash →
-                    </button>
-                  </div>
-                </div>
-              </div>
+          {/* ─── YUZ RASMLARI ─── */}
+          <PhotoSection
+            title="Yuz rasmlari"
+            subtitle="Profil rasmi sifatida saqlanadi"
+            accentColor="#2563EB"
+            badgeLabel="Profil"
+            photos={photos.filter(p => p.photo_type === "face" || p.is_profile)}
+            activePhotoId={profilePhoto?.id}
+            uploading={uploadingType === "face"}
+            embedCount={embedCount}
+            photoType="face"
+            onUpload={e => handleUpload(e, "face")}
+            onSetActive={setProfilePhoto}
+            onDelete={deletePhoto}
+            onZoom={setLightbox}
+          />
 
-              {/* Upload buttons */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-                {uploading > 0 ? (
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 22px",
-                    borderRadius: 10, background: "#E2E8F0", color: "#64748B", fontSize: 13, fontWeight: 600 }}>
-                    <Spinner size={16} /> {uploading} ta yuklanmoqda...
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button onClick={() => muzzleRef.current?.click()} style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "9px 16px", borderRadius: 9, border: "none",
-                      background: "#7C3AED", color: "#fff", fontSize: 12, fontWeight: 600,
-                      cursor: "pointer", fontFamily: "inherit",
-                    }}>
-                      👃 Muzzle rasm
-                    </button>
-                    <button onClick={() => faceRef.current?.click()} style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "9px 16px", borderRadius: 9, border: "none",
-                      background: "#0891B2", color: "#fff", fontSize: 12, fontWeight: 600,
-                      cursor: "pointer", fontFamily: "inherit",
-                    }}>
-                      🐮 Yuz rasmi
-                    </button>
-                    <button onClick={() => bodyRef.current?.click()} style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "9px 16px", borderRadius: 9, border: "none",
-                      background: "#2563EB", color: "#fff", fontSize: 12, fontWeight: 600,
-                      cursor: "pointer", fontFamily: "inherit",
-                    }}>
-                      <Upload size={13} /> Body rasm
-                    </button>
-                  </div>
-                )}
-                <span style={{ fontSize: 10, color: "#94A3B8" }}>
-                  👃 Muzzle va 🐮 Yuz → AI embedding avtomatik yaratiladi
-                </span>
-                {registerMsg && (
-                  <div style={{
-                    fontSize: 11, padding: "6px 12px", borderRadius: 7, maxWidth: 340, textAlign: "right",
-                    background: registerMsg.ok ? "#F0FDF4" : "#FEF2F2",
-                    color: registerMsg.ok ? "#15803D" : "#DC2626",
-                    border: `1px solid ${registerMsg.ok ? "#BBF7D0" : "#FECACA"}`,
-                  }}>
-                    {registerMsg.text}
-                  </div>
-                )}
-              </div>
-            </div>
-            <input ref={muzzleRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "muzzle")} />
-            <input ref={faceRef}   type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "face")}   />
-            <input ref={bodyRef}   type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "body")}   />
-            <input ref={uploadRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => handleUpload(e, "body")}   />
-          </div>
+          {/* ─── MUZZLE RASMLARI ─── */}
+          <PhotoSection
+            title="Muzzle rasmlari"
+            subtitle="AI identifikatsiya uchun — embedding avtomatik yaratiladi"
+            accentColor="#7C3AED"
+            badgeLabel="Muzzle"
+            photos={photos.filter(p => p.photo_type === "muzzle" || p.is_muzzle)}
+            activePhotoId={muzzlePhoto?.id}
+            uploading={uploadingType === "muzzle"}
+            embedCount={embedCount}
+            photoType="muzzle"
+            onUpload={e => handleUpload(e, "muzzle")}
+            onSetActive={setMuzzlePhoto}
+            onDelete={deletePhoto}
+            onZoom={setLightbox}
+          />
 
-          {/* Gallery */}
-          {photos.length === 0 ? (
+          {registerMsg && (
             <div style={{
-              background: "#fff", border: "2px dashed #E2E8F0", borderRadius: 18,
-              padding: "72px 24px", textAlign: "center",
+              padding: "10px 16px", borderRadius: 10, fontSize: 13,
+              background: registerMsg.ok ? "#F0FDF4" : "#FEF2F2",
+              color:      registerMsg.ok ? "#15803D" : "#DC2626",
+              border: `1px solid ${registerMsg.ok ? "#BBF7D0" : "#FECACA"}`,
             }}>
-              <div style={{
-                width: 72, height: 72, borderRadius: 20, background: "#F1F5F9",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 18px",
-              }}>
-                <Camera size={32} color="#CBD5E1" />
-              </div>
-              <p style={{ fontSize: 16, fontWeight: 500, color: "#374151", marginBottom: 8 }}>
-                Hali rasm yuklanmagan
-              </p>
-              <p style={{ fontSize: 13, color: "#94A3B8", marginBottom: 20 }}>
-                Yuqoridagi tugmani bosib rasmlarni yuklang
-              </p>
-              <button
-                onClick={() => uploadRef.current?.click()}
-                style={{
-                  padding: "9px 22px", borderRadius: 10, border: "1.5px solid #E2E8F0",
-                  background: "#fff", color: "#64748B", cursor: "pointer",
-                  fontSize: 13, fontFamily: "inherit",
-                }}
-              >
-                Rasm yuklash
-              </button>
-            </div>
-          ) : (
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
-              gap: 16,
-            }}>
-              {photos.map(photo => (
-                <PhotoCard
-                  key={photo.id}
-                  photo={photo}
-                  onSetProfile={() => setProfilePhoto(photo.id)}
-                  onSetMuzzle={() => setMuzzlePhoto(photo.id)}
-                  onDelete={() => deletePhoto(photo.id)}
-                  onZoom={() => setLightbox(photo.id)}
-                />
-              ))}
+              {registerMsg.text}
             </div>
           )}
-
-          {/* AI info card */}
-          <div style={{
-            ...card,
-            background: "linear-gradient(135deg, #F0F7FF 0%, #F5F3FF 100%)",
-            border: "1px solid #DBEAFE",
-          }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px", color: "#1E40AF" }}>
-              AI Identifikatsiya qanday ishlaydi?
-            </h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
-              {[
-                { n: "1", c: "#2563EB", t: "Rasm yuklang",     d: "Tumshuq rasmi — aniq, yaxshi yoritilgan. Kamida 5 ta." },
-                { n: "2", c: "#7C3AED", t: "Embedding",        d: "MobileNetV2 128-o'lchamli vektor yaratadi." },
-                { n: "3", c: "#16A34A", t: "Taqqoslash",       d: "Cosine o'xshashlik ≥ 0.85 bo'lsa — jonivor tanildi." },
-                { n: "4", c: "#D97706", t: "ADI & Vazn",       d: "Tanilgan jonivorda avtomatik hisoblanadi." },
-              ].map(({ n, c, t, d }) => (
-                <div key={n} style={{ display: "flex", gap: 10 }}>
-                  <div style={{
-                    width: 26, height: 26, borderRadius: 8, background: c,
-                    color: "#fff", display: "grid", placeItems: "center",
-                    fontSize: 12, fontWeight: 700, flexShrink: 0,
-                  }}>{n}</div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2, color: "#0F172A" }}>{t}</div>
-                    <div style={{ fontSize: 11, color: "#64748B", lineHeight: 1.5 }}>{d}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {embedCount < 5 && (
-              <div style={{
-                marginTop: 14, padding: "8px 14px", borderRadius: 8,
-                background: "#FFFBEB", border: "1px solid #FDE68A",
-                fontSize: 12, color: "#D97706", fontWeight: 500,
-              }}>
-                ⚠ Hozirda {embedCount} ta embedding bor. Kamida 5 ta rasm kerak — yana {5 - embedCount} ta qo'shing.
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
