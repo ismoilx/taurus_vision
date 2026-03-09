@@ -59,12 +59,6 @@ class PipelineStartRequest(PydanticModel):
     """Kamera pipeline ishga tushirish uchun request."""
     camera_id:   str  = Field(..., description="DB dagi kamera identifikatori")
     skip_frames: int  = Field(3, ge=1, le=20, description="Har N-chi kadrni qayta ishlash")
-    colab_mode:  bool = Field(False, description="Colab GPU ga yuborish rejimi")
-
-
-class ColabUrlRequest(PydanticModel):
-    """Colab stream URL ni sozlash."""
-    url: str = Field(..., description="Colab Cloudflare/ngrok URL (https://...)")
 
 
 class PipelineStatusResponse(PydanticModel):
@@ -123,50 +117,14 @@ async def start_pipeline(
             detail=f"Pipeline '{body.camera_id}' allaqachon ishlayapti",
         )
 
-    # ── Colab GPU rejimi ──────────────────────────────────────────────────────
-    if body.colab_mode:
-        from app.services.colab_pipeline import ColabPipeline
-        from app.services.camera.camera_factory import CameraFactory
-        from app.config import settings as cfg
-
-        colab_url = get_colab_url()
-        if not colab_url:
-            raise HTTPException(
-                status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Colab URL sozlanmagan. set-colab-url endpointiga URL yuboring. "
-                    "Misol: POST /api/v1/pipeline/set-colab-url"
-                ),
-            )
-
-        cam_service = CameraFactory.create_camera({
-            "camera_id":    camera.camera_id,
-            "type":         camera.type.value,
-            "url":          camera.source,          # RTSP uchun
-            "device_index": camera.device_index,    # USB uchun
-            "fps":          camera.fps or 15,
-        })
-        if cam_service is None:
-            raise HTTPException(
-                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Kamera '{camera.camera_id}' ni yaratib bo'lmadi",
-            )
-        pipeline = ColabPipeline(
-            camera_service = cam_service,
-            colab_url      = colab_url,
-            colab_secret   = cfg.COLAB_SECRET_KEY,
-            target_fps     = camera.fps or 15,
-        )
-        ok, reason = await manager.start_colab_pipeline(camera.camera_id, pipeline)
-    else:
-        ok, reason = await manager.start_camera(
-            camera_id    = camera.camera_id,
-            camera_type  = camera.type.value,
-            source       = camera.source,
-            device_index = camera.device_index,
-            fps          = camera.fps,
-            skip_frames  = body.skip_frames,
-        )
+    ok, reason = await manager.start_camera(
+        camera_id    = camera.camera_id,
+        camera_type  = camera.type.value,
+        source       = camera.source,
+        device_index = camera.device_index,
+        fps          = camera.fps,
+        skip_frames  = body.skip_frames,
+    )
 
     if not ok:
         raise HTTPException(
@@ -174,12 +132,11 @@ async def start_pipeline(
             detail=reason or f"Pipeline '{body.camera_id}' ni ishga tushirib bo'lmadi",
         )
 
-    mode = "colab_gpu" if body.colab_mode else "local_cpu"
     return {
         "status":        "started",
         "camera_id":     body.camera_id,
-        "mode":          mode,
-        "message":       f"Pipeline muvaffaqiyatli ishga tushirildi ({mode})",
+        "mode":          "local_cpu",
+        "message":       "Pipeline muvaffaqiyatli ishga tushirildi (local_cpu)",
         "total_running": manager.total_running(),
     }
 
@@ -357,85 +314,6 @@ async def start_video_pipeline(
             "camera_id":    camera_id,
         },
     }
-
-
-# =============================================================================
-# COLAB GPU SOZLAMALARI
-# =============================================================================
-
-# Pydantic Settings immutable — runtime URL ni shu global da saqlaymiz
-_colab_stream_url: Optional[str] = None
-
-
-def get_colab_url() -> Optional[str]:
-    """Colab URL ni qaytaradi (settings yoki runtime da o'rnatilgan)."""
-    from app.config import settings
-    return _colab_stream_url or settings.COLAB_STREAM_URL
-
-
-@router.post(
-    "/set-colab-url",
-    status_code=http_status.HTTP_200_OK,
-    summary="Colab stream URL ni sozlash",
-    description="Colab Cell 6 dan olingan URL ni backend ga beradi.",
-)
-async def set_colab_url(
-    body:         ColabUrlRequest,
-    current_user: CurrentManager = ...,
-) -> dict:
-    """
-    Colab URL ni runtime da o'rnatish.
-
-    Cell 6 ishga tushgandan keyin chiqadigan URL ni bu yerga yuboring.
-    Misol: {"url": "https://ceramic-benjamin-folder-reno.trycloudflare.com"}
-    """
-    global _colab_stream_url
-    _colab_stream_url = body.url.rstrip("/")
-
-    # URL ishlayotganini tekshirish
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{_colab_stream_url}/status")
-            if r.status_code == 200:
-                data = r.json()
-                return {
-                    "ok":      True,
-                    "url":     _colab_stream_url,
-                    "message": "Colab ulandi va tayyor",
-                    "colab":   data,
-                }
-    except Exception:
-        pass
-
-    return {
-        "ok":      True,
-        "url":     _colab_stream_url,
-        "message": "URL saqlandi (lekin Colab hozir javob bermadi — Cell 6 ishlamoqdami?)",
-    }
-
-
-@router.get(
-    "/colab-status",
-    status_code=http_status.HTTP_200_OK,
-    summary="Colab stream holati",
-)
-async def get_colab_status(
-    current_user: CurrentUser = ...,
-) -> dict:
-    """Colab server holati va statistikasi."""
-    url = get_colab_url()
-    if not url:
-        return {"connected": False, "message": "Colab URL sozlanmagan"}
-
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f"{url}/status")
-            if r.status_code == 200:
-                return {"connected": True, "url": url, **r.json()}
-    except Exception as e:
-        return {"connected": False, "url": url, "error": str(e)}
 
 
 # =============================================================================

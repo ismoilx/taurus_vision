@@ -40,7 +40,6 @@ from app.api.v1.endpoints import (
     employees,
     milk,
     medicine,
-    colab,
 )
 
 router = APIRouter(prefix="/v1")
@@ -116,6 +115,3 @@ router.include_router(milk.router)
 
 # --- Dori-Darmon Ombori ---
 router.include_router(medicine.router)
-
-# --- Google Colab GPU Integration ---
-router.include_router(colab.router)
