@@ -12,7 +12,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Text, ForeignKey, Index
+from sqlalchemy import String, Text, ForeignKey, Index, Boolean
 from sqlalchemy import JSON as JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,7 @@ class AlertType(str, enum.Enum):
     ADI_SHARP_DROP         = "adi_sharp_drop"
     ADI_WARNING            = "adi_warning"
     FEEDING_PROBLEM        = "feeding_problem"
+    FEEDING_STOPPED        = "feeding_stopped"
 
     # Kamera / tizim
     CAMERA_OFFLINE         = "camera_offline"
@@ -41,6 +42,9 @@ class AlertType(str, enum.Enum):
     # Sprint 17-18: IoT sensor
     SENSOR_OFFLINE         = "sensor_offline"
     SENSOR_ANOMALY         = "sensor_anomaly"
+    HIGH_TEMPERATURE       = "high_temperature"
+    LOW_HEART_RATE         = "low_heart_rate"
+    HIGH_HEART_RATE        = "high_heart_rate"
 
     # Boshqa
     SYSTEM_ERROR           = "system_error"
@@ -159,6 +163,13 @@ class Alert(BaseModel):
         Text,
         nullable=True,
         comment="Hal qiluvchi izohi",
+    )
+
+    auto_generated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="AI yoki tizim tomonidan avtomatik yaratilganmi",
     )
 
     # ------------------------------------------------------------------ #

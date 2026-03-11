@@ -674,7 +674,7 @@ class AlertService:
                 # Sprint 11: Yangi alert uchun email notification
                 # LOW severity uchun email yuborilmaydi (notification_service da filtrlanadi)
                 try:
-                    from workers.tasks.notification_tasks import send_alert_email
+                    from workers.notification_tasks import send_alert_email
                     send_alert_email.delay(
                         alert_id   = created.id,
                         animal_tag = None,  # AlertService animal_tag ni bilmaydi

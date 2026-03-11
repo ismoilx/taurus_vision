@@ -38,9 +38,15 @@ def upgrade() -> None:
         END $$;
     """)
 
-    # ── notifications jadvali ─────────────────────────────────────────────────
-    # MUHIM: create_type=False — enum yuqorida yaratilgan, SQLAlchemy qayta
-    #        yaratmasligi uchun kerak
+    # ── notifications jadvali mavjudligini tekshir ────────────────────────────
+    conn = op.get_bind()
+    result = conn.execute(sa.text(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='notifications')"
+    ))
+    if result.scalar():
+        return  # jadval allaqachon bor — o'tkazib yuborish
+
+    # ── notifications jadvali — String ishlatamiz (enum yuqorida yaratilgan) ──
     op.create_table(
         "notifications",
 
@@ -48,22 +54,12 @@ def upgrade() -> None:
         sa.Column("user_id",      sa.Integer(),    nullable=True,
                   comment="NULL = broadcast (barcha foydalanuvchilarga)"),
 
-        sa.Column("n_type",
-                  sa.Enum("info", "success", "warning", "alert", "system",
-                          name="notification_type_enum",
-                          create_type=False),
-                  nullable=False,
-                  server_default="info"),
+        sa.Column("n_type",       sa.String(20),   nullable=False, server_default="info"),
 
         sa.Column("title",        sa.String(120),  nullable=False),
         sa.Column("message",      sa.Text(),       nullable=False),
 
-        sa.Column("entity_type",
-                  sa.Enum("animal", "camera", "sensor", "alert", "task",
-                          "training", "report", "system", "user",
-                          name="notification_entity_type_enum",
-                          create_type=False),
-                  nullable=True),
+        sa.Column("entity_type",  sa.String(20),   nullable=True),
         sa.Column("entity_id",    sa.Integer(),    nullable=True),
         sa.Column("action_url",   sa.String(255),  nullable=True),
 
