@@ -72,9 +72,14 @@ class EntityNotFoundError(TaurusException):
         self,
         entity: Optional[str] = None,
         identifier: Any = None,
+        entity_id: Any = None,      # alias for identifier (backward-compat)
         message: Optional[str] = None,
         details: Optional[dict[str, Any]] = None,
     ) -> None:
+        # entity_id — eski servis kodlari uchun alias
+        if identifier is None and entity_id is not None:
+            identifier = entity_id
+
         if message is None:
             if entity and identifier is not None:
                 message = f"{entity} with identifier '{identifier}' not found"

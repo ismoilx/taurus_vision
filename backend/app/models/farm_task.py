@@ -120,6 +120,7 @@ class FarmTask(BaseModel):
     task_type: Mapped[TaskType] = mapped_column(
         String(30),
         nullable=False,
+        default=TaskType.OTHER,
         index=True,
         comment="Vazifa turi",
     )

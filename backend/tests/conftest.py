@@ -200,9 +200,44 @@ def mock_frame() -> np.ndarray:
 
 @pytest.fixture
 def test_client(app):
-    """Sinxron TestClient — test_cameras_api.py legacy uchun."""
+    """Sinxron TestClient — test_cameras_api.py legacy uchun.
+    
+    Auth dependency override: cameras API testlari token bermaydi,
+    shuning uchun get_current_active_user ni mock User bilan override qilamiz.
+    """
     from fastapi.testclient import TestClient
-    return TestClient(app)
+    from app.api.v1.deps import get_current_active_user, require_manager
+
+    class _MockUser:
+        id = 1
+        email = "test@taurus.uz"
+        is_active = True
+        is_manager = True
+        is_admin = True
+
+        @property
+        def role(self):
+            class _Role:
+                value = "admin"
+            return _Role()
+
+    _mock_user = _MockUser()
+
+    async def _override_user():
+        return _mock_user
+
+    async def _override_manager():
+        return _mock_user
+
+    app.dependency_overrides[get_current_active_user] = _override_user
+    app.dependency_overrides[require_manager] = _override_manager
+
+    client = TestClient(app)
+    yield client
+
+    # Tozalash
+    app.dependency_overrides.pop(get_current_active_user, None)
+    app.dependency_overrides.pop(require_manager, None)
 
 
 @pytest.fixture

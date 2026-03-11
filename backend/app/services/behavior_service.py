@@ -226,7 +226,7 @@ def _compute_social_score(social_ratio: float) -> BehaviorScore:
         pct = 90.0
         desc = f"Ijtimoiy jonivor ({social_ratio:.0%} vaqt birgalikda)"
     elif social_ratio >= 0.1:
-        pct = 65.0
+        pct = 75.0
         desc = f"O'rtacha ijtimoiy ({social_ratio:.0%} vaqt birgalikda)"
     elif social_ratio > 0:
         pct = 35.0

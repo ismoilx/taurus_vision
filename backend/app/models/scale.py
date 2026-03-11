@@ -24,6 +24,7 @@ class ScaleType(str, enum.Enum):
     MANUAL = "manual"    # Foydalanuvchi qo'lda kiritadi
     SERIAL = "serial"    # USB/RS-232 serial port
     API    = "api"       # Tarozi o'zi HTTP yuboradi
+    FLOOR  = "floor"     # Pol tarozisi (katta hayvonlar uchun)
 
 
 class ScaleStatus(str, enum.Enum):

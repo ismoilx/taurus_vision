@@ -262,14 +262,30 @@ class HealthRecordResponse(HealthRecordBase):
         None,
         description="Resolution timestamp"
     )
-    created_at: datetime = Field(
-        ...,
+    created_at: Optional[datetime] = Field(
+        None,
         description="Record creation timestamp"
     )
-    updated_at: datetime = Field(
-        ...,
+    updated_at: Optional[datetime] = Field(
+        None,
         description="Record update timestamp"
     )
+
+    @field_validator("record_type", mode="before")
+    @classmethod
+    def coerce_record_type(cls, v):
+        """Enum yoki string qiymatni Literal ga moslashtirish."""
+        if hasattr(v, "value"):
+            return v.value
+        return v
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def coerce_severity(cls, v):
+        """Enum yoki string qiymatni Literal ga moslashtirish."""
+        if hasattr(v, "value"):
+            return v.value
+        return v
     
     model_config = ConfigDict(
         from_attributes=True,
@@ -327,6 +343,11 @@ class HealthRecordListResponse(BaseModel):
         description="Maximum number of records returned",
         ge=1
     )
+
+    @property
+    def items(self) -> List[HealthRecordResponse]:
+        """Backward-compatibility alias for `records`."""
+        return self.records
     
     model_config = ConfigDict(
         json_schema_extra={

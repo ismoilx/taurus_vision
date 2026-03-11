@@ -18,10 +18,23 @@ ARXITEKTURA:
 
 from datetime import datetime
 from typing import Optional
+import enum
+
 from sqlalchemy import String, Float, Index, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
+
+
+class SensorType(str, enum.Enum):
+    """IoT sensor qurilma turlari."""
+    TEMPERATURE  = "temperature"   # Tana harorati
+    HEART_RATE   = "heart_rate"    # Yurak urishi
+    ACTIVITY     = "activity"      # Harakat/faollik
+    WEIGHT       = "weight"        # Vazn platforma
+    HUMIDITY     = "humidity"      # Namlik
+    GPS          = "gps"           # Joylashuv
+    OTHER        = "other"         # Boshqa
 
 
 class SensorReading(BaseModel):

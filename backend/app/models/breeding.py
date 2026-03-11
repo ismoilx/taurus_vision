@@ -44,6 +44,10 @@ class MatingMethod(str, enum.Enum):
     EMBRYO_TRANSFER       = "embryo_transfer"        # Embrion ko'chirish
 
 
+# Backward-compatibility alias — testlar BreedingMethod nomi bilan import qiladi
+BreedingMethod = MatingMethod
+
+
 class BreedingStatus(str, enum.Enum):
     """Nasl yozuvining joriy holati."""
     PLANNED             = "planned"              # Rejalashtirilgan

@@ -91,9 +91,10 @@ class Detection(BaseModel):
         comment="COCO dataset class id",
     )
 
-    class_name: Mapped[str] = mapped_column(
+    class_name: Mapped[Optional[str]] = mapped_column(
         String(50),
-        nullable=False,
+        nullable=True,
+        default="unknown",
         comment="Human-readable COCO class name",
     )
 

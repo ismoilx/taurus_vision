@@ -221,6 +221,15 @@ class FeedStock(BaseModel):
         return self.current_kg < self.min_threshold_kg
 
     @property
+    def quantity_kg(self) -> float:
+        """Backward-compatibility alias for `current_kg`."""
+        return self.current_kg
+
+    @quantity_kg.setter
+    def quantity_kg(self, value: float) -> None:
+        self.current_kg = value
+
+    @property
     def stock_percent(self) -> float:
         """Minimal chegaraga nisbatan foiz (100+ = yetarli, 0 = qurib bitdi)."""
         if self.min_threshold_kg <= 0:

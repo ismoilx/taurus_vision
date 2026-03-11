@@ -94,6 +94,11 @@ class PaymentMethod(str, enum.Enum):
     CREDIT   = "credit"    # Kredit
 
 
+# Backward-compatibility alias — testlar TransactionCategory nomi bilan import qiladi
+# ExpenseCategory ni alias sifatida ishlatamiz chunki u FEED qiymatini o'z ichiga oladi
+TransactionCategory = ExpenseCategory
+
+
 # =============================================================================
 # FINANCE TRANSACTION
 # =============================================================================

@@ -718,3 +718,16 @@ def get_pipeline_manager() -> PipelineManager:
     if _pipeline_manager is None:
         _pipeline_manager = PipelineManager()
     return _pipeline_manager
+
+def get_ws_manager():
+    """
+    WebSocket manager ni qaytaradi.
+
+    Test mock lari uchun module darajasida eksport qilinadi.
+    Haqiqiy implementatsiya app.api.v1.websocket dan keladi.
+    """
+    try:
+        from app.api.v1.websocket import get_ws_manager as _get_ws_manager
+        return _get_ws_manager()
+    except Exception:
+        return None

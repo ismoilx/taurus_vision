@@ -209,6 +209,21 @@ class Alert(BaseModel):
     def is_critical(self) -> bool:
         return self.severity == AlertSeverity.CRITICAL
 
+    @property
+    def resolution_note(self) -> Optional[str]:
+        """Backward-compatibility alias for `notes` field."""
+        return self.notes
+
+    def resolve(self, resolved_by_id: Optional[int] = None, note: Optional[str] = None) -> None:
+        """Alertni RESOLVED holatiga o'tkazish helper metodi."""
+        from datetime import datetime
+        self.status = AlertStatus.RESOLVED
+        self.resolved_at = datetime.utcnow()
+        if resolved_by_id is not None:
+            self.resolved_by = resolved_by_id
+        if note is not None:
+            self.notes = note
+
 # =============================================================================
 # SEVERITY MAP — alert_service.py tomonidan ishlatiladi
 # =============================================================================

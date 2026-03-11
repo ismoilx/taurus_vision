@@ -194,14 +194,18 @@ class HealthRecordService:
             (r.severity.value if hasattr(r.severity, 'value') else r.severity) == critical_val
         )
         by_severity = {}
+        by_type = {}
         for r in records:
             sev = r.severity.value if hasattr(r.severity, 'value') else str(r.severity)
             by_severity[sev] = by_severity.get(sev, 0) + 1
+            rtype = r.record_type.value if hasattr(r.record_type, 'value') else str(r.record_type)
+            by_type[rtype] = by_type.get(rtype, 0) + 1
         return {
-            "total_records": total,
-            "unresolved": unresolved,
+            "total_records":      total,
+            "unresolved":         unresolved,
             "critical_unresolved": critical_unresolved,
-            "by_severity": by_severity,
+            "by_severity":        by_severity,
+            "by_type":            by_type,
         }
 
     async def get_health_summary(self, db: AsyncSession, animal_id: int) -> dict:
@@ -209,14 +213,66 @@ class HealthRecordService:
         animal = await db.get(Animal, animal_id)
         if animal is None:
             raise ValueError(f"Animal {animal_id} not found")
+
         stats = await self.get_health_statistics(db, animal_id=animal_id)
         score = self._calculate_health_score(stats)
         status = self._get_health_status(score)
+
+        # Unresolved records
+        unresolved_list, _ = await self.get_unresolved_records(db, animal_id=animal_id)
+        unresolved_items = [
+            {
+                "id":        r.id,
+                "type":      r.record_type.value if hasattr(r.record_type, "value") else r.record_type,
+                "severity":  r.severity.value if hasattr(r.severity, "value") else r.severity,
+                "diagnosis": r.diagnosis,
+            }
+            for r in unresolved_list
+        ]
+
+        # Latest record
+        all_records, _ = await self.get_animal_records(db, animal_id, skip=0, limit=1)
+        latest_record = None
+        if all_records:
+            r = all_records[0]
+            latest_record = {
+                "id":          r.id,
+                "type":        r.record_type.value if hasattr(r.record_type, "value") else r.record_type,
+                "severity":    r.severity.value if hasattr(r.severity, "value") else r.severity,
+                "diagnosis":   r.diagnosis,
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+            }
+
+        # Upcoming checkups
+        upcoming, _ = await self.get_upcoming_checkups(db)
+        animal_upcoming = [r for r in upcoming if r.animal_id == animal_id]
+
         return {
-            "animal_id": animal_id,
-            "total_records": stats["total_records"],
-            "unresolved_issues": stats["unresolved"],
-            "health_score": score,
+            "animal_id":         animal_id,
+            "animal_tag":        animal.tag_id if hasattr(animal, "tag_id") else str(animal_id),
+            "total_records":     stats["total_records"],
+            "latest_record":     latest_record,
+            "unresolved_issues": {
+                "count":   len(unresolved_items),
+                "records": unresolved_items,
+            },
+            "upcoming_checkups": {
+                "count":     len(animal_upcoming),
+                "next_date": (
+                    animal_upcoming[0].next_checkup_date.isoformat()
+                    if animal_upcoming and animal_upcoming[0].next_checkup_date
+                    else None
+                ),
+            },
+            "statistics": {
+                "total_records":      stats["total_records"],
+                "by_type":            stats.get("by_type", {}),
+                "by_severity":        stats.get("by_severity", {}),
+                "unresolved":         stats.get("unresolved", 0),
+                "critical_unresolved": stats.get("critical_unresolved", 0),
+                "health_score":       score,
+            },
+            "health_score":  score,
             "health_status": status,
         }
 

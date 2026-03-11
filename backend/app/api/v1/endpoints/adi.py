@@ -216,7 +216,8 @@ async def trigger_calculation(
             results.append(ADICalculationResult(
                 success=True, animal_id=request.animal_id,
                 calculation_date=adi.calculation_date,
-                adi_score=adi.adi_score, category=adi.category,
+                adi_score=float(adi.adi_score) if adi.adi_score is not None else 0.0,
+                category=adi.category,
                 data_quality=adi.data_quality,
             ))
         except EntityNotFoundError:
