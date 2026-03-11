@@ -21,6 +21,7 @@ import {
   WifiOff,
   Droplets,
   Pill,
+  Beef,
 } from 'lucide-react';
 import { useState, lazy, Suspense, useEffect, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -105,6 +106,7 @@ const ScalePage         = lazy(() => import('./pages/ScalePage'));
 const BreedingPage      = lazy(() => import('./pages/BreedingPage'));   // Sprint 25-26
 const EmployeesPage     = lazy(() => import('./pages/EmployeesPage'));  // Hodimlar moduli
 const MilkProductionPage = lazy(() => import('./pages/MilkProductionPage')); // Sut ishlab chiqarish
+const MeatProductionPage = lazy(() => import('./pages/MeatProductionPage')); // Go'sht ishlab chiqarish
 const MedicinePage      = lazy(() => import('./pages/MedicinePage'));   // Dori-darmon ombori
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to:'/predictions', icon:Brain,         label:'Bashorat'         },
       { to:'/breeding',    icon:Baby,          label:'Nasl & Zotchilik' }, // Sprint 25-26
       { to:'/milk',        icon:Droplets,      label:'Sut Ishlab Chiqarish' },
+      { to:'/meat',        icon:Beef,          label:"Go'sht Ishlab Chiqarish" },
     ],
   },
   {
@@ -862,6 +865,7 @@ export default function App() {
                     <Route path="/breeding"      element={<BreedingPage/>}/>   {/* Sprint 25-26 */}
                     <Route path="/employees"     element={<EmployeesPage/>}/>  {/* Hodimlar */}
                     <Route path="/milk"          element={<MilkProductionPage/>}/> {/* Sut */}
+                    <Route path="/meat"          element={<MeatProductionPage/>}/> {/* Go'sht */}
                     <Route path="/medicine"      element={<MedicinePage/>}/>   {/* Dori ombori */}
                     <Route path="*"              element={<Navigate to="/" replace/>}/>
                   </Routes>

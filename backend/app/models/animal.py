@@ -258,6 +258,14 @@ class Animal(BaseModel):
         order_by="MedicineUsage.given_date.desc()",
     )
 
+    slaughter_records: Mapped[list["SlaughterRecord"]] = relationship(  # type: ignore[name-defined]
+        "SlaughterRecord",
+        back_populates="animal",
+        cascade="all, delete-orphan",
+        lazy="noload",
+        order_by="SlaughterRecord.slaughter_date.desc()",
+    )
+
     # ------------------------------------------------------------------ #
     # Table Constraints                                                    #
     # ------------------------------------------------------------------ #

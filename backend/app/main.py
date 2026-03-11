@@ -272,23 +272,38 @@ async def startup_event():
         try:
             from app.services.ai.frame_collector import initialize_frame_collector
             import os
-            os.makedirs(settings.TRAINING_FRAMES_DIR, exist_ok=True)
-            initialize_frame_collector(
-                save_dir        = settings.TRAINING_FRAMES_DIR,
-                collect_every_n = settings.TRAINING_COLLECT_EVERY_N,
-                min_detections  = settings.TRAINING_MIN_DETECTIONS,
-                max_per_camera  = settings.TRAINING_MAX_PER_CAMERA,
-                max_total       = settings.TRAINING_MAX_TOTAL,
-                jpeg_quality    = settings.TRAINING_JPEG_QUALITY,
-            )
-            logger.info(
-                f"✓ Frame collector initialized | "
-                f"dir={settings.TRAINING_FRAMES_DIR} | "
-                f"every_n={settings.TRAINING_COLLECT_EVERY_N}"
-            )
+
+            # Papkani yaratishga urinish — OS xatosi bo'lsa collection o'chiriladi,
+            # lekin bu CRITICAL emas, dastur ishlashda davom etadi.
+            try:
+                os.makedirs(settings.TRAINING_FRAMES_DIR, exist_ok=True)
+            except (PermissionError, OSError) as perm_exc:
+                logger.warning(
+                    f"⚠️ Training frames directory yaratib bo'lmadi "
+                    f"({type(perm_exc).__name__}): {settings.TRAINING_FRAMES_DIR}. "
+                    f"Frame collection o'chirib qo'yildi. "
+                    f"Tuzatish: docker-compose da 'training_data' named volume ishlatilsin."
+                )
+                logger.info("ℹ️ Training frame collection disabled (directory permission error)")
+            else:
+                # Papka muvaffaqiyatli yaratildi — collector ishga tushiriladi
+                initialize_frame_collector(
+                    save_dir        = settings.TRAINING_FRAMES_DIR,
+                    collect_every_n = settings.TRAINING_COLLECT_EVERY_N,
+                    min_detections  = settings.TRAINING_MIN_DETECTIONS,
+                    max_per_camera  = settings.TRAINING_MAX_PER_CAMERA,
+                    max_total       = settings.TRAINING_MAX_TOTAL,
+                    jpeg_quality    = settings.TRAINING_JPEG_QUALITY,
+                )
+                logger.info(
+                    f"✓ Frame collector initialized | "
+                    f"dir={settings.TRAINING_FRAMES_DIR} | "
+                    f"every_n={settings.TRAINING_COLLECT_EVERY_N}"
+                )
         except Exception as exc:
-            logger.error(f"✗ Frame collector initialization failed: {exc}")
-            logger.warning("⚠️ Training data collection disabled")
+            # Boshqa kutilmagan xatolar — masalan import muammosi
+            logger.warning(f"⚠️ Frame collector initialization skipped: {exc}")
+            logger.info("ℹ️ Training frame collection disabled")
     else:
         logger.info("ℹ️ Training frame collection disabled (TRAINING_COLLECTION_ENABLED=False)")
 

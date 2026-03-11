@@ -40,6 +40,7 @@ from app.api.v1.endpoints import (
     employees,
     milk,
     medicine,
+    meat,
 )
 
 router = APIRouter(prefix="/v1")
@@ -115,3 +116,6 @@ router.include_router(milk.router)
 
 # --- Dori-Darmon Ombori ---
 router.include_router(medicine.router)
+
+# --- Go'sht Ishlab Chiqarish ---
+router.include_router(meat.router)

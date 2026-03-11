@@ -107,7 +107,9 @@ services:
       - ./backend/tests:/app/tests
       - backend_data:/app/data
       - ./data/videos:/app/data/videos
-      - ./data/training:/app/data/training
+      # Named volume ishlatiladi — bind mount UID/permission muammosini hal qiladi.
+      # Host papkasi kerak bo'lsa: `docker cp taurus-backend:/app/data/training ./data/training`
+      - training_data:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,7 +124,11 @@ services:
     networks:
       - taurus-network
     command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "
+        mkdir -p /app/data/training/frames /app/data/training/datasets /app/data/training/models
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
     mem_limit: 2g
     memswap_limit: 2g
 
@@ -146,7 +152,7 @@ services:
       - ./workers:/app/workers
       - backend_data:/app/data
       - ./data/videos:/app/data/videos
-      - ./data/training:/app/data/training
+      - training_data:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -199,7 +205,7 @@ services:
       - ./backend/ml:/app/ml
       - ./workers:/app/workers
       - backend_data:/app/data
-      - ./data/training:/app/data/training
+      - training_data:/app/data/training
     depends_on:
       postgres:
         condition: service_healthy
@@ -328,5 +334,7 @@ volumes:
     name: taurus_redis_data
   backend_data:
     name: taurus_backend_data
+  training_data:
+    name: taurus_training_data
   frontend_node_modules:
     name: taurus_frontend_node_modules

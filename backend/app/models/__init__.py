@@ -20,6 +20,7 @@ from app.models.scale            import Scale, ScaleType, ScaleStatus
 from app.models.weight_measurement import WeightMeasurement, WeightSource
 from app.models.health_record    import HealthRecord
 from app.models.milk_production  import MilkProduction, MilkSession, MilkQualityGrade
+from app.models.meat_production  import SlaughterRecord, SlaughterPurpose, MeatQualityGrade
 from app.models.medicine         import (
     MedicineInventory,
     MedicineUsage,
