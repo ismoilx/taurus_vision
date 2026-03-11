@@ -33,6 +33,25 @@ class MilkProductionBase(BaseModel):
     milked_by: Optional[str] = Field(None, max_length=200, description="Kim sog'di")
     notes: Optional[str] = Field(None, description="Izoh")
 
+    @field_validator("quality_grade", mode="before")
+    @classmethod
+    def normalize_quality_grade(cls, v):
+        if v is None:
+            return v
+        # Map common aliases to valid enum values
+        _alias_map = {
+            "grade_a": "premium",
+            "a": "premium",
+            "grade_b": "standard",
+            "b": "standard",
+            "grade_c": "low",
+            "c": "low",
+        }
+        if isinstance(v, str):
+            v_lower = v.lower()
+            return _alias_map.get(v_lower, v)
+        return v
+
 
 # =============================================================================
 # CREATE / UPDATE

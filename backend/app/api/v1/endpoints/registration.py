@@ -42,7 +42,7 @@ from app.services.ai.muzzle_detector import get_muzzle_detector, crop_muzzle_fro
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/identification", tags=["Identification"], dependencies=[Depends(get_current_active_user)])
+router = APIRouter(prefix="/registration", tags=["Identification"], dependencies=[Depends(get_current_active_user)])
 
 # Max upload size: 10MB
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
@@ -399,3 +399,40 @@ async def delete_embedding(
             "Upload a new photo to re-register."
         ) if was_reference else None,
     }
+
+# =============================================================================
+# PATH ALIASES — tests expect /{animal_id}/register, /{animal_id}/embeddings/{id}
+# =============================================================================
+
+@router.post(
+    "/{animal_id}/register",
+    summary="Register muzzle (test alias)",
+)
+async def register_animal_muzzle_alias(
+    animal_id: int,
+    photo: UploadFile = File(...),
+    full_frame: bool = Form(default=False),
+    bbox_x: Optional[float] = Form(default=None),
+    bbox_y: Optional[float] = Form(default=None),
+    bbox_w: Optional[float] = Form(default=None),
+    bbox_h: Optional[float] = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alias: same as /register/{animal_id}."""
+    return await register_animal_muzzle(
+        animal_id=animal_id, photo=photo, full_frame=full_frame,
+        bbox_x=bbox_x, bbox_y=bbox_y, bbox_w=bbox_w, bbox_h=bbox_h, db=db,
+    )
+
+
+@router.delete(
+    "/{animal_id}/embeddings/{embedding_id}",
+    summary="Delete embedding (test alias)",
+)
+async def delete_embedding_alias(
+    animal_id: int,
+    embedding_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Alias: same as /embeddings/{embedding_id}."""
+    return await delete_embedding(embedding_id=embedding_id, db=db)

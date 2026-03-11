@@ -73,23 +73,31 @@ class BreedingRecordCreate(BaseModel):
     POST /breeding/records — Yangi nasl yozuvi yaratish.
 
     VALIDATSIYA QOIDALARI:
-        1. father_id YOKI external_sire_tag ALBATTA kerak
+        1. father_id/sire_id YOKI external_sire_tag ALBATTA kerak (AI metod uchun ixtiyoriy)
         2. Mating date kelajakda bo'lmasin
         3. Expected birth date avtomatik hisoblanadi (agar berilmasa)
     """
 
     farm_id: Optional[int] = Field(None, description="Ferma ID (null = default farm)")
 
-    mother_id: int = Field(..., gt=0, description="Ona jonivor ID (female animal)")
+    # Support both mother_id and dam_id (test alias)
+    mother_id:  Optional[int] = Field(None, gt=0, description="Ona jonivor ID (female animal)")
+    dam_id:     Optional[int] = Field(None, gt=0, description="Alias for mother_id")
 
-    # Ota — ichki yoki tashqi
+    # Ota — ichki yoki tashqi; support sire_id alias
     father_id:           Optional[int] = Field(None, gt=0)
+    sire_id:             Optional[int] = Field(None, gt=0, description="Alias for father_id")
     external_sire_tag:   Optional[str] = Field(None, max_length=100)
     external_sire_breed: Optional[str] = Field(None, max_length=100)
     external_sire_farm:  Optional[str] = Field(None, max_length=200)
 
-    mating_date:   date         = Field(..., description="Juftlashish sanasi")
-    mating_method: MatingMethod = Field(MatingMethod.NATURAL)
+    # Support both mating_date and breeding_date (test alias)
+    mating_date:    Optional[date]  = Field(None, description="Juftlashish sanasi")
+    breeding_date:  Optional[date]  = Field(None, description="Alias for mating_date")
+
+    # Support both mating_method and method (test alias)
+    mating_method:  Optional[MatingMethod] = Field(None)
+    method:         Optional[str]          = Field(None, description="Alias for mating_method")
 
     # Gestatsiya (avtomatik hisoblanadi, lekin override mumkin)
     gestation_days: Optional[int] = Field(
@@ -105,20 +113,39 @@ class BreedingRecordCreate(BaseModel):
     veterinarian: Optional[str] = Field(None, max_length=200)
     notes:        Optional[str] = Field(None, max_length=2000)
 
-    @field_validator("mating_date")
-    @classmethod
-    def mating_not_future(cls, v: date) -> date:
-        if v > date.today():
-            raise ValueError("Juftlashish sanasi kelajakda bo'lishi mumkin emas")
-        return v
-
     @model_validator(mode="after")
-    def validate_sire(self) -> "BreedingRecordCreate":
-        if not self.father_id and not self.external_sire_tag:
-            raise ValueError(
-                "Ota jonivor ko'rsatilishi shart: "
-                "father_id (ichki) yoki external_sire_tag (tashqi) dan biri."
-            )
+    def resolve_and_validate(self) -> "BreedingRecordCreate":
+        # Resolve dam_id → mother_id
+        if self.mother_id is None and self.dam_id is not None:
+            self.mother_id = self.dam_id
+        if self.mother_id is None:
+            raise ValueError("'mother_id' yoki 'dam_id' maydoni talab qilinadi")
+        # Resolve sire_id → father_id
+        if self.father_id is None and self.sire_id is not None:
+            self.father_id = self.sire_id
+        # Resolve breeding_date → mating_date
+        if self.mating_date is None and self.breeding_date is not None:
+            self.mating_date = self.breeding_date
+        if self.mating_date is None:
+            raise ValueError("'mating_date' yoki 'breeding_date' maydoni talab qilinadi")
+        if self.mating_date > date.today():
+            raise ValueError("Juftlashish sanasi kelajakda bo'lishi mumkin emas")
+        # Resolve method → mating_method
+        if self.mating_method is None and self.method is not None:
+            try:
+                self.mating_method = MatingMethod(self.method)
+            except ValueError:
+                self.mating_method = MatingMethod.NATURAL
+        if self.mating_method is None:
+            self.mating_method = MatingMethod.NATURAL
+        # AI metodda sire_id ixtiyoriy
+        method_val = self.mating_method.value if self.mating_method else ""
+        if "artificial" not in method_val:
+            if not self.father_id and not self.external_sire_tag:
+                raise ValueError(
+                    "Ota jonivor ko'rsatilishi shart: "
+                    "father_id/sire_id (ichki) yoki external_sire_tag (tashqi) dan biri."
+                )
         if self.father_id and self.father_id == self.mother_id:
             raise ValueError("Ona va ota bir xil jonivor bo'lishi mumkin emas")
         return self

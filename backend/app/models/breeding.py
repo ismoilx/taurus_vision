@@ -51,6 +51,7 @@ BreedingMethod = MatingMethod
 class BreedingStatus(str, enum.Enum):
     """Nasl yozuvining joriy holati."""
     PLANNED             = "planned"              # Rejalashtirilgan
+    PENDING             = "planned"              # Backward-compat alias
     CONFIRMED_PREGNANT  = "confirmed_pregnant"   # Homiladorlik tasdiqlangan
     BIRTHED             = "birthed"              # Tug'ildi
     FAILED              = "failed"               # Muvaffaqiyatsiz (homiladorlik bo'lmadi)
@@ -385,6 +386,26 @@ class BreedingRecord(BaseModel):
         tag = self.external_sire_tag or "Noma'lum"
         breed = self.external_sire_breed or ""
         return f"Tashqi: {tag}" + (f" ({breed})" if breed else "")
+
+    def __init__(self, **kwargs):
+        # Accept test-friendly aliases
+        if "dam_id" in kwargs and "mother_id" not in kwargs:
+            kwargs["mother_id"] = kwargs.pop("dam_id")
+        elif "dam_id" in kwargs:
+            kwargs.pop("dam_id")
+        if "sire_id" in kwargs and "father_id" not in kwargs:
+            kwargs["father_id"] = kwargs.pop("sire_id")
+        elif "sire_id" in kwargs:
+            kwargs.pop("sire_id")
+        if "breeding_date" in kwargs and "mating_date" not in kwargs:
+            kwargs["mating_date"] = kwargs.pop("breeding_date")
+        elif "breeding_date" in kwargs:
+            kwargs.pop("breeding_date")
+        if "method" in kwargs and "mating_method" not in kwargs:
+            kwargs["mating_method"] = kwargs.pop("method")
+        elif "method" in kwargs:
+            kwargs.pop("method")
+        super().__init__(**kwargs)
 
     def __repr__(self) -> str:
         return (

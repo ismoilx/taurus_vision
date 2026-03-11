@@ -272,3 +272,45 @@ async def ai_health_check(
         "model_loaded": yolo_service.is_loaded,
         "model_name": yolo_service.model_name,
     }
+
+# =============================================================================
+# PATH ALIASES — tests use /upload and /base64
+# =============================================================================
+
+@router.post(
+    "/upload",
+    summary="Detect objects in uploaded image (alias for /detect-upload)",
+)
+async def detect_from_upload_alias(
+    file: UploadFile = File(...),
+    confidence_threshold: float = Query(default=0.5),
+    yolo_service: YoloService = Depends(get_yolo_service),
+):
+    """Alias for /detect-upload — same handler."""
+    return await detect_from_upload(
+        file=file,
+        confidence_threshold=confidence_threshold,
+        yolo_service=yolo_service,
+    )
+
+
+@router.post(
+    "/base64",
+    summary="Detect objects in base64 image (alias for /detect-base64)",
+)
+async def detect_from_base64_alias(
+    image_base64: str = "",
+    confidence_threshold: float = 0.5,
+    target_classes: list[int] | None = None,
+    yolo_service: YoloService = Depends(get_yolo_service),
+):
+    """Alias for /detect-base64."""
+    if not image_base64:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(status_code=422, detail="image_base64 maydoni talab qilinadi")
+    return await detect_from_base64(
+        image_base64=image_base64,
+        confidence_threshold=confidence_threshold,
+        target_classes=target_classes,
+        yolo_service=yolo_service,
+    )

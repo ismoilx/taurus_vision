@@ -226,7 +226,7 @@ async def trigger_calculation(
         except Exception as e:
             results.append(ADICalculationResult(
                 success=False, animal_id=request.animal_id,
-                calculation_date=target_date, error=str(e),
+                calculation_date=target_date, adi_score=0.0, error=str(e),
             ))
     else:
         # Barcha aktiv jonivorlar
@@ -243,13 +243,14 @@ async def trigger_calculation(
                 results.append(ADICalculationResult(
                     success=True, animal_id=animal_id,
                     calculation_date=adi.calculation_date,
-                    adi_score=adi.adi_score, category=adi.category,
+                    adi_score=float(adi.adi_score) if adi.adi_score is not None else 0.0,
+                    category=adi.category,
                     data_quality=adi.data_quality,
                 ))
             except Exception as e:
                 results.append(ADICalculationResult(
                     success=False, animal_id=animal_id,
-                    calculation_date=target_date, error=str(e),
+                    calculation_date=target_date, adi_score=0.0, error=str(e),
                 ))
 
     duration_ms = (time.monotonic() - start_time) * 1000

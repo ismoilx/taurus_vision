@@ -50,8 +50,83 @@ DB             = Annotated[AsyncSession, Depends(get_db)]
 
 
 # =============================================================================
-# TRANSACTIONS
+# ROOT ROUTES (test-compatible aliases for /transactions)
 # =============================================================================
+
+@router.get(
+    "/",
+    response_model=FinanceTransactionListResponse,
+    summary="Operatsiyalar ro'yxati (root alias)",
+)
+async def list_transactions_root(
+    db:        DB,
+    user:      CurrentUser,
+    type:      Optional[str]  = Query(None),
+    category:  Optional[str]  = Query(None),
+    animal_id: Optional[int]  = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to:   Optional[date] = Query(None),
+    page:      int            = Query(1, ge=1),
+    size:      int            = Query(20, ge=1, le=100),
+) -> FinanceTransactionListResponse:
+    return await FinanceService(db).list_transactions(
+        type=type, category=category, animal_id=animal_id,
+        date_from=date_from, date_to=date_to, page=page, size=size,
+    )
+
+
+@router.post(
+    "/",
+    response_model=FinanceTransactionResponse,
+    status_code=201,
+    summary="Yangi operatsiya (root alias)",
+)
+async def create_transaction_root(
+    db:   DB,
+    user: CurrentManager,
+    data: FinanceTransactionCreate,
+) -> FinanceTransactionResponse:
+    return await FinanceService(db).create(data, created_by=user.id)
+
+
+@router.get(
+    "/{tx_id:int}",
+    response_model=FinanceTransactionResponse,
+    summary="Bitta operatsiya (root alias)",
+)
+async def get_transaction_root(
+    db:    DB,
+    user:  CurrentUser,
+    tx_id: int,
+) -> FinanceTransactionResponse:
+    return await FinanceService(db).get_by_id(tx_id)
+
+
+@router.patch(
+    "/{tx_id:int}",
+    response_model=FinanceTransactionResponse,
+    summary="Operatsiyani tahrirlash (root alias)",
+)
+async def update_transaction_root(
+    db:    DB,
+    user:  CurrentManager,
+    tx_id: int,
+    data:  FinanceTransactionUpdate,
+) -> FinanceTransactionResponse:
+    return await FinanceService(db).update(tx_id, data)
+
+
+@router.delete(
+    "/{tx_id:int}",
+    status_code=204,
+    summary="Operatsiyani o'chirish (root alias)",
+)
+async def delete_transaction_root(
+    db:    DB,
+    user:  CurrentManager,
+    tx_id: int,
+) -> None:
+    await FinanceService(db).delete(tx_id)
 
 @router.get(
     "/transactions",
@@ -197,10 +272,6 @@ async def get_trends(
     "/roi",
     response_model=ROIReport,
     summary="Jonivorlar ROI hisoboti",
-    description=(
-        "Har bir jonivor uchun daromad/xarajat/ROI tahlili. "
-        "Jonivorga bog'liq bo'lmagan operatsiyalar alohida ko'rsatiladi."
-    ),
 )
 async def get_roi_report(
     db:        DB,
@@ -208,12 +279,21 @@ async def get_roi_report(
     date_from: Optional[date] = Query(None, description="Boshlanish sanasi"),
     date_to:   Optional[date] = Query(None, description="Tugash sanasi"),
 ) -> ROIReport:
-    """
-    Jonivorlar bo'yicha ROI hisoboti.
-
-    Agar sana berilmasa — joriy yil ishlatiladi.
-    """
     today     = date.today()
     date_from = date_from or today.replace(month=1, day=1)
     date_to   = date_to   or today
     return await FinanceService(db).get_roi_report(date_from, date_to)
+
+
+@router.get(
+    "/monthly",
+    response_model=FinanceTrends,
+    summary="Oylik trendlar (alias for /trends)",
+)
+async def get_monthly_alias(
+    db:     DB,
+    user:   CurrentUser,
+    months: int = Query(12, ge=3, le=24),
+) -> FinanceTrends:
+    """Test-compatible alias for /trends."""
+    return await FinanceService(db).get_monthly_trends(months=months)

@@ -10,7 +10,7 @@ Date: 2026-02-16
 
 from datetime import datetime, date
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
 # =============================================================================
@@ -328,6 +328,10 @@ class HealthRecordListResponse(BaseModel):
         ...,
         description="List of health records"
     )
+    items: Optional[List[HealthRecordResponse]] = Field(
+        None,
+        description="Alias for records (test compatibility)"
+    )
     total: int = Field(
         ...,
         description="Total number of records",
@@ -344,15 +348,18 @@ class HealthRecordListResponse(BaseModel):
         ge=1
     )
 
-    @property
-    def items(self) -> List[HealthRecordResponse]:
-        """Backward-compatibility alias for `records`."""
-        return self.records
-    
+    @model_validator(mode="after")
+    def sync_items(self) -> "HealthRecordListResponse":
+        """Sync items = records for backward compatibility."""
+        if self.items is None:
+            self.items = self.records
+        return self
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "records": [],
+                "items": [],
                 "total": 15,
                 "skip": 0,
                 "limit": 10

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from io import BytesIO
+from pydantic import BaseModel as _PydanticBase
 
 from app.core.database import get_db
 from app.api.v1.deps import get_current_active_user
@@ -636,3 +637,45 @@ async def preview_report(
                 {"name": "Tavsiyalar",            "available": True},
             ],
         }
+
+# =============================================================================
+# SHORT PATH ALIASES — tests use /reports/animal/{id}, /reports/farm, etc.
+# =============================================================================
+
+@router.post(
+    "/animal/{animal_id}",
+    summary="Generate animal report (short alias)",
+)
+async def generate_animal_report_alias(
+    animal_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Short alias for /generate/animal/{animal_id}."""
+    return await generate_animal_report(animal_id=animal_id, db=db)
+
+
+class _FarmReportBody(_PydanticBase):
+    format: Optional[str] = None
+
+
+@router.post(
+    "/farm",
+    summary="Generate farm report (short alias)",
+)
+async def generate_farm_report_alias(
+    body: Optional[_FarmReportBody] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Short alias for /generate/farm."""
+    return await generate_farm_report(db=db)
+
+
+@router.post(
+    "/health",
+    summary="Generate health report (short alias)",
+)
+async def generate_health_report_alias(
+    db: AsyncSession = Depends(get_db),
+):
+    """Short alias for /generate/health."""
+    return await generate_health_report(db=db)

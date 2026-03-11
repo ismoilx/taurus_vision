@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from app.models.medicine import MedicineType, MedicineUnit, MedicineAdminRoute
 
@@ -73,7 +73,16 @@ class MedicineInventoryResponse(MedicineInventoryBase):
 
 class MedicineRestockRequest(BaseModel):
     """Ombor to'ldirish."""
-    quantity_to_add: float = Field(..., gt=0, description="Qo'shiladigan miqdor")
+    quantity_to_add: Optional[float] = Field(None, gt=0, description="Qo'shiladigan miqdor")
+    quantity:        Optional[float] = Field(None, gt=0, description="Alias for quantity_to_add")
+
+    @model_validator(mode="after")
+    def resolve_quantity(self) -> "MedicineRestockRequest":
+        if self.quantity_to_add is None and self.quantity is not None:
+            self.quantity_to_add = self.quantity
+        if self.quantity_to_add is None:
+            raise ValueError("'quantity_to_add' yoki 'quantity' maydoni talab qilinadi")
+        return self
     batch_number: Optional[str] = Field(None, description="Yangi partiya raqami")
     expiry_date: Optional[date] = Field(None, description="Yangi muddat")
     purchase_price: Optional[float] = Field(None, ge=0, description="Narxi")

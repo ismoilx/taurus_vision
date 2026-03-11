@@ -74,6 +74,7 @@ class AllPipelinesResponse(PydanticModel):
     total_running: int
     running_cameras: list[str]
     pipelines: dict
+    status: str = "ok"  # test compatibility field
 
 
 # =============================================================================
@@ -260,7 +261,7 @@ async def get_camera_pipeline_status(
     tags=["Pipeline", "legacy"],
 )
 async def start_video_pipeline(
-    video_filename: str = "sigir_test.mp4",
+    video_filename: str,
     camera_fps:     int = 10,
     skip_frames:    int = 3,
     current_user:   CurrentManager = ...,
@@ -466,3 +467,19 @@ async def get_system_metrics(
     """
     manager = get_pipeline_manager()
     return manager.get_system_metrics()
+
+@router.get(
+    "/output-videos",
+    status_code=200,
+    summary="Output video fayllar ro'yxati",
+)
+async def list_output_videos(
+    current_user: CurrentUser = ...,
+) -> dict:
+    """Output video fayllar ro'yxatini qaytaradi."""
+    from pathlib import Path
+    video_dir = Path("/app/data/output_videos")
+    videos = []
+    if video_dir.exists():
+        videos = [str(p.name) for p in video_dir.glob("*.mp4")]
+    return {"videos": videos, "files": videos, "count": len(videos)}

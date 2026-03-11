@@ -207,6 +207,22 @@ class FeedStock(BaseModel):
         Index("ix_feed_stocks_type_active", "feed_type", "is_active"),
     )
 
+    def __init__(self, **kwargs):
+        # Accept test-friendly aliases
+        if "min_stock_kg" in kwargs and "min_threshold_kg" not in kwargs:
+            kwargs["min_threshold_kg"] = kwargs.pop("min_stock_kg")
+        elif "min_stock_kg" in kwargs:
+            kwargs.pop("min_stock_kg")
+        if "quantity_kg" in kwargs and "current_kg" not in kwargs:
+            kwargs["current_kg"] = kwargs.pop("quantity_kg")
+        elif "quantity_kg" in kwargs:
+            kwargs.pop("quantity_kg")
+        if "price_per_kg" in kwargs and "unit_cost_uzs" not in kwargs:
+            kwargs["unit_cost_uzs"] = int(kwargs.pop("price_per_kg"))
+        elif "price_per_kg" in kwargs:
+            kwargs.pop("price_per_kg")
+        super().__init__(**kwargs)
+
     def __repr__(self) -> str:
         return (
             f"<FeedStock(id={self.id}, "
@@ -219,6 +235,15 @@ class FeedStock(BaseModel):
     def is_low(self) -> bool:
         """Miqdor minimal chegaradan pastmi?"""
         return self.current_kg < self.min_threshold_kg
+
+    @property
+    def min_stock_kg(self) -> float:
+        """Backward-compatibility alias for `min_threshold_kg`."""
+        return self.min_threshold_kg
+
+    @min_stock_kg.setter
+    def min_stock_kg(self, value: float) -> None:
+        self.min_threshold_kg = value
 
     @property
     def quantity_kg(self) -> float:

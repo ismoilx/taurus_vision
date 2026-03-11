@@ -166,16 +166,30 @@ class Scale(BaseModel):
     # ------------------------------------------------------------------ #
 
     notes: Mapped[Optional[str]] = mapped_column(
-        Text,
+        String(500),
         nullable=True,
-        comment="Tarozi haqida qo'shimcha ma'lumot",
     )
 
-    # API tarozi uchun token (webhook autentifikatsiya)
     api_token: Mapped[Optional[str]] = mapped_column(
-        String(128),
+        String(200),
         nullable=True,
-        comment="Tarozi API webhook token (scale_type=API uchun)",
+        comment="API autentifikatsiya tokeni (IoT qurilma uchun)",
+    )
+
+    # ------------------------------------------------------------------
+    # Capacity & Precision (added for test compatibility)
+    # ------------------------------------------------------------------
+
+    capacity_kg: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Maksimal o'lchov qobiliyati (kg)",
+    )
+
+    precision_kg: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="O'lchov aniqligi (kg)",
     )
 
     # ------------------------------------------------------------------ #

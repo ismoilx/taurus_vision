@@ -21,13 +21,25 @@ class FeedStockCreate(BaseModel):
     feed_type:        FeedType
     description:      Optional[str]      = None
     unit:             FeedUnit           = FeedUnit.KG
-    current_kg:       float              = Field(0.0, ge=0)
+    current_kg:       Optional[float]    = Field(None, ge=0)
+    quantity_kg:      Optional[float]    = Field(None, ge=0, description="Alias for current_kg")
     min_threshold_kg: float              = Field(100.0, ge=0)
     unit_cost_uzs:    Optional[int]      = Field(None, ge=0)
+    price_per_kg:     Optional[float]    = Field(None, ge=0, description="Alias for unit_cost_uzs")
     supplier:         Optional[str]      = Field(None, max_length=200)
     purchase_date:    Optional[datetime] = None
     expiry_date:      Optional[datetime] = None
     notes:            Optional[str]      = None
+
+    @model_validator(mode="after")
+    def resolve_aliases(self) -> "FeedStockCreate":
+        if self.current_kg is None:
+            self.current_kg = self.quantity_kg if self.quantity_kg is not None else 0.0
+        if self.current_kg is not None and self.current_kg < 0:
+            raise ValueError("quantity_kg/current_kg must be >= 0")
+        if self.unit_cost_uzs is None and self.price_per_kg is not None:
+            self.unit_cost_uzs = int(self.price_per_kg)
+        return self
 
 
 class FeedStockUpdate(BaseModel):

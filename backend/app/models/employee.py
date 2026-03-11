@@ -374,7 +374,12 @@ class WorkerTask(BaseModel):
             return False
         if self.status in (WorkerTaskStatus.COMPLETED, WorkerTaskStatus.CANCELLED):
             return False
-        return datetime.now(timezone.utc) > self.due_date
+        now = datetime.now(timezone.utc)
+        due = self.due_date
+        # Make sure both are timezone-aware for comparison
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=timezone.utc)
+        return now > due
 
     @property
     def is_open(self) -> bool:

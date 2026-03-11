@@ -29,6 +29,15 @@ from typing import Optional
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
+def _ensure_tz(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure datetime is timezone-aware (UTC). SQLite returns naive datetimes."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 from app.models.animal import Animal, AnimalStatus
 from app.models.detection import Detection
 from app.models.adi_log import ADILog
@@ -817,7 +826,11 @@ class BehaviorService:
 
         last_feeding_h: Optional[float] = None
         if last_feeding_ts is not None:
-            last_feeding_h = (now - last_feeding_ts).total_seconds() / 3600
+            from datetime import timezone as _tz
+            ts = last_feeding_ts
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_tz.utc)
+            last_feeding_h = (now - ts).total_seconds() / 3600
 
         return feeding_visits, last_feeding_h
 

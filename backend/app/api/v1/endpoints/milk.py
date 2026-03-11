@@ -44,7 +44,7 @@ router = APIRouter(prefix="/milk", tags=["Sut ishlab chiqarish"])
 async def create_milk_record(
     data: MilkProductionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_active_user),
+    current_user=Depends(require_manager),
 ):
     svc = MilkService(db)
     record = await svc.add_record(data)

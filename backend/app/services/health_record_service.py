@@ -206,6 +206,7 @@ class HealthRecordService:
             "critical_unresolved": critical_unresolved,
             "by_severity":        by_severity,
             "by_type":            by_type,
+            "health_score":       max(0, min(100, 100 - (unresolved * 10) - (critical_unresolved * 20))),
         }
 
     async def get_health_summary(self, db: AsyncSession, animal_id: int) -> dict:

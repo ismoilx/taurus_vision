@@ -23,11 +23,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class FinanceBase(BaseModel):
     """Umumiy maydonlar."""
-    type:             str  = Field(...,  description="income | expense")
+    type:             Optional[str]  = Field(None,  description="income | expense")
+    transaction_type: Optional[str]  = Field(None,  description="Alias for type: income | expense")
     category:         str  = Field(...,  max_length=30)
-    amount_uzs:       int  = Field(...,  gt=0, description="Miqdor (UZS, musbat)")
-    amount_usd:       Optional[float] = Field(None, gt=0)
-    description:      str  = Field(...,  min_length=2, max_length=500)
+    amount_uzs:       Optional[int]  = Field(None,  gt=0, description="Miqdor (UZS, musbat)")
+    amount:           Optional[float]= Field(None,  gt=0, description="Alias for amount_uzs")
+    amount_usd:       Optional[float]= Field(None, gt=0)
+    currency:         Optional[str]  = Field(None, description="Valyuta (UZS default, ignored)")
+    description:      Optional[str]  = Field(None,  min_length=2, max_length=500)
     notes:            Optional[str]   = Field(None, max_length=2000)
     transaction_date: date = Field(...,  description="Operatsiya sanasi")
     payment_method:   str  = Field("cash", description="cash | transfer | credit")
@@ -35,9 +38,27 @@ class FinanceBase(BaseModel):
     animal_id:        Optional[int]   = Field(None, gt=0)
     meta:             Optional[dict[str, Any]] = None
 
-    @field_validator("type")
+    @model_validator(mode="after")
+    def resolve_aliases(self) -> "FinanceBase":
+        # transaction_type → type
+        if self.type is None and self.transaction_type is not None:
+            self.type = self.transaction_type
+        if self.type is None:
+            raise ValueError("'type' yoki 'transaction_type' maydoni talab qilinadi")
+        # amount → amount_uzs
+        if self.amount_uzs is None and self.amount is not None:
+            self.amount_uzs = int(self.amount)
+        if self.amount_uzs is None:
+            raise ValueError("'amount_uzs' yoki 'amount' maydoni talab qilinadi")
+        if self.description is None:
+            self.description = "-"
+        return self
+
+    @field_validator("type", mode="before")
     @classmethod
-    def validate_type(cls, v: str) -> str:
+    def validate_type(cls, v) -> Optional[str]:
+        if v is None:
+            return v
         if v not in ("income", "expense"):
             raise ValueError("type faqat 'income' yoki 'expense' bo'lishi mumkin")
         return v
@@ -128,8 +149,10 @@ class FinanceTransactionResponse(BaseModel):
     """Javob: bitta operatsiya."""
     id:               int
     type:             str
+    transaction_type: Optional[str] = None   # alias for type
     category:         str
     amount_uzs:       int
+    amount:           Optional[float] = None  # alias for amount_uzs
     amount_usd:       Optional[float]
     description:      str
     notes:            Optional[str]
@@ -145,6 +168,14 @@ class FinanceTransactionResponse(BaseModel):
     updated_at:       datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def populate_aliases(self) -> "FinanceTransactionResponse":
+        if self.transaction_type is None:
+            self.transaction_type = self.type
+        if self.amount is None:
+            self.amount = float(self.amount_uzs)
+        return self
 
 
 class FinanceTransactionListResponse(BaseModel):

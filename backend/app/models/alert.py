@@ -214,15 +214,35 @@ class Alert(BaseModel):
         """Backward-compatibility alias for `notes` field."""
         return self.notes
 
-    def resolve(self, resolved_by_id: Optional[int] = None, note: Optional[str] = None) -> None:
+    def resolve(
+        self,
+        resolved_by: Optional[str] = None,
+        resolved_by_id: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> None:
         """Alertni RESOLVED holatiga o'tkazish helper metodi."""
         from datetime import datetime
         self.status = AlertStatus.RESOLVED
         self.resolved_at = datetime.utcnow()
+        # Support both old (resolved_by_id: int) and new (resolved_by: str) callers
         if resolved_by_id is not None:
             self.resolved_by = resolved_by_id
         if note is not None:
             self.notes = note
+
+    @property
+    def duration_minutes(self) -> Optional[float]:
+        """Alert yaratilganidan beri o'tgan daqiqalar soni."""
+        if self.triggered_at is None:
+            return None
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        # triggered_at timezone-naive bo'lsa, UTC deb qabul qilamiz
+        triggered = self.triggered_at
+        if triggered.tzinfo is None:
+            triggered = triggered.replace(tzinfo=timezone.utc)
+        delta = now - triggered
+        return round(delta.total_seconds() / 60, 2)
 
 # =============================================================================
 # SEVERITY MAP — alert_service.py tomonidan ishlatiladi

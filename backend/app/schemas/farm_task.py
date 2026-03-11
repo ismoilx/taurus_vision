@@ -42,7 +42,7 @@ class FarmTaskCreate(BaseModel):
     )
 
     task_type: TaskType = Field(
-        ...,
+        TaskType.OTHER,
         description="Vazifa turi",
     )
 

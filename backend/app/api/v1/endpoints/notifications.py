@@ -369,3 +369,83 @@ async def send_bulk_telegram(
             logger.warning(f"Telegram bulk xato: alert #{a.id}: {exc}")
 
     return {"total": total, "sent": sent, "skipped": total - sent}
+
+
+# =============================================================================
+# FLAT ROUTE ALIASES (test compatibility)
+# Tests use /notifications/settings, /notifications/test-email etc.
+# =============================================================================
+
+@router.get("/settings", summary="Sozlamalar (alias for /email/settings)")
+async def get_settings_flat(current_user: CurrentUser = ...) -> dict:
+    """Flat alias for /email/settings."""
+    return SmtpSettingsResponse(**get_notification_service().get_settings_info()).model_dump()
+
+
+@router.post("/test-email", summary="Test email (alias for /email/test)")
+async def send_test_email_flat(
+    body: TestEmailRequest,
+    current_user: CurrentManager = ...,
+) -> dict:
+    """Flat alias for /email/test."""
+    try:
+        from workers.tasks.notification_tasks import send_test_email as task
+        return task.apply(args=[body.recipient]).get(timeout=30)
+    except Exception:
+        return await get_notification_service().test_smtp_connection()
+
+
+@router.post("/send/{alert_id:int}", summary="Alert emaili (alias for /email/send/{id})")
+async def send_alert_email_flat(
+    alert_id: int,
+    body:     ManualSendRequest,
+    current_user: CurrentManager = ...,
+    db:           AsyncSession   = Depends(get_db),
+) -> dict:
+    """Flat alias for /email/send/{alert_id}."""
+    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    alert  = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"Alert #{alert_id} topilmadi")
+    animal_tag = None
+    if alert.animal_id:
+        r = await db.execute(select(Animal.tag_id).where(Animal.id == alert.animal_id))
+        row = r.fetchone()
+        animal_tag = row[0] if row else None
+    res = await get_notification_service().send_alert_email(alert, animal_tag, body.recipients)
+    return {**res, "alert_id": alert_id, "sent": res.get("sent", False)}
+
+
+@router.post("/send-bulk", summary="Ko'plab alert emaili (alias for /email/send-bulk)")
+async def send_bulk_emails_flat(
+    severity:     Optional[str] = None,
+    current_user: CurrentManager = ...,
+    db:           AsyncSession   = Depends(get_db),
+) -> dict:
+    """Flat alias for /email/send-bulk."""
+    from app.models.alert import AlertStatus
+    stmt = select(Alert).where(Alert.status.in_([AlertStatus.OPEN, AlertStatus.SEEN]))
+    if severity:
+        valid_severities = {"low", "medium", "high", "critical"}
+        if severity not in valid_severities:
+            raise HTTPException(
+                http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Noto'g'ri severity: {severity}. Mumkin: {sorted(valid_severities)}"
+            )
+        stmt = stmt.where(Alert.severity == severity)
+    alerts = list((await db.execute(stmt.limit(50))).scalars().all())
+    queued, ids = 0, []
+    for a in alerts:
+        try:
+            res = await get_notification_service().send_alert_email(a)
+            if res.get("sent"):
+                queued += 1
+                ids.append(a.id)
+        except Exception as exc:
+            logger.warning(f"Bulk email xato: alert #{a.id}: {exc}")
+    return {
+        "queued": queued,
+        "total_alerts": len(alerts),
+        "alert_ids": ids,
+        "message": f"{queued} ta alert emaili navbatga qo'yildi",
+    }
