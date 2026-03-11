@@ -214,6 +214,36 @@ class Alert(BaseModel):
         """Backward-compatibility alias for `notes` field."""
         return self.notes
 
+    def mark_seen(self) -> None:
+        """Alertni SEEN holatiga o'tkazish.
+
+        Faqat OPEN statusdagi alertlar uchun amal qiladi.
+        Allaqachon SEEN/RESOLVED/DISMISSED bo'lsa, o'zgarmaydi.
+        """
+        from datetime import datetime
+        if self.status == AlertStatus.OPEN:
+            self.status = AlertStatus.SEEN
+            self.seen_at = datetime.utcnow()
+
+    def dismiss(
+        self,
+        dismissed_by: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Alertni DISMISSED (noto'g'ri alarm) holatiga o'tkazish.
+
+        Args:
+            dismissed_by: Kim bekor qildi (foydalanuvchi nomi)
+            reason:       Bekor qilish sababi (ixtiyoriy)
+        """
+        from datetime import datetime
+        self.status = AlertStatus.DISMISSED
+        self.resolved_at = datetime.utcnow()
+        if reason is not None:
+            # Sababni notesga qo'shamiz — dismissed_by ham qo'shilsa
+            prefix = f"[{dismissed_by}] " if dismissed_by else ""
+            self.notes = f"{prefix}{reason}"
+
     def resolve(
         self,
         resolved_by: Optional[str] = None,

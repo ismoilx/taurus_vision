@@ -194,6 +194,7 @@ class AlertSummary(BaseModel):
 
 class HealthMetricsResponse(BaseModel):
     animals_by_status: Dict[str, int]
+    status_distribution: Dict[str, int]  # alias for animals_by_status — backward compat
     weight_distribution: Dict[str, int]
     alerts: List[Alert]
     alert_summary: AlertSummary
@@ -288,10 +289,12 @@ class ADITrendStats(BaseModel):
     """Statistik xulosalar trend davri uchun."""
 
     period_days: int = Field(..., ge=1)
-    average_adi: float = Field(..., ge=0.0, le=100.0)
+    avg_adi: float = Field(..., ge=0.0, le=100.0, description="O'rtacha ADI balli")
     min_adi: float = Field(..., ge=0.0, le=100.0)
     max_adi: float = Field(..., ge=0.0, le=100.0)
-    trend_direction: Literal["improving", "declining", "stable"] = Field(
+    trend_direction: Literal[
+        "improving", "declining", "stable", "insufficient_data"
+    ] = Field(
         ..., description="Umumiy trend yo'nalishi (oxirgi 7 kun vs oldingi 7 kun)"
     )
     trend_delta: float = Field(
@@ -319,7 +322,7 @@ class ADITrendsResponse(BaseModel):
                 "data": [],
                 "stats": {
                     "period_days": 30,
-                    "average_adi": 76.2,
+                    "avg_adi": 76.2,
                     "min_adi": 61.0,
                     "max_adi": 89.5,
                     "trend_direction": "improving",
@@ -348,7 +351,7 @@ class GrowthPoint(BaseModel):
         description="O'rtacha normalized bbox maydoni (kamera o'lchami surogati)",
     )
     measurement_count: int = Field(..., ge=0)
-    animal_count: int = Field(..., ge=1)
+    animal_count: int = Field(..., ge=0)
 
 
 class LinearRegressionStats(BaseModel):

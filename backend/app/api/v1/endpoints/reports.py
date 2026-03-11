@@ -666,8 +666,23 @@ async def generate_farm_report_alias(
     body: Optional[_FarmReportBody] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Short alias for /generate/farm."""
-    return await generate_farm_report(db=db)
+    """Short alias for /generate/farm — oxirgi 30 kunlik summary hisobot."""
+    from datetime import date, timedelta
+    from app.schemas.report import FarmReportRequest
+
+    today     = date.today()
+    date_from = today - timedelta(days=30)
+
+    report_type = "summary"
+    if body and getattr(body, "format", None) in ("detailed", "health", "summary"):
+        report_type = body.format  # type: ignore[assignment]
+
+    default_request = FarmReportRequest(
+        date_from=date_from,
+        date_to=today,
+        report_type=report_type,
+    )
+    return await generate_farm_report(request=default_request, db=db)
 
 
 @router.post(
@@ -677,5 +692,8 @@ async def generate_farm_report_alias(
 async def generate_health_report_alias(
     db: AsyncSession = Depends(get_db),
 ):
-    """Short alias for /generate/health."""
-    return await generate_health_report(db=db)
+    """Short alias for /generate/health — barcha aktiv jonivorlar."""
+    from app.schemas.report import HealthReportRequest
+
+    default_request = HealthReportRequest(animal_ids=None)
+    return await generate_health_report(request=default_request, db=db)

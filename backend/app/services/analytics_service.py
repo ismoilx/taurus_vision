@@ -198,8 +198,8 @@ class AnalyticsService:
                 )
                 .where(
                     and_(
-                        func.date(WeightMeasurement.timestamp) >= date_from,
-                        func.date(WeightMeasurement.timestamp) <= date_to,
+                        WeightMeasurement.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                        WeightMeasurement.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                     )
                 )
             )
@@ -215,7 +215,7 @@ class AnalyticsService:
 
             return [
                 {
-                    "date":              row.date.isoformat(),
+                    "date":              str(row.date)[:10],
                     "average_weight":    round(float(row.avg_weight), 2),
                     "min_weight":        round(float(row.min_weight), 2),
                     "max_weight":        round(float(row.max_weight), 2),
@@ -260,8 +260,8 @@ class AnalyticsService:
                     func.count(Detection.id).label("count"),
                 )
                 .where(and_(
-                    func.date(Detection.timestamp) >= date_from,
-                    func.date(Detection.timestamp) <= date_to,
+                    Detection.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                    Detection.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                 ))
                 .group_by("hour")
                 .order_by("hour")
@@ -278,15 +278,15 @@ class AnalyticsService:
                     func.count(Detection.id).label("count"),
                 )
                 .where(and_(
-                    func.date(Detection.timestamp) >= date_from,
-                    func.date(Detection.timestamp) <= date_to,
+                    Detection.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                    Detection.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                 ))
                 .group_by("date")
                 .order_by("date")
             )).all()
 
             detections_by_day = [
-                {"date": row.date.isoformat(), "count": row.count}
+                {"date": str(row.date)[:10], "count": row.count}
                 for row in day_rows
             ]
 
@@ -298,8 +298,8 @@ class AnalyticsService:
                     func.avg(Detection.confidence).label("avg_conf"),
                 )
                 .where(and_(
-                    func.date(Detection.timestamp) >= date_from,
-                    func.date(Detection.timestamp) <= date_to,
+                    Detection.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                    Detection.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                 ))
                 .group_by(Detection.camera_id)
                 .order_by(desc("count"))
@@ -324,8 +324,8 @@ class AnalyticsService:
                 .select_from(Detection)
                 .join(Animal, Detection.animal_id == Animal.id)
                 .where(and_(
-                    func.date(Detection.timestamp) >= date_from,
-                    func.date(Detection.timestamp) <= date_to,
+                    Detection.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                    Detection.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                 ))
                 .group_by(Animal.id, Animal.tag_id, Animal.species)
                 .order_by(desc("det_count"))
@@ -406,7 +406,8 @@ class AnalyticsService:
             total_animals = sum(animals_by_status.values()) or 1
 
             return {
-                "animals_by_status":  animals_by_status,
+                "animals_by_status":   animals_by_status,
+                "status_distribution": animals_by_status,   # alias — testlar uchun
                 "weight_distribution": weight_distribution,
                 "alerts":             alerts,
                 "alert_summary": {
@@ -660,10 +661,10 @@ class AnalyticsService:
         if not data:
             return {
                 "period_days":     period_days,
-                "average_adi":     0.0,
+                "avg_adi":         0.0,
                 "min_adi":         0.0,
                 "max_adi":         0.0,
-                "trend_direction": "stable",
+                "trend_direction": "insufficient_data",
                 "trend_delta":     0.0,
                 "days_healthy":    0,
                 "days_critical":   0,
@@ -680,7 +681,9 @@ class AnalyticsService:
 
         delta = avg_recent - avg_previous
 
-        if delta > _TREND_STABLE_DELTA:
+        if len(scores) < 3:
+            direction = "insufficient_data"
+        elif delta > _TREND_STABLE_DELTA:
             direction = "improving"
         elif delta < -_TREND_STABLE_DELTA:
             direction = "declining"
@@ -689,7 +692,7 @@ class AnalyticsService:
 
         return {
             "period_days":     period_days,
-            "average_adi":     round(sum(scores) / len(scores), 2),
+            "avg_adi":         round(sum(scores) / len(scores), 2),
             "min_adi":         round(min(scores), 2),
             "max_adi":         round(max(scores), 2),
             "trend_direction": direction,
@@ -751,8 +754,8 @@ class AnalyticsService:
                 )
                 .where(
                     and_(
-                        func.date(WeightMeasurement.timestamp) >= date_from,
-                        func.date(WeightMeasurement.timestamp) <= date_to,
+                        WeightMeasurement.timestamp >= datetime.combine(date_from, datetime.min.time()),
+                        WeightMeasurement.timestamp <  datetime.combine(date_to + timedelta(days=1), datetime.min.time()),
                     )
                 )
             )
@@ -770,7 +773,7 @@ class AnalyticsService:
 
             data_points = [
                 {
-                    "date":                 row.date.isoformat(),
+                    "date":                 str(row.date)[:10],
                     "average_weight_kg":    round(float(row.avg_weight), 2),
                     "bbox_area_normalized": None,   # kamera ma'lumoti keyingi sprint'da
                     "measurement_count":    row.meas_count,
