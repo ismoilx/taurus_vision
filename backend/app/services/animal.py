@@ -51,7 +51,7 @@ logger = get_logger(__name__)
 
 # CSV importda bir vaqtda qabul qilinadigan maksimal satr soni.
 # Katta fayllar uchun stream-based import tavsiya etiladi.
-_MAX_IMPORT_ROWS = 1_000
+_MAX_IMPORT_ROWS = 5_000
 
 
 class AnimalService:

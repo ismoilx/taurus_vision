@@ -229,7 +229,7 @@ async def download_csv_template() -> Response:
     - Bitta satr xatosi butun importni to'xtatmaydi
     - `skip_duplicates=true`: mavjud tag_id lar o'tkazib yuboriladi
     - `skip_duplicates=false`: mavjud tag_id lar xato sifatida qaytariladi
-    - Maksimal: 1000 satr, 2 MB
+    - Maksimal: 5000 satr, 2 MB
 
     **Javob:**
     Har bir satr uchun natija: `created` | `skipped` | `error`

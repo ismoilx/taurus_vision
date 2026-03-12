@@ -99,9 +99,15 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const makeRequest = async (token: string | null) => {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...(init?.headers as Record<string, string> || {}),
     };
+
+    // FormData yuborishda Content-Type ni QO'SHMA —
+    // browser o'zi multipart/form-data + boundary qo'yadi.
+    // Aks holda backend fayl o'qiy olmaydi (422 xato).
+    if (!(init?.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
