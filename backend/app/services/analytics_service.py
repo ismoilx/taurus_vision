@@ -1069,7 +1069,7 @@ class AnalyticsService:
                     select(Animal).where(Animal.id == aid)
                 )).scalar_one_or_none()
                 if animal is None:
-                    continue
+                    raise ValueError(f"Animal {aid} not found")
 
                 # ADI ma'lumotlari
                 adi_rows = (await db.execute(
@@ -1415,24 +1415,68 @@ class AnalyticsService:
     def _assess_periods(
         self, curr: Dict[str, Any], prev: Dict[str, Any]
     ) -> str:
-        """Umumiy holat: improved | declined | stable."""
+        """
+        Umumiy holat bahosi.
+
+        Qaytarish qiymatlari (test kutgan to'plam bilan moslashtirilgan):
+            "improving"         — ikkala davrda ham ma'lumot bor, yaxshilangan
+            "declining"         — ikkala davrda ham ma'lumot bor, yomonlashgan
+            "stable"            — ikkala davrda ham ma'lumot bor, farq kichik
+            "mixed"             — ba'zi ko'rsatkichlar yaxshi, ba'zilari yomon
+            "no_data"           — ikkala davrda ham hech qanday ma'lumot yo'q
+            "insufficient_data" — faqat bitta davrda ma'lumot bor
+        """
+        has_curr_data = bool(
+            curr.get("avg_adi") or curr.get("total_detections", 0) > 0
+        )
+        has_prev_data = bool(
+            prev.get("avg_adi") or prev.get("total_detections", 0) > 0
+        )
+
+        # Ma'lumot yo'q holatlari
+        if not has_curr_data and not has_prev_data:
+            return "no_data"
+        if not has_curr_data or not has_prev_data:
+            return "insufficient_data"
+
         score = 0
+        signals: list[int] = []
+
         # ADI ko'rsatkich
         if curr.get("avg_adi") and prev.get("avg_adi"):
-            score += 1 if curr["avg_adi"] > prev["avg_adi"] + 2 else (-1 if curr["avg_adi"] < prev["avg_adi"] - 2 else 0)
-        # Deteksiya
-        if curr.get("total_detections", 0) > prev.get("total_detections", 0) * 1.05:
-            score += 1
-        elif curr.get("total_detections", 0) < prev.get("total_detections", 0) * 0.95:
-            score -= 1
-        # Critical alertlar
-        if curr.get("critical_alerts", 0) < prev.get("critical_alerts", 0):
-            score += 1
-        elif curr.get("critical_alerts", 0) > prev.get("critical_alerts", 0):
-            score -= 1
+            adi_delta = curr["avg_adi"] - prev["avg_adi"]
+            sig = 1 if adi_delta > 2 else (-1 if adi_delta < -2 else 0)
+            score += sig
+            signals.append(sig)
 
-        if   score >= 2:  return "improved"
-        elif score <= -2: return "declined"
+        # Deteksiya
+        p_det = prev.get("total_detections", 0)
+        c_det = curr.get("total_detections", 0)
+        if p_det > 0:
+            if   c_det > p_det * 1.05:  sig = 1
+            elif c_det < p_det * 0.95:  sig = -1
+            else:                       sig = 0
+        else:
+            sig = 1 if c_det > 0 else 0
+        score += sig
+        signals.append(sig)
+
+        # Critical alertlar (kami yaxshi)
+        c_crit = curr.get("critical_alerts", 0)
+        p_crit = prev.get("critical_alerts", 0)
+        if   c_crit < p_crit:  sig = 1
+        elif c_crit > p_crit:  sig = -1
+        else:                  sig = 0
+        score += sig
+        signals.append(sig)
+
+        # "mixed": qarama-qarshi signallar bor
+        non_zero = [s for s in signals if s != 0]
+        if len(non_zero) >= 2 and any(s > 0 for s in non_zero) and any(s < 0 for s in non_zero):
+            return "mixed"
+
+        if   score >= 2:   return "improving"
+        elif score <= -2:  return "declining"
         return "stable"
 
     def _summarize_key_changes(

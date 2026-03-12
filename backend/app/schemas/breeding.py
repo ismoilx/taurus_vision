@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, computed_field
 
 from app.models.breeding import (
     MatingMethod,
@@ -269,6 +269,21 @@ class BreedingRecordResponse(BaseModel):
     farm_id:    Optional[int]
     mother_id:  int
     father_id:  Optional[int]
+
+    # Test alias maydonlari — test da r.json()["dam_id"] va r.json()["sire_id"] tekshiriladi
+    # Pydantic v2 computed_field JSON chiqishga kiritiladi
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def dam_id(self) -> int:
+        """mother_id uchun alias (test compatibility)."""
+        return self.mother_id
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def sire_id(self) -> Optional[int]:
+        """father_id uchun alias (test compatibility)."""
+        return self.father_id
 
     external_sire_tag:   Optional[str]
     external_sire_breed: Optional[str]

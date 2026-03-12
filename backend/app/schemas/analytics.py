@@ -571,7 +571,11 @@ class PeriodComparisonResponse(BaseModel):
     current_period: PeriodMetrics
     previous_period: PeriodMetrics
     deltas: List[PeriodDelta]
-    overall_assessment: Literal["improved", "declined", "stable"] = Field(
+    overall_assessment: Literal[
+        "improving", "declining", "stable",
+        "mixed", "no_data", "insufficient_data",
+        "improved", "declined",   # backward compat alias
+    ] = Field(
         ..., description="Umumiy holat bahosi"
     )
     key_changes: List[str] = Field(

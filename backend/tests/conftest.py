@@ -555,3 +555,32 @@ async def viewer_token(client, viewer_user) -> str:
 def auth_headers(admin_token: str) -> dict:
     """Admin token bilan Authorization header."""
     return {"Authorization": f"Bearer {admin_token}"}
+
+# ── Analytics Cache Izolyatsiyasi ─────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+async def clear_analytics_cache():
+    """
+    Har test OLDIN analytics Redis kesh kalitlarini tozalaydi.
+
+    autouse=True — barcha testlarga avtomatik qo'llanadi.
+
+    Sabab: analytics endpointlari Redis keshidan foydalanadi.
+    Oldingi test bo'sh DB bilan keshga 0 yozishi mumkin.
+    Keyingi test ma'lumotli DB bilan ishlasa, keshdan 0 olishi mumkin.
+
+    Redis mavjud bo'lmasa (test muhiti) — bu fixture hech narsa qilmaydi.
+    Redis mavjud bo'lsa — analytics kalitlarini tozalaydi.
+    """
+    from app.core.cache import cache_invalidate
+    try:
+        await cache_invalidate("analytics:*")
+    except Exception:
+        pass  # Redis mavjud bo'lmasa — xato yutib yuboriladi
+
+    yield
+    # Test keyin ham tozalash (ixtiyoriy, lekin izchillik uchun)
+    try:
+        await cache_invalidate("analytics:*")
+    except Exception:
+        pass

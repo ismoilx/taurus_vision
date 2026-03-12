@@ -232,12 +232,22 @@ class BreedingService:
             data.mating_date + timedelta(days=gestation)
         )
 
+        # Agar AI metod va ota ko'rsatilmagan — constraint uchun external_sire_tag to'ldiriladi
+        # DB CHECK: (father_id IS NOT NULL) OR (external_sire_tag IS NOT NULL)
+        ext_sire_tag = data.external_sire_tag
+        if (
+            data.father_id is None
+            and not ext_sire_tag
+            and data.mating_method == MatingMethod.ARTIFICIAL_INSEMINATION
+        ):
+            ext_sire_tag = "AI"  # Sun'iy urug'lantirish — tashqi ota belgilovi
+
         # 4. Model yaratish
         record = BreedingRecord(
             farm_id=data.farm_id or mother.farm_id,
             mother_id=data.mother_id,
             father_id=data.father_id,
-            external_sire_tag=data.external_sire_tag,
+            external_sire_tag=ext_sire_tag,
             external_sire_breed=data.external_sire_breed,
             external_sire_farm=data.external_sire_farm,
             mating_date=data.mating_date,
