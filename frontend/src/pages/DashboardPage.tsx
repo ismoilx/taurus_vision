@@ -4,7 +4,8 @@
  * Bu faylni: frontend/src/pages/DashboardPage.tsx ga ko'chiring
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import type { ReactNode, CSSProperties, ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AreaChart, Area, LineChart, Line,
