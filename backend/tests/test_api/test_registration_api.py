@@ -9,13 +9,20 @@ H = lambda t: {"Authorization": f"Bearer {t}"}
 
 
 def make_tiny_png_bytes() -> bytes:
+    """
+    Endpoint minimum 32x32px talab qiladi — shuning uchun 64x64 PNG yaratamiz.
+    Registration endpoint: if h < 32 or w < 32 → 422 "Muzzle crop too small"
+    """
     import zlib, struct
+    W, H = 64, 64
     def chunk(t, d):
         c = t + d
         return struct.pack('>I', len(d)) + c + struct.pack('>I', zlib.crc32(c) & 0xFFFFFFFF)
     sig  = b'\x89PNG\r\n\x1a\n'
-    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', 8, 8, 8, 2, 0, 0, 0))
-    raw  = (b'\x00' + b'\xFF\x80\x00' * 8) * 8
+    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 2, 0, 0, 0))
+    # Har satr: filter byte (0x00) + W*3 ta piksel (RGB)
+    row  = b'\x00' + b'\x80\xA0\x60' * W
+    raw  = row * H
     idat = chunk(b'IDAT', zlib.compress(raw))
     iend = chunk(b'IEND', b'')
     return sig + ihdr + idat + iend

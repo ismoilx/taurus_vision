@@ -14,20 +14,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class _MockManagerUser:
-    """Integration testlar uchun mock MANAGER foydalanuvchi."""
-    id         = 999
-    email      = "integration_test@taurus.uz"
-    username   = "integration_test"
-    full_name  = "Integration Test Manager"
-    is_active  = True
-    is_manager = True
-    is_admin   = True
+    """Integration testlar uchun mock MANAGER foydalanuvchi.
+
+    UserResponse.model_validate() muvaffaqiyatli o'tishi uchun
+    barcha kerakli maydonlar to'liq ko'rsatilgan.
+    """
+    id            = 999
+    email         = "integration_test@taurus.uz"
+    username      = "integration_test"
+    full_name     = "Integration Test Manager"
+    is_active     = True
+    is_manager    = True
+    is_admin      = True
+    last_login_at = None
+
+    @property
+    def created_at(self):
+        from datetime import datetime, timezone
+        return datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     @property
     def role(self):
-        class _Role:
-            value = "manager"
-        return _Role()
+        from app.models.user import UserRole
+        return UserRole.MANAGER
 
 
 _mock_manager = _MockManagerUser()

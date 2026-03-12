@@ -12,13 +12,57 @@ To'liq auth zanjirini tekshiradi:
   8. To'liq CRUD zanjiri: login → animal CRUD → logout
 
 Barcha testlar izolatsiyalangan — har biri o'z DB va foydalanuvchisiga ega.
+
+MUHIM: Bu fayl test_integration/ papkasida joylashgan, lekin u yergi conftest.py
+barcha auth ni mock qilib qo'yadi. Shu sababli bu fayl o'zining REAL auth
+ishlatadigan `client` fixture ni e'lon qiladi — integration conftest dagi
+mock versiyani ustidan yopadi.
 """
 
 import pytest
-from httpx import AsyncClient
+from typing import AsyncGenerator
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import asyncio
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+# ════════════════════════════════════════════════════════════════════
+# LOCAL CLIENT FIXTURE — REAL AUTH (integration conftest ni ustidan yopadi)
+# ════════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+async def client(app, test_engine) -> AsyncGenerator[AsyncClient, None]:
+    """
+    Auth flow testlari uchun REAL auth ishlatiladigan client.
+
+    integration/conftest.py dagi mock client ni bu fayl doirasida
+    ustidan yopadi. Faqat get_db override qilinadi — auth dependency lar
+    HAQIQIY ishlaydi, token tekshiriladi.
+    """
+    from app.core.database import get_db
+
+    client_session_factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async def override_get_db():
+        async with client_session_factory() as session:
+            yield session
+
+    # Faqat DB override — auth mock QILINMAYDI
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        follow_redirects=True,
+    ) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
 
 
 # ════════════════════════════════════════════════════════════════════

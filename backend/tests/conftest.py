@@ -102,7 +102,12 @@ async def client(app, test_engine) -> AsyncGenerator[AsyncClient, None]:
 
     async def override_get_db():
         async with client_session_factory() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()   # Real get_db kabi — flush'ni DB ga yozish
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides.clear()  # Oldingi qoldiqlarni tozalaymiz
     app.dependency_overrides[get_db] = override_get_db

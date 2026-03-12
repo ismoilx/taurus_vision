@@ -184,7 +184,7 @@ class TestFeedAPI:
     async def test_create_stock(self, client: AsyncClient, manager_token: str):
         r = await client.post("/api/v1/feed/stocks/", headers=H(manager_token), json={
             "name": "Somon",
-            "feed_type": "straw",
+            "feed_type": "wheat_straw",
             "quantity_kg": 1000.0,
             "unit": "kg",
             "price_per_kg": 500.0,

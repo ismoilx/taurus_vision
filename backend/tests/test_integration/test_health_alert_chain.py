@@ -353,7 +353,7 @@ class TestAlertNotificationChain:
         mock_task.delay = lambda **kwargs: queued_tasks.append(kwargs)
 
         with patch(
-            "workers.tasks.notification_tasks.send_alert_email",
+            "workers.notification_tasks.send_alert_email",
             mock_task,
         ):
             service = AlertService(db)
