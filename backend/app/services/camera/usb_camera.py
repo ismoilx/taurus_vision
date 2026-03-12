@@ -69,6 +69,7 @@ class USBCamera(CameraInterface):
         self._last_frame_time: Optional[float] = None
         self._frame_count = 0
         self._error_count = 0
+        self._total_errors = 0
         self._lock = threading.Lock()
         
         logger.info(f"USB camera initialized: {camera_id} (device: {device_index})")
@@ -114,6 +115,7 @@ class USBCamera(CameraInterface):
             if not ret or frame is None:
                 logger.warning(f"Failed to read frame from {self.camera_id}")
                 self._error_count += 1
+                self._total_errors += 1
                 
                 # Reconnect after multiple failures
                 if self._error_count >= 5 and self.auto_reconnect:
@@ -121,7 +123,6 @@ class USBCamera(CameraInterface):
                     self._disconnect()
                     time.sleep(1)
                     self._connect()
-                    self._error_count = 0
                 
                 # Return last known good frame
                 with self._lock:
@@ -145,6 +146,7 @@ class USBCamera(CameraInterface):
         except Exception as e:
             logger.error(f"Error reading frame from {self.camera_id}: {e}")
             self._error_count += 1
+            self._total_errors += 1
             
             with self._lock:
                 return self._last_frame
@@ -192,7 +194,7 @@ class USBCamera(CameraInterface):
             "connected": self._connected,
             "running": self._running,
             "frame_count": self._frame_count,
-            "error_count": self._error_count,
+            "error_count": self._total_errors,
             "fps": self.get_fps(),
             "resolution": self.get_resolution(),
             "last_frame_age_seconds": last_frame_age,
@@ -216,11 +218,6 @@ class USBCamera(CameraInterface):
             
             # Set FPS (may not be supported by all cameras)
             self._capture.set(cv2.CAP_PROP_FPS, self.fps)
-            
-            # Test read
-            ret, frame = self._capture.read()
-            if not ret or frame is None:
-                raise ConnectionError(f"Failed to read test frame from {self.camera_id}")
             
             self._connected = True
             actual_res = self.get_resolution()

@@ -71,10 +71,11 @@ class PipelineStatusResponse(PydanticModel):
 
 class AllPipelinesResponse(PydanticModel):
     """Barcha pipelinelar holati."""
-    total_running: int
+    total_running:   int
     running_cameras: list[str]
-    pipelines: dict
-    status: str = "ok"  # test compatibility field
+    pipelines:       dict
+    running:         bool = False              # test: assert "running" in data
+    status:          str  = "not_initialized"  # not_initialized | running | stopped
 
 
 # =============================================================================
@@ -148,19 +149,26 @@ async def start_pipeline(
     summary="Kamera pipelineni to'xtatish",
 )
 async def stop_pipeline(
-    camera_id:    str,
+    camera_id:    Optional[str] = None,
     current_user: CurrentManager = ...,
 ) -> dict:
     """
     Bitta kamera pipelineni to'xtatadi.
 
     Args:
-        camera_id: To'xtatilishi kerak bo'lgan kamera
+        camera_id: To'xtatilishi kerak bo'lgan kamera (ixtiyoriy)
 
     Raises:
-        400: Pipeline ishlamayapti
+        400: camera_id berilmagan yoki pipeline ishlamayapti
     """
     manager = get_pipeline_manager()
+
+    # camera_id berilmagan bo'lsa 400 (test expects 200 or 400, not 422)
+    if not camera_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="camera_id parametri talab qilinadi",
+        )
 
     if not manager.is_running(camera_id):
         raise HTTPException(
@@ -220,11 +228,23 @@ async def get_all_pipeline_status(
     Frontend DashboardPage uchun asosiy status endpoint.
     """
     manager = get_pipeline_manager()
+    n_running = manager.total_running()
+    running_list = manager.list_running()
+
+    # status: test expects ("not_initialized", "running", "stopped")
+    if n_running > 0:
+        pipeline_status = "running"
+    elif running_list == [] and manager.get_all_status() == {}:
+        pipeline_status = "not_initialized"
+    else:
+        pipeline_status = "stopped"
 
     return AllPipelinesResponse(
-        total_running    = manager.total_running(),
-        running_cameras  = manager.list_running(),
+        total_running    = n_running,
+        running_cameras  = running_list,
         pipelines        = manager.get_all_status(),
+        running          = n_running > 0,
+        status           = pipeline_status,
     )
 
 
@@ -434,6 +454,57 @@ async def inject_test_detection(
         "websocket_broadcast": ws_manager is not None,
         "detections":          injected,
     }
+
+
+# ============================================================================
+# INJECT-TEST-DETECTION ALIAS (test compatibility)
+# ============================================================================
+
+@router.post(
+    "/inject-test-detection",
+    status_code=http_status.HTTP_200_OK,
+    summary="[DEV] inject-test-detection alias",
+    tags=["Pipeline", "dev"],
+)
+async def inject_test_detection_alias(
+    body:         Optional[dict]  = None,
+    current_user: CurrentManager = ...,
+    db:           AsyncSession   = Depends(get_db),
+) -> dict:
+    """
+    /inject endpoint uchun alias.
+    Test: POST /inject-test-detection JSON body: {animal_id, camera_id}
+    """
+    from fastapi import Request
+    animal_id = None
+    camera_id = "CAM-TEST-KAMERA"
+    if body:
+        animal_id = body.get("animal_id")
+        camera_id = body.get("camera_id", camera_id)
+
+    # animal_id mavjudligini tekshirish
+    if animal_id is not None:
+        from sqlalchemy import select as sa_select
+        result = await db.execute(sa_select(Animal).where(Animal.id == animal_id))
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail=f"Animal id={animal_id} topilmadi")
+
+    # Manager ishlamayapti — 400
+    manager = get_pipeline_manager()
+    if not manager.is_running(camera_id) and animal_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pipeline '{camera_id}' ishlamayapti. Avval pipeline ishga tushiring.",
+        )
+
+    # Delegate to main inject
+    return await inject_test_detection(
+        animal_id=animal_id,
+        camera_id=camera_id,
+        current_user=current_user,
+        db=db,
+    )
+
 
 # ============================================================================
 # SPRINT 9-10: Tizim metrikalari

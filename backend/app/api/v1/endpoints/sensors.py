@@ -7,6 +7,8 @@ monitoring uchun API endpointlar.
 ENDPOINTLAR:
     POST   /sensors/reading               — Bitta o'lchov yuborish
     POST   /sensors/readings/bulk         — Batch o'lchovlar (max 100)
+    GET    /sensors/readings              — Barcha o'lchovlar ro'yxati
+    GET    /sensors/latest                — Oxirgi o'lchovlar (barcha)
     GET    /sensors/latest/{animal_id}    — Jonivorning oxirgi o'lchovi
     GET    /sensors/history/{animal_id}   — Jonivor sensor tarixi (grafik uchun)
     GET    /sensors/farm-history          — Ferma umumiy sensor tarixi
@@ -17,9 +19,10 @@ ENDPOINTLAR:
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -42,6 +45,77 @@ router = APIRouter(prefix="/sensors", tags=["Sensors — IoT"])
 
 
 # =============================================================================
+# FLEXIBLE CREATE SCHEMA — test compatibility (sensor_type/value/unit)
+# =============================================================================
+
+class SensorReadingFlexCreate(BaseModel):
+    """
+    Moslashuvchan sensor o'lchov yaratish.
+    Eski format (sensor_type/value/unit) ham yangi format (device_type/temperature) ham qabul qilinadi.
+    """
+    device_id:    str            = Field(..., min_length=1, max_length=100)
+    # Yangi format
+    device_type:  Optional[str]  = Field(None)
+    animal_id:    Optional[int]  = Field(None)
+    temperature:  Optional[float]= Field(None)
+    heart_rate:   Optional[float]= Field(None)
+    activity_level: Optional[float] = Field(None)
+    weight_kg:    Optional[float]= Field(None)
+    recorded_at:  Optional[datetime] = Field(None)
+    # Eski format (test compatibility)
+    sensor_type:  Optional[str]  = Field(None, description="Alias: temperature|heart_rate|activity|weight")
+    value:        Optional[float]= Field(None, description="Alias: o'lchov qiymati")
+    unit:         Optional[str]  = Field(None, description="Birligi (ignored, compatibility)")
+
+    @model_validator(mode="after")
+    def resolve_legacy_fields(self) -> "SensorReadingFlexCreate":
+        # sensor_type → device_type
+        if self.device_type is None:
+            st = (self.sensor_type or "").lower()
+            if st in ("temperature", "temp"):
+                self.device_type = "collar"
+            elif st in ("heart_rate", "heartrate", "bpm"):
+                self.device_type = "collar"
+            elif st in ("activity", "motion"):
+                self.device_type = "collar"
+            elif st in ("weight", "scale"):
+                self.device_type = "scale"
+            elif st in ("environment", "env", "humidity", "co2"):
+                self.device_type = "environment"
+            else:
+                self.device_type = "collar"
+
+        # value → to'g'ri maydon
+        if self.value is not None:
+            st = (self.sensor_type or "").lower()
+            if st in ("temperature", "temp") and self.temperature is None:
+                self.temperature = self.value
+            elif st in ("heart_rate", "heartrate", "bpm") and self.heart_rate is None:
+                self.heart_rate = self.value
+            elif st in ("activity", "motion") and self.activity_level is None:
+                self.activity_level = min(max(self.value / 100.0, 0.0), 1.0) if self.value > 1 else self.value
+            elif st in ("weight", "scale") and self.weight_kg is None:
+                self.weight_kg = self.value
+            else:
+                # Default: temperature ga qo'yamiz
+                if self.temperature is None:
+                    self.temperature = self.value
+        return self
+
+    def to_sensor_reading_create(self) -> SensorReadingCreate:
+        return SensorReadingCreate(
+            device_id=self.device_id,
+            device_type=self.device_type or "collar",
+            animal_id=self.animal_id,
+            temperature=self.temperature,
+            heart_rate=self.heart_rate,
+            activity_level=self.activity_level,
+            weight_kg=self.weight_kg,
+            recorded_at=self.recorded_at,
+        )
+
+
+# =============================================================================
 # WRITE ENDPOINTS
 # =============================================================================
 
@@ -52,7 +126,7 @@ router = APIRouter(prefix="/sensors", tags=["Sensors — IoT"])
     summary="Sensor o'lchovi yuborish",
 )
 async def create_sensor_reading(
-    data: SensorReadingCreate,
+    data: SensorReadingFlexCreate,
     db:   AsyncSession = Depends(get_db),
     _:    object       = Depends(require_manager),
 ):
@@ -61,7 +135,7 @@ async def create_sensor_reading(
     Anomaly aniqlansa avtomatik alert yaratiladi.
     """
     service = SensorService(db)
-    reading = await service.process_reading(data)
+    reading = await service.process_reading(data.to_sensor_reading_create())
     return reading
 
 
@@ -82,6 +156,72 @@ async def create_bulk_readings(
     service = SensorService(db)
     result  = await service.process_bulk(data.readings)
     return result
+
+@router.get(
+    "/readings",
+    summary="Barcha sensor o'lchovlari ro'yxati",
+)
+async def list_sensor_readings(
+    limit: int        = Query(50, ge=1, le=500, description="Sahifa hajmi"),
+    skip:  int        = Query(0, ge=0, description="Offset"),
+    db:    AsyncSession = Depends(get_db),
+    _:     object       = Depends(get_current_active_user),
+):
+    """Barcha sensor o'lchovlarini sahifalab qaytaradi."""
+    result = await db.execute(
+        select(SensorReading)
+        .order_by(SensorReading.recorded_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    readings = result.scalars().all()
+    total = await db.scalar(select(func.count(SensorReading.id))) or 0
+    return {
+        "items": [SensorReadingResponse.model_validate(r) for r in readings],
+        "total": total,
+    }
+
+
+@router.get(
+    "/latest",
+    summary="Oxirgi o'lchovlar (barcha qurilmalar)",
+)
+async def get_all_latest_readings(
+    limit: int        = Query(20, ge=1, le=100, description="Qaytariladigan o'lchovlar soni"),
+    db:    AsyncSession = Depends(get_db),
+    _:     object       = Depends(get_current_active_user),
+):
+    """
+    Har bir qurilmaning eng so'nggi o'lchovini qaytaradi.
+    test_latest_readings uchun: sample_sensor_reading bo'lsa ishlaydi.
+    """
+    # Har device_id dan bitta (eng so'nggi) o'lchov
+    subq = (
+        select(
+            SensorReading.device_id,
+            func.max(SensorReading.recorded_at).label("max_at"),
+        )
+        .group_by(SensorReading.device_id)
+        .subquery()
+    )
+    q = (
+        select(SensorReading)
+        .join(
+            subq,
+            and_(
+                SensorReading.device_id == subq.c.device_id,
+                SensorReading.recorded_at == subq.c.max_at,
+            ),
+        )
+        .order_by(SensorReading.recorded_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(q)
+    readings = result.scalars().all()
+    return {
+        "total": len(readings),
+        "readings": [SensorReadingResponse.model_validate(r) for r in readings],
+    }
 
 
 # =============================================================================

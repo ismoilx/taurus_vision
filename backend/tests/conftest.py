@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
+from sqlalchemy.pool import StaticPool
 from httpx import AsyncClient, ASGITransport
 
 
@@ -35,7 +36,31 @@ def event_loop():
 
 
 @pytest.fixture(scope="function")
-async def db() -> AsyncGenerator[AsyncSession, None]:
+async def test_engine():
+    """
+    Har test uchun yangi in-memory SQLite engine (StaticPool).
+
+    StaticPool: barcha sessiyalar bitta SQLite connection orqali ishlaydi.
+    Bu bir test ichidagi ikki sessiya (db + client) bitta :memory: DB ni ko'rishini ta'minlaydi.
+    """
+    from app.models.base import Base
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield engine
+
+    await engine.dispose()
+
+
+@pytest.fixture(scope="function")
+async def db(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """
     Har test uchun yangi in-memory SQLite DB.
 
@@ -43,24 +68,12 @@ async def db() -> AsyncGenerator[AsyncSession, None]:
     - Test tugagach barcha ma'lumotlar yo'qoladi
     - Testlar bir-birini buzmasligi kafolatlangan
     """
-    from app.models.base import Base
-
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-    )
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
+        test_engine, class_=AsyncSession, expire_on_commit=False
     )
 
     async with async_session() as session:
         yield session
-
-    await engine.dispose()
 
 
 # ── App + HTTP Clients ────────────────────────────────────────────────────────
@@ -73,22 +86,31 @@ def app():
 
 
 @pytest.fixture
-async def client(app, db) -> AsyncGenerator[AsyncClient, None]:
+async def client(app, test_engine) -> AsyncGenerator[AsyncClient, None]:
     """
-    Async HTTP client — faqat DB override bilan.
-    Endi passlib o'rnatildi, haqiqiy auth tizimi o'zi muammosiz ishlaydi!
+    Async HTTP client — DB override bilan (alohida sessiya).
+
+    MUHIM: client ALOHIDA sessiya ishlatadi (db bilan emas),
+    bu sample_medicine.quantity kabi fixture ob'ektlarining
+    mutatsiyasini oldini oladi. StaticPool orqali bir xil DB ni ko'rishadi.
     """
     from app.core.database import get_db
 
-    async def override_get_db():
-        yield db
+    client_session_factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
-    app.dependency_overrides.clear() # Oldingi qoldiqlarni tozalaymiz
+    async def override_get_db():
+        async with client_session_factory() as session:
+            yield session
+
+    app.dependency_overrides.clear()  # Oldingi qoldiqlarni tozalaymiz
     app.dependency_overrides[get_db] = override_get_db
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
+        follow_redirects=True,
     ) as ac:
         yield ac
 

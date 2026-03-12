@@ -142,7 +142,7 @@ async def get_weight_trends(
     try:
         if animal_id is not None:
             from app.repositories.animal import AnimalRepository
-            if not await AnimalRepository().get_by_id(db, animal_id):
+            if not await AnimalRepository(db).get_by_id(animal_id):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"Animal {animal_id} not found")
 
         trends = await _analytics_service.get_weight_trends(db, animal_id=animal_id, days=days, aggregation=aggregation)

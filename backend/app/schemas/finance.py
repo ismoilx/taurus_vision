@@ -70,10 +70,25 @@ class FinanceBase(BaseModel):
             raise ValueError("payment_method: cash | transfer | credit")
         return v
 
-    @field_validator("transaction_date")
+    @field_validator("transaction_date", mode="before")
     @classmethod
-    def not_future(cls, v: date) -> date:
-        if v > date.today():
+    def not_future(cls, v) -> date:
+        # ISO datetime string → date (test sends full ISO datetime)
+        if isinstance(v, str):
+            try:
+                # "2026-03-12T10:00:00+00:00" → date
+                from datetime import datetime as dt
+                parsed = dt.fromisoformat(v.replace("Z", "+00:00"))
+                v = parsed.date()
+            except ValueError:
+                try:
+                    from datetime import date as d
+                    v = d.fromisoformat(v[:10])
+                except ValueError:
+                    raise ValueError("transaction_date: yaroqli sana formati talab qilinadi")
+        elif isinstance(v, datetime):
+            v = v.date()
+        if isinstance(v, date) and v > date.today():
             raise ValueError("Kelajak sanaga operatsiya kiritib bo'lmaydi")
         return v
 

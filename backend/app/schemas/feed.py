@@ -45,16 +45,29 @@ class FeedStockCreate(BaseModel):
 class FeedStockUpdate(BaseModel):
     name:             Optional[str]      = Field(None, min_length=2, max_length=200)
     description:      Optional[str]      = None
+    current_kg:       Optional[float]    = Field(None, ge=0, description="Joriy miqdor (kg)")
+    quantity_kg:      Optional[float]    = Field(None, ge=0, description="Alias for current_kg")
     min_threshold_kg: Optional[float]    = Field(None, ge=0)
     unit_cost_uzs:    Optional[int]      = Field(None, ge=0)
+    price_per_kg:     Optional[float]    = Field(None, ge=0, description="Alias for unit_cost_uzs")
     supplier:         Optional[str]      = Field(None, max_length=200)
     expiry_date:      Optional[datetime] = None
     is_active:        Optional[bool]     = None
     notes:            Optional[str]      = None
 
     @model_validator(mode="after")
-    def at_least_one(self) -> "FeedStockUpdate":
-        if not self.model_dump(exclude_none=True):
+    def resolve_and_validate(self) -> "FeedStockUpdate":
+        # quantity_kg → current_kg alias
+        if self.current_kg is None and self.quantity_kg is not None:
+            self.current_kg = self.quantity_kg
+        # price_per_kg → unit_cost_uzs alias
+        if self.unit_cost_uzs is None and self.price_per_kg is not None:
+            self.unit_cost_uzs = int(self.price_per_kg)
+        # Kamida bitta real maydon bo'lsin (alias lar hisoblanmaydi)
+        check = self.model_dump(exclude_none=True)
+        check.pop("quantity_kg", None)
+        check.pop("price_per_kg", None)
+        if not check:
             raise ValueError("Kamida bitta maydon bo'lishi kerak.")
         return self
 
@@ -76,6 +89,7 @@ class FeedStockResponse(BaseModel):
     description:      Optional[str]    = None
     unit:             FeedUnit
     current_kg:       float
+    quantity_kg:      Optional[float]  = None   # alias for current_kg (test compatibility)
     min_threshold_kg: float
     unit_cost_uzs:    Optional[int]    = None
     supplier:         Optional[str]    = None
@@ -92,6 +106,12 @@ class FeedStockResponse(BaseModel):
     updated_at:       datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def set_quantity_kg_alias(self) -> "FeedStockResponse":
+        if self.quantity_kg is None:
+            self.quantity_kg = self.current_kg
+        return self
 
 
 class FeedStockListResponse(BaseModel):

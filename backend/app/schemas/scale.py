@@ -6,7 +6,7 @@ Q7 — Tarozi integratsiyasi: request/response schemalar.
 
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 import re
 
 
@@ -71,24 +71,31 @@ class ManualWeightCreate(BaseModel):
     """
     Foydalanuvchi tarozidan o'qib, qo'lda kiritadigan vazn.
 
-    animal_id    — qaysi jonivor
-    weight_kg    — tarozida ko'rsatilgan vazn (kg)
-    scale_id     — qaysi tarozi ishlatildi (ixtiyoriy)
-    measured_at  — o'lchov vaqti (bo'sh = hozir)
-    notes        — qo'shimcha izoh
+    animal_id        — qaysi jonivor
+    weight_kg        — tarozida ko'rsatilgan vazn (kg)
+    actual_weight_kg — alias for weight_kg (test compatibility)
+    scale_id         — qaysi tarozi ishlatildi (ixtiyoriy)
+    measured_at      — o'lchov vaqti (bo'sh = hozir)
+    notes            — qo'shimcha izoh
     """
-    animal_id:   int            = Field(..., gt=0)
-    weight_kg:   float          = Field(..., gt=0, le=2000, description="Haqiqiy tarozi vazni (kg)")
-    scale_id:    Optional[int]  = Field(None, description="Tarozi qurilma ID si (ixtiyoriy)")
-    measured_at: Optional[datetime] = Field(None, description="O'lchov vaqti (bo'sh = hozir)")
-    notes:       Optional[str]  = Field(None, max_length=500)
+    animal_id:        int            = Field(..., gt=0)
+    weight_kg:        Optional[float] = Field(None, gt=0, le=2000, description="Haqiqiy tarozi vazni (kg)")
+    actual_weight_kg: Optional[float] = Field(None, gt=0, le=2000, description="Alias for weight_kg")
+    scale_id:         Optional[int]  = Field(None, description="Tarozi qurilma ID si (ixtiyoriy)")
+    measured_at:      Optional[datetime] = Field(None, description="O'lchov vaqti (bo'sh = hozir)")
+    notes:            Optional[str]  = Field(None, max_length=500)
 
-    @field_validator("weight_kg")
-    @classmethod
-    def validate_weight(cls, v: float) -> float:
-        if v <= 0:
+    @model_validator(mode="after")
+    def resolve_weight(self) -> "ManualWeightCreate":
+        # actual_weight_kg → weight_kg alias
+        if self.weight_kg is None and self.actual_weight_kg is not None:
+            self.weight_kg = self.actual_weight_kg
+        if self.weight_kg is None:
+            raise ValueError("'weight_kg' yoki 'actual_weight_kg' maydoni talab qilinadi")
+        if self.weight_kg <= 0:
             raise ValueError("Vazn musbat bo'lishi kerak")
-        return round(v, 2)
+        self.weight_kg = round(self.weight_kg, 2)
+        return self
 
 
 # =============================================================================

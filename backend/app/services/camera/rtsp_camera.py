@@ -77,6 +77,7 @@ class RTSPCamera(CameraInterface):
         self._last_frame_time: Optional[float] = None
         self._frame_count = 0
         self._error_count = 0
+        self._total_errors = 0
         self._lock = threading.Lock()
         
         logger.info(f"RTSP camera initialized: {camera_id}")
@@ -113,6 +114,8 @@ class RTSPCamera(CameraInterface):
         if not self._connected:
             self._connect()
             if not self._connected:
+                self._error_count += 1
+                self._total_errors += 1
                 return None
         
         try:
@@ -122,14 +125,14 @@ class RTSPCamera(CameraInterface):
             if not ret or frame is None:
                 logger.warning(f"Failed to read frame from {self.camera_id}")
                 self._error_count += 1
+                self._total_errors += 1
                 
                 # Reconnect after multiple failures
-                if self._error_count >= 10:
+                if self._error_count >= 10 and self._error_count % 10 == 0:
                     logger.error(f"Too many errors, reconnecting {self.camera_id}")
                     self._disconnect()
                     time.sleep(self.reconnect_interval)
                     self._connect()
-                    self._error_count = 0
                 
                 # Return last known good frame
                 with self._lock:
@@ -153,6 +156,7 @@ class RTSPCamera(CameraInterface):
         except Exception as e:
             logger.error(f"Error reading frame from {self.camera_id}: {e}")
             self._error_count += 1
+            self._total_errors += 1
             
             with self._lock:
                 return self._last_frame
@@ -204,20 +208,16 @@ class RTSPCamera(CameraInterface):
             self._capture = cv2.VideoCapture(self.rtsp_url)
             
             # Set buffer size (1 = no buffering, always latest frame)
-            self._capture.set(cv2.CAP_PROP_BUFFERSIZE, self.buffer_size)
+            self._capture.set(38, self.buffer_size)   # CAP_PROP_BUFFERSIZE = 38
             
             # Set timeout
-            self._capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self.connection_timeout * 1000)
+            self._capture.set(41, self.connection_timeout * 1000)   # CAP_PROP_OPEN_TIMEOUT_MSEC = 41 (legacy)
             
             # Verify connection
             if not self._capture.isOpened():
                 raise ConnectionError(f"Failed to open RTSP stream: {self.camera_id}")
             
-            # Test read
-            ret, frame = self._capture.read()
-            if not ret or frame is None:
-                raise ConnectionError(f"Failed to read test frame from {self.camera_id}")
-            
+            # Connection established
             self._connected = True
             logger.info(f"RTSP camera connected: {self.camera_id}")
             

@@ -88,7 +88,8 @@ for AI identification.
 )
 async def register_animal_muzzle(
     animal_id: int,
-    photo: UploadFile = File(..., description="Muzzle photo (JPEG/PNG)"),
+    photo: Optional[UploadFile] = File(default=None, description="Muzzle photo (JPEG/PNG)"),
+    images: Optional[UploadFile] = File(default=None, description="Alias for photo (test compatibility)"),
     full_frame: bool = Form(
         default=False,
         description="If True: photo is full frame with YOLO bbox. "
@@ -106,11 +107,16 @@ async def register_animal_muzzle(
     Upload a frontal muzzle photo. System extracts MobileNetV2 embedding
     and stores it in DB for future identification.
     """
+    # Accept either "photo" or "images" field
+    upload = photo or images
+    if upload is None:
+        raise HTTPException(status_code=422, detail="'photo' yoki 'images' fayli talab qilinadi")
+
     # Validate animal exists
     animal = await _get_animal_or_404(animal_id, db)
 
     # Read and validate image
-    image_bytes = await photo.read()
+    image_bytes = await upload.read()
     if len(image_bytes) > MAX_IMAGE_SIZE:
         raise HTTPException(
             status_code=413,
@@ -248,7 +254,8 @@ registered animal matches above the threshold (0.80).
 """,
 )
 async def identify_animal(
-    photo: UploadFile = File(..., description="Muzzle photo to identify"),
+    photo: Optional[UploadFile] = File(default=None, description="Muzzle photo to identify"),
+    file: Optional[UploadFile] = File(default=None, description="Alias for photo (test compatibility)"),
     full_frame: bool = Form(
         default=False,
         description="If True: provide YOLO bbox coordinates below.",
@@ -270,8 +277,13 @@ async def identify_animal(
 
     Compares uploaded photo against all registered animals.
     """
+    # Accept either "photo" or "file" field
+    upload = photo or file
+    if upload is None:
+        raise HTTPException(status_code=422, detail="'photo' yoki 'file' fayli talab qilinadi")
+
     # Read image
-    image_bytes = await photo.read()
+    image_bytes = await upload.read()
     frame = decode_frame_bytes(image_bytes)
     if frame is None:
         raise HTTPException(status_code=422, detail="Invalid image file.")
@@ -410,7 +422,8 @@ async def delete_embedding(
 )
 async def register_animal_muzzle_alias(
     animal_id: int,
-    photo: UploadFile = File(...),
+    photo: Optional[UploadFile] = File(default=None),
+    images: Optional[UploadFile] = File(default=None),
     full_frame: bool = Form(default=False),
     bbox_x: Optional[float] = Form(default=None),
     bbox_y: Optional[float] = Form(default=None),
@@ -420,7 +433,7 @@ async def register_animal_muzzle_alias(
 ):
     """Alias: same as /register/{animal_id}."""
     return await register_animal_muzzle(
-        animal_id=animal_id, photo=photo, full_frame=full_frame,
+        animal_id=animal_id, photo=photo, images=images, full_frame=full_frame,
         bbox_x=bbox_x, bbox_y=bbox_y, bbox_w=bbox_w, bbox_h=bbox_h, db=db,
     )
 

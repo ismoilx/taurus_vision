@@ -649,7 +649,34 @@ class AlertService:
                 return existing
             else:
                 # Yangi alert yaratish
-                severity = ALERT_SEVERITY_MAP.get(alert_type, AlertSeverity.MEDIUM)
+                # AlertType → AlertSeverity mapping
+                _ALERT_TYPE_SEVERITY: dict = {
+                    AlertType.ADI_CRITICAL:      AlertSeverity.CRITICAL,
+                    AlertType.ADI_RAPID_DECLINE: AlertSeverity.HIGH,
+                    AlertType.ADI_SHARP_DROP:    AlertSeverity.HIGH,
+                    AlertType.ADI_WARNING:       AlertSeverity.MEDIUM,
+                    AlertType.FEEDING_STOPPED:   AlertSeverity.HIGH,
+                    AlertType.FEEDING_PROBLEM:   AlertSeverity.MEDIUM,
+                    AlertType.ANIMAL_MISSING:    AlertSeverity.HIGH,
+                    AlertType.ANIMAL_MISSING_LONG: AlertSeverity.CRITICAL,
+                    AlertType.HEALTH_ANOMALY:    AlertSeverity.HIGH,
+                    AlertType.WEIGHT_LOSS:       AlertSeverity.MEDIUM,
+                    AlertType.GROWTH_STAGNATION: AlertSeverity.LOW,
+                    AlertType.CAMERA_OFFLINE:    AlertSeverity.MEDIUM,
+                    AlertType.DETECTION_STOPPED: AlertSeverity.MEDIUM,
+                    AlertType.SENSOR_OFFLINE:    AlertSeverity.MEDIUM,
+                    AlertType.SENSOR_ANOMALY:    AlertSeverity.MEDIUM,
+                    AlertType.HIGH_TEMPERATURE:  AlertSeverity.HIGH,
+                    AlertType.LOW_HEART_RATE:    AlertSeverity.HIGH,
+                    AlertType.HIGH_HEART_RATE:   AlertSeverity.HIGH,
+                    AlertType.SYSTEM_ERROR:      AlertSeverity.CRITICAL,
+                    AlertType.CUSTOM:            AlertSeverity.MEDIUM,
+                }
+                # Avval AlertType→severity map, keyin fallback string map, oxiri MEDIUM
+                severity = (
+                    _ALERT_TYPE_SEVERITY.get(alert_type)
+                    or ALERT_SEVERITY_MAP.get(str(getattr(alert_type, 'value', alert_type)), AlertSeverity.MEDIUM)
+                )
                 alert = Alert(
                     animal_id=     animal_id,
                     camera_id=     camera_id,

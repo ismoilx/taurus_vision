@@ -26,6 +26,17 @@ class AlertCreateManual(BaseModel):
         description="Jonivor ID. None = umumiy ferma muammosi")
     alert_type:  AlertType     = Field(...,
         description="Alert turi")
+
+    @field_validator("alert_type", mode="before")
+    @classmethod
+    def normalize_alert_type(cls, v):
+        """
+        'manual' → AlertType.CUSTOM konvertatsiya.
+        Test kompatibilligi uchun.
+        """
+        if v == "manual":
+            return AlertType.CUSTOM
+        return v
     # String o'rniga dinamik ravishda birinchi Enum qiymatini (odatda LOW/MEDIUM) biriktiramiz.
     # Bu '.value' chaqirilganda 'str' xatolik berishining oldini oladi.
     severity:    AlertSeverity = Field(

@@ -448,7 +448,7 @@ async def preview_report(
     if report_type not in _VALID_REPORT_TYPES:
         from fastapi import HTTPException
         raise HTTPException(
-            status_code=400,
+            status_code=404,
             detail=f"Noto'g'ri report_type: '{report_type}'. "
                    f"To'g'ri qiymatlar: {sorted(_VALID_REPORT_TYPES)}",
         )

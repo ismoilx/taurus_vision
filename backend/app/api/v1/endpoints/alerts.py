@@ -191,6 +191,13 @@ async def get_alert(
     status_code=status.HTTP_201_CREATED,
     summary="Qo'lda alert yaratish",
 )
+@router.post(
+    "/manual",
+    response_model=AlertResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Qo'lda alert yaratish (alias)",
+    include_in_schema=False,
+)
 async def create_alert(
     data: AlertCreateManual,
     db:   AsyncSession = Depends(get_db),

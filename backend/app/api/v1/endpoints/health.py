@@ -30,7 +30,7 @@ ENDPOINTLAR:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Path, status
+from fastapi import APIRouter, Depends, Query, Path, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -116,7 +116,11 @@ async def create_health_record(
             next_checkup_date=record.next_checkup_date,
         )
     except ValueError as exc:
-        raise BusinessRuleViolationError(message=str(exc))
+        msg = str(exc)
+        # Animal not found → 404, boshqa validatsiya xatolari → 400
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise BusinessRuleViolationError(message=msg)
 
     return HealthRecordResponse.model_validate(created)
 
@@ -175,6 +179,7 @@ async def get_animal_health_records(
     animal_id: int = Path(..., gt=0, description="Jonivor ID"),
     skip: int = Query(0, ge=0, description="O'tkazib yuborilgan yozuvlar soni"),
     limit: int = Query(20, ge=1, le=100, description="Sahifa hajmi"),
+    record_type: Optional[str] = Query(None, description="Tur bo'yicha filter (vaccination, checkup, ...)"),
     current_user: CurrentUser = ...,
     db: AsyncSession = Depends(get_db),
 ) -> HealthRecordListResponse:
@@ -185,6 +190,7 @@ async def get_animal_health_records(
         animal_id:    Jonivor ID
         skip:         Sahifalash offseti
         limit:        Sahifa hajmi (max 100)
+        record_type:  Ixtiyoriy filter (vaccination, checkup, ...)
         current_user: Autentifikatsiya qilingan foydalanuvchi
         db:           DB session
 
@@ -196,7 +202,18 @@ async def get_animal_health_records(
     """
     service = HealthRecordService(db)
     try:
-        records, total = await service.get_animal_records(db, animal_id, skip, limit)
+        if record_type:
+            try:
+                rt = HealthRecordType(record_type)
+            except ValueError:
+                raise HTTPException(status_code=422, detail=f"Noto'g'ri record_type: {record_type}")
+            records, total = await service.get_records_by_type(db, animal_id, rt)
+            # Pagination qo'lda
+            records = records[skip: skip + limit]
+        else:
+            records, total = await service.get_animal_records(db, animal_id, skip, limit)
+    except HTTPException:
+        raise
     except ValueError:
         raise EntityNotFoundError(entity="Animal", identifier=animal_id)
 
