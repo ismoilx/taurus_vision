@@ -1,635 +1,641 @@
 """
-Taurus Vision — Health Record Service Tests (Sprint 11-12)
-
-Service qatlamini unit testlari.
-DB integrasiyasi bilan ishlaydi (in-memory SQLite yoki test PostgreSQL).
-
-Test qamrovi:
-    create_health_record     — Yaratish + validatsiya
-    get_record_by_id         — ID bo'yicha olish
-    get_animal_records       — Jonivor yozuvlari
-    get_records_by_type      — Tur bo'yicha filtr
-    get_records_by_severity  — Og'irlik bo'yicha filtr
-    get_unresolved_records   — Hal etilmaganlar
-    get_critical_records     — Kritik yozuvlar
-    update_health_record     — Yangilash
-    resolve_health_record    — Hal etilgan belgilash
-    delete_health_record     — O'chirish
-    get_health_statistics    — Statistika
-    get_health_summary       — Xulosa
-    _calculate_health_score  — Balni hisoblash mantiq
-    _get_health_status       — Status belgilash mantiq
+TAURUS VISION — tests/test_services/test_health_service.py
+============================================================
+HealthRecordRepository + HealthRecordService uchun to'liq testlar.
 """
 
 import pytest
-from datetime import datetime, date, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from datetime import date, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.services]
+from app.models.animal import Animal, AnimalSpecies, AnimalGender, AnimalStatus
+from app.models.health_record import HealthRecord, HealthRecordType, HealthRecordSeverity
+from app.repositories.health_record import HealthRecordRepository
+from app.services.health_record_service import HealthRecordService
+from app.core.exceptions import EntityNotFoundError
 
+pytestmark = pytest.mark.asyncio
 
-# =============================================================================
-# FIXTURES
-# =============================================================================
-
-@pytest.fixture
-def service(db: AsyncSession):
-    """HealthRecordService instance."""
-    from app.services.health_record_service import HealthRecordService
-    return HealthRecordService(db)
-
-
-@pytest.fixture
-def valid_types():
-    """Barcha HealthRecordType lari."""
-    from app.models.health_record import HealthRecordType
-    return list(HealthRecordType)
+TODAY = date.today()
+TOMORROW = TODAY + timedelta(days=1)
+NEXT_WEEK = TODAY + timedelta(days=7)
 
 
 @pytest.fixture
-def valid_severities():
-    """Barcha HealthRecordSeverity lari."""
-    from app.models.health_record import HealthRecordSeverity
-    return list(HealthRecordSeverity)
-
-
-async def _make_record(
-    service,
-    db: AsyncSession,
-    animal,
-    **kwargs,
-):
-    """Yordamchi: health record yaratadi."""
-    from app.models.health_record import HealthRecordType, HealthRecordSeverity
-    return await service.create_health_record(
-        db           = db,
-        animal_id    = animal.id,
-        record_type  = kwargs.get("record_type",  HealthRecordType.CHECKUP),
-        severity     = kwargs.get("severity",     HealthRecordSeverity.NORMAL),
-        diagnosis    = kwargs.get("diagnosis",    "Routine checkup"),
-        symptoms     = kwargs.get("symptoms",     None),
-        treatment    = kwargs.get("treatment",    None),
-        medication   = kwargs.get("medication",   None),
-        dosage       = kwargs.get("dosage",       None),
-        veterinarian = kwargs.get("veterinarian", "Dr. Test"),
-        clinic_name  = kwargs.get("clinic_name",  None),
-        cost         = kwargs.get("cost",         None),
-        notes        = kwargs.get("notes",        None),
-        next_checkup_date = kwargs.get("next_checkup_date", None),
+async def animal(db):
+    a = Animal(
+        tag_id="HLT-ANIMAL-001",
+        species=AnimalSpecies.CATTLE,
+        gender=AnimalGender.FEMALE,
+        status=AnimalStatus.ACTIVE,
+        acquisition_date=datetime(2022, 1, 1),
     )
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    return a
 
 
-# =============================================================================
-# YARATISH TESTLARI
-# =============================================================================
-
-class TestCreateHealthRecord:
-    """create_health_record() metodi testlari."""
-
-    async def test_create_returns_health_record(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Record yaratiladi va qaytariladi."""
-        from app.models.health_record import HealthRecord
-        record = await _make_record(service, db, sample_animal)
-        assert isinstance(record, HealthRecord)
-        assert record.id is not None
-        assert record.id > 0
-
-    async def test_create_stores_correct_animal_id(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """animal_id to'g'ri saqlanadi."""
-        record = await _make_record(service, db, sample_animal)
-        assert record.animal_id == sample_animal.id
-
-    async def test_create_defaults_is_resolved_false(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Yangi record is_resolved=False."""
-        record = await _make_record(service, db, sample_animal)
-        assert record.is_resolved is False
-        assert record.resolved_at is None
-
-    async def test_create_all_record_types(
-        self, service, db: AsyncSession, sample_animal, valid_types
-    ):
-        """Barcha HealthRecordType lari muvaffaqiyatli yaratiladi."""
-        for rt in valid_types:
-            from app.models.health_record import HealthRecordSeverity
-            record = await _make_record(
-                service, db, sample_animal,
-                record_type = rt,
-                diagnosis   = f"Test {rt.value}",
-            )
-            assert record.record_type == rt, f"Type {rt.value} mismatch"
-
-    async def test_create_all_severities(
-        self, service, db: AsyncSession, sample_animal, valid_severities
-    ):
-        """Barcha HealthRecordSeverity lari muvaffaqiyatli yaratiladi."""
-        for sev in valid_severities:
-            from app.models.health_record import HealthRecordType
-            record = await _make_record(
-                service, db, sample_animal,
-                severity  = sev,
-                diagnosis = f"Test {sev.value}",
-            )
-            assert record.severity == sev
-
-    async def test_create_with_all_optional_fields(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Barcha ixtiyoriy maydonlar saqlanadi."""
-        next_checkup = date.today() + timedelta(days=30)
-        record = await _make_record(
-            service, db, sample_animal,
-            symptoms         = "High temperature, loss of appetite",
-            treatment        = "Antibiotics administered",
-            medication       = "Penicillin G",
-            dosage           = "10000 IU/kg IM",
-            veterinarian     = "Dr. Rahimov",
-            clinic_name      = "Samarqand Vet Klinikasi",
-            cost             = 75000.0,
-            notes            = "Follow-up in 7 days",
-            next_checkup_date = next_checkup,
-        )
-        assert record.symptoms     == "High temperature, loss of appetite"
-        assert record.treatment    == "Antibiotics administered"
-        assert record.medication   == "Penicillin G"
-        assert record.dosage       == "10000 IU/kg IM"
-        assert record.veterinarian == "Dr. Rahimov"
-        assert record.clinic_name  == "Samarqand Vet Klinikasi"
-        assert record.cost         == 75000.0
-        assert record.next_checkup_date == next_checkup
-
-    async def test_create_raises_for_nonexistent_animal(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q jonivor uchun ValueError."""
-        from app.models.health_record import HealthRecordType, HealthRecordSeverity
-
-        with pytest.raises(ValueError, match="not found"):
-            await service.create_health_record(
-                db          = db,
-                animal_id   = 999999,
-                record_type = HealthRecordType.CHECKUP,
-                severity    = HealthRecordSeverity.NORMAL,
-                diagnosis   = "Ghost animal test",
-            )
-
-    async def test_create_raises_for_past_checkup_date(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """O'tgan sana next_checkup_date — ValueError."""
-        past_date = date.today() - timedelta(days=1)
-        with pytest.raises(ValueError, match="past"):
-            await _make_record(
-                service, db, sample_animal,
-                next_checkup_date = past_date,
-            )
-
-    async def test_create_raises_for_negative_cost(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Manfiy xarajat — ValueError."""
-        with pytest.raises(ValueError, match="negative"):
-            await _make_record(
-                service, db, sample_animal,
-                cost = -100.0,
-            )
-
-    async def test_create_sets_recorded_at(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """recorded_at avtomatik o'rnatiladi."""
-        before = datetime.utcnow()
-        record = await _make_record(service, db, sample_animal)
-        after  = datetime.utcnow()
-
-        assert record.recorded_at is not None
-        assert before <= record.recorded_at <= after
+@pytest.fixture
+async def second_animal(db):
+    a = Animal(
+        tag_id="HLT-ANIMAL-002",
+        species=AnimalSpecies.SHEEP,
+        gender=AnimalGender.MALE,
+        status=AnimalStatus.ACTIVE,
+        acquisition_date=datetime(2022, 1, 1),
+    )
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    return a
 
 
-# =============================================================================
-# OLISH TESTLARI
-# =============================================================================
+def _rec(animal_id, **kw):
+    defaults = dict(
+        animal_id=animal_id,
+        record_type=kw.pop("record_type", HealthRecordType.CHECKUP),
+        severity=kw.pop("severity", HealthRecordSeverity.NORMAL),
+        diagnosis="Test",
+        is_resolved=False,
+        recorded_at=datetime.utcnow(),
+    )
+    defaults.update(kw)
+    return HealthRecord(**defaults)
 
-class TestGetHealthRecord:
-    """get_record_by_id() va get_animal_records() testlari."""
 
-    async def test_get_by_id_returns_correct_record(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """ID bo'yicha to'g'ri record qaytadi."""
-        created = await _make_record(
-            service, db, sample_animal, diagnosis="Get by ID test"
-        )
-        fetched = await service.get_record_by_id(db, created.id)
-        assert fetched is not None
-        assert fetched.id       == created.id
-        assert fetched.diagnosis == "Get by ID test"
+@pytest.fixture
+def repo():
+    return HealthRecordRepository()
 
-    async def test_get_by_id_returns_none_for_missing(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q ID — None yoki EntityNotFoundError."""
-        from app.core.exceptions import EntityNotFoundError
-        try:
-            result = await service.get_record_by_id(db, 999999)
-            assert result is None
-        except EntityNotFoundError:
-            pass  # Bu ham to'g'ri
 
-    async def test_get_animal_records_returns_list(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Jonivor yozuvlari ro'yxat sifatida qaytadi."""
-        for i in range(3):
-            await _make_record(
-                service, db, sample_animal,
-                diagnosis=f"Record #{i}",
-            )
+@pytest.fixture
+def svc():
+    return HealthRecordService(db=None)
 
-        records, total = await service.get_animal_records(
-            db, sample_animal.id, skip=0, limit=10
-        )
-        assert isinstance(records, list)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHealthRecordModel:
+    def test_repr_contains_key_info(self):
+        r = HealthRecord(animal_id=5, record_type=HealthRecordType.VACCINATION,
+                         severity=HealthRecordSeverity.NORMAL, diagnosis="FMD")
+        s = repr(r)
+        assert "5" in s and "vaccination" in s and "normal" in s
+
+    def test_to_dict_required_keys(self):
+        r = HealthRecord(animal_id=1, record_type=HealthRecordType.CHECKUP,
+                         severity=HealthRecordSeverity.NORMAL, diagnosis="T",
+                         is_resolved=False, recorded_at=datetime.utcnow())
+        d = r.to_dict()
+        for k in ["animal_id", "record_type", "severity", "diagnosis", "is_resolved"]:
+            assert k in d
+
+    def test_to_dict_enum_values_are_strings(self):
+        r = HealthRecord(animal_id=1, record_type=HealthRecordType.VACCINATION,
+                         severity=HealthRecordSeverity.CRITICAL, diagnosis="T")
+        d = r.to_dict()
+        assert d["record_type"] == "vaccination"
+        assert d["severity"]    == "critical"
+
+    def test_to_dict_is_resolved_false(self):
+        r = HealthRecord(animal_id=1, record_type=HealthRecordType.CHECKUP,
+                         severity=HealthRecordSeverity.NORMAL, diagnosis="T", is_resolved=False)
+        assert r.to_dict()["is_resolved"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPOSITORY — CREATE & GET
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHealthRepoCreateGet:
+    async def test_create_assigns_id(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        assert r.id is not None and r.id > 0
+
+    async def test_create_saves_fields(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id,
+            record_type=HealthRecordType.VACCINATION,
+            severity=HealthRecordSeverity.WARNING,
+            diagnosis="FMD", veterinarian="Dr. X", cost=50000.0))
+        assert r.record_type  == HealthRecordType.VACCINATION
+        assert r.severity     == HealthRecordSeverity.WARNING
+        assert r.veterinarian == "Dr. X"
+        assert r.cost         == 50000.0
+
+    async def test_get_by_id_existing(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        found = await repo.get_by_id(db, r.id)
+        assert found is not None and found.id == r.id
+
+    async def test_get_by_id_missing_none(self, db, repo):
+        assert await repo.get_by_id(db, 999999) is None
+
+    async def test_get_by_animal_counts(self, db, repo, animal):
+        for _ in range(3):
+            await repo.create(db, _rec(animal.id))
+        recs, total = await repo.get_by_animal(db, animal.id)
         assert total >= 3
 
-    async def test_get_animal_records_pagination(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Pagination ishlaydi."""
-        for i in range(6):
-            await _make_record(
-                service, db, sample_animal,
-                diagnosis=f"Pagination #{i}",
-            )
+    async def test_get_by_animal_pagination(self, db, repo, animal):
+        for _ in range(5):
+            await repo.create(db, _rec(animal.id))
+        p1, _ = await repo.get_by_animal(db, animal.id, skip=0, limit=2)
+        p2, _ = await repo.get_by_animal(db, animal.id, skip=2, limit=2)
+        assert {r.id for r in p1}.isdisjoint({r.id for r in p2})
 
-        records_p1, total = await service.get_animal_records(
-            db, sample_animal.id, skip=0, limit=3
-        )
-        records_p2, _     = await service.get_animal_records(
-            db, sample_animal.id, skip=3, limit=3
-        )
-
-        assert len(records_p1) <= 3
-        assert len(records_p2) <= 3
-        assert total >= 6
-
-        ids_p1 = {r.id for r in records_p1}
-        ids_p2 = {r.id for r in records_p2}
-        assert ids_p1.isdisjoint(ids_p2), "Pagination kesishmasligi kerak"
-
-    async def test_get_records_by_type_filters_correctly(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """record_type filtr ishlaydi."""
-        from app.models.health_record import HealthRecordType
-
-        await _make_record(
-            service, db, sample_animal,
-            record_type = HealthRecordType.VACCINATION,
-            diagnosis   = "Vaccination record",
-        )
-        await _make_record(
-            service, db, sample_animal,
-            record_type = HealthRecordType.INJURY,
-            diagnosis   = "Injury record",
-        )
-
-        records, _ = await service.get_records_by_type(
-            db, sample_animal.id, HealthRecordType.VACCINATION
-        )
-        for r in records:
-            assert r.record_type == HealthRecordType.VACCINATION
-
-    async def test_get_records_by_severity_filters_correctly(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """severity filtr ishlaydi."""
-        from app.models.health_record import HealthRecordSeverity, HealthRecordType
-
-        await _make_record(
-            service, db, sample_animal,
-            severity    = HealthRecordSeverity.CRITICAL,
-            record_type = HealthRecordType.ILLNESS,
-            diagnosis   = "Critical severity test",
-        )
-
-        records, _ = await service.get_records_by_severity(
-            db, sample_animal.id, HealthRecordSeverity.CRITICAL
-        )
-        for r in records:
-            assert r.severity == HealthRecordSeverity.CRITICAL
+    async def test_get_by_animal_own_only(self, db, repo, animal, second_animal):
+        await repo.create(db, _rec(animal.id))
+        await repo.create(db, _rec(second_animal.id))
+        recs, _ = await repo.get_by_animal(db, animal.id)
+        assert all(r.animal_id == animal.id for r in recs)
 
 
-# =============================================================================
-# YANGILASH TESTLARI
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPOSITORY — FILTERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestUpdateHealthRecord:
-    """update_health_record() metodi testlari."""
+class TestHealthRepoFilters:
+    async def test_get_by_type_vaccination(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, record_type=HealthRecordType.VACCINATION, diagnosis="v"))
+        await repo.create(db, _rec(animal.id, record_type=HealthRecordType.CHECKUP))
+        recs, total = await repo.get_by_type(db, HealthRecordType.VACCINATION)
+        assert all(r.record_type == HealthRecordType.VACCINATION for r in recs)
+        assert total >= 1
 
-    async def test_update_diagnosis(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Diagnosis muvaffaqiyatli yangilanadi."""
-        record = await _make_record(
-            service, db, sample_animal, diagnosis="Original"
-        )
-        updated = await service.update_health_record(
-            db, record.id, {"diagnosis": "Updated diagnosis"}
-        )
-        assert updated.diagnosis == "Updated diagnosis"
+    async def test_get_by_severity_critical(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, severity=HealthRecordSeverity.CRITICAL))
+        recs, total = await repo.get_by_severity(db, HealthRecordSeverity.CRITICAL)
+        assert all(r.severity == HealthRecordSeverity.CRITICAL for r in recs)
+        assert total >= 1
 
-    async def test_update_severity(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Severity yangilanadi."""
-        from app.models.health_record import HealthRecordSeverity
+    async def test_get_unresolved_only_unresolved(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, is_resolved=False))
+        await repo.create(db, _rec(animal.id, is_resolved=True, resolved_at=datetime.utcnow()))
+        recs, _ = await repo.get_unresolved(db)
+        assert all(not r.is_resolved for r in recs)
 
-        record = await _make_record(
-            service, db, sample_animal,
-            severity=HealthRecordSeverity.NORMAL
-        )
-        updated = await service.update_health_record(
-            db, record.id, {"severity": HealthRecordSeverity.WARNING}
-        )
-        assert updated.severity == HealthRecordSeverity.WARNING
+    async def test_get_unresolved_by_animal(self, db, repo, animal, second_animal):
+        await repo.create(db, _rec(animal.id, is_resolved=False))
+        await repo.create(db, _rec(second_animal.id, is_resolved=False))
+        recs, _ = await repo.get_unresolved(db, animal_id=animal.id)
+        assert all(r.animal_id == animal.id for r in recs)
 
-    async def test_update_nonexistent_raises(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q record yangilash — xato."""
-        from app.core.exceptions import EntityNotFoundError
+    async def test_get_critical_unresolved(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, severity=HealthRecordSeverity.CRITICAL, is_resolved=False))
+        await repo.create(db, _rec(animal.id, severity=HealthRecordSeverity.CRITICAL,
+                                   is_resolved=True, resolved_at=datetime.utcnow()))
+        recs, total = await repo.get_critical_unresolved(db)
+        assert all(r.severity == HealthRecordSeverity.CRITICAL and not r.is_resolved for r in recs)
+        assert total >= 1
 
-        with pytest.raises((EntityNotFoundError, ValueError)):
-            await service.update_health_record(
-                db, 999999, {"diagnosis": "Ghost"}
-            )
+    async def test_get_upcoming_in_range(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, next_checkup_date=TODAY + timedelta(days=3)))
+        recs, total = await repo.get_upcoming_checkups(db, days_ahead=7)
+        assert total >= 1
+        for r in recs:
+            assert r.next_checkup_date >= TODAY
+            assert r.next_checkup_date <= TODAY + timedelta(days=7)
 
+    async def test_get_upcoming_excludes_past(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, next_checkup_date=TODAY - timedelta(days=1)))
+        recs, _ = await repo.get_upcoming_checkups(db, days_ahead=7)
+        assert all(r.next_checkup_date >= TODAY for r in recs)
 
-# =============================================================================
-# HAL ETISH TESTLARI
-# =============================================================================
-
-class TestResolveHealthRecord:
-    """resolve_health_record() metodi testlari."""
-
-    async def test_resolve_sets_is_resolved(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """is_resolved = True ga o'rnatiladi."""
-        record = await _make_record(service, db, sample_animal)
-        assert record.is_resolved is False
-
-        resolved = await service.resolve_health_record(
-            db, record.id, resolution_note="Fully healed"
-        )
-        assert resolved.is_resolved is True
-
-    async def test_resolve_sets_resolved_at(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """resolved_at timestamp o'rnatiladi."""
-        record  = await _make_record(service, db, sample_animal)
-        before  = datetime.utcnow()
-        resolved = await service.resolve_health_record(db, record.id)
-        after   = datetime.utcnow()
-
-        assert resolved.resolved_at is not None
-        assert before <= resolved.resolved_at <= after
-
-    async def test_resolve_nonexistent_raises(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q record hal etish — xato."""
-        from app.core.exceptions import EntityNotFoundError
-        with pytest.raises((EntityNotFoundError, ValueError)):
-            await service.resolve_health_record(db, 999999)
+    async def test_get_upcoming_excludes_far_future(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, next_checkup_date=TODAY + timedelta(days=30)))
+        recs, _ = await repo.get_upcoming_checkups(db, days_ahead=7)
+        assert all(r.next_checkup_date <= TODAY + timedelta(days=7) for r in recs)
 
 
-# =============================================================================
-# O'CHIRISH TESTLARI
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPOSITORY — UPDATE, RESOLVE, DELETE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestDeleteHealthRecord:
-    """delete_health_record() metodi testlari."""
+class TestHealthRepoUpdateResolveDelete:
+    async def test_update_field(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        updated = await repo.update(db, r.id, diagnosis="Updated")
+        assert updated.diagnosis == "Updated"
 
-    async def test_delete_removes_record(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Record o'chirilgandan so'ng topilmaydi."""
-        from app.core.exceptions import EntityNotFoundError
+    async def test_update_multiple(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        u = await repo.update(db, r.id, treatment="New TX", notes="Note", cost=10000.0)
+        assert u.treatment == "New TX" and u.notes == "Note" and u.cost == 10000.0
 
-        record = await _make_record(service, db, sample_animal)
-        record_id = record.id
+    async def test_update_missing_returns_none(self, db, repo):
+        assert await repo.update(db, 999999, diagnosis="Ghost") is None
 
-        await service.delete_health_record(db, record_id)
+    async def test_mark_resolved(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id, is_resolved=False))
+        resolved = await repo.mark_resolved(db, r.id)
+        assert resolved.is_resolved is True and resolved.resolved_at is not None
 
-        # O'chirilgandan keyin topilmasligi kerak
-        try:
-            fetched = await service.get_record_by_id(db, record_id)
-            assert fetched is None
-        except EntityNotFoundError:
-            pass  # Bu ham to'g'ri
+    async def test_mark_resolved_custom_ts(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id, is_resolved=False))
+        ts = datetime(2025, 6, 15)
+        resolved = await repo.mark_resolved(db, r.id, resolved_at=ts)
+        assert resolved.resolved_at == ts
 
-    async def test_delete_nonexistent_raises(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q record o'chirish — xato."""
-        from app.core.exceptions import EntityNotFoundError
-        with pytest.raises((EntityNotFoundError, ValueError)):
-            await service.delete_health_record(db, 999999)
+    async def test_mark_resolved_missing_returns_none(self, db, repo):
+        assert await repo.mark_resolved(db, 999999) is None
 
+    async def test_delete_returns_true(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        assert await repo.delete(db, r.id) is True
 
-# =============================================================================
-# STATISTIKA TESTLARI
-# =============================================================================
+    async def test_delete_removes(self, db, repo, animal):
+        r = await repo.create(db, _rec(animal.id))
+        rid = r.id
+        await repo.delete(db, rid)
+        assert await repo.get_by_id(db, rid) is None
 
-class TestHealthStatistics:
-    """get_health_statistics() va get_health_summary() testlari."""
-
-    async def test_statistics_returns_dict(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Statistika dict qaytaradi."""
-        result = await service.get_health_statistics(db, animal_id=sample_animal.id)
-        assert isinstance(result, dict)
-
-    async def test_statistics_counts_records(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """total_records to'g'ri hisoblanadi."""
-        for i in range(3):
-            await _make_record(
-                service, db, sample_animal,
-                diagnosis=f"Stats test #{i}",
-            )
-        stats = await service.get_health_statistics(db, animal_id=sample_animal.id)
-        assert stats.get("total_records", 0) >= 3
-
-    async def test_summary_structure(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Xulosa barcha kerakli kalitlarni o'z ichiga oladi."""
-        summary = await service.get_health_summary(db, sample_animal.id)
-
-        required = [
-            "animal_id", "total_records", "unresolved_issues",
-            "health_score", "health_status",
-        ]
-        for key in required:
-            assert key in summary, f"Summary key '{key}' missing"
-
-    async def test_summary_animal_id_matches(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Summary animal_id to'g'ri."""
-        summary = await service.get_health_summary(db, sample_animal.id)
-        assert summary["animal_id"] == sample_animal.id
-
-    async def test_summary_nonexistent_animal_raises(
-        self, service, db: AsyncSession
-    ):
-        """Yo'q jonivor — ValueError."""
-        with pytest.raises(ValueError, match="not found"):
-            await service.get_health_summary(db, 999999)
+    async def test_delete_missing_returns_false(self, db, repo):
+        assert await repo.delete(db, 999999) is False
 
 
-# =============================================================================
-# BALL HISOBLASH TESTLARI (UNIT)
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPOSITORY — STATISTICS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestCalculateHealthScore:
-    """_calculate_health_score() mantiq testlari."""
+class TestHealthRepoStatistics:
+    async def test_statistics_structure(self, db, repo, animal):
+        stats = await repo.get_statistics(db, animal_id=animal.id)
+        for k in ["total_records", "by_type", "by_severity", "unresolved", "critical_unresolved"]:
+            assert k in stats
 
-    def test_perfect_score_no_issues(self, service):
-        """Muammo yo'q — 100 ball."""
-        stats = {
-            "total_records":         5,
-            "unresolved":            0,
-            "critical_unresolved":   0,
-            "by_severity":           {"normal": 5, "warning": 0, "critical": 0},
-        }
-        score = service._calculate_health_score(stats)
-        assert score == 100
+    async def test_total_count(self, db, repo, animal):
+        for _ in range(3):
+            await repo.create(db, _rec(animal.id))
+        stats = await repo.get_statistics(db, animal_id=animal.id)
+        assert stats["total_records"] >= 3
 
-    def test_critical_unresolved_deducts_points(self, service):
-        """Hal etilmagan kritik — ball kamayadi."""
-        stats_clean = {
-            "total_records": 5, "unresolved": 0, "critical_unresolved": 0,
-            "by_severity": {"normal": 5},
-        }
-        stats_critical = {
-            "total_records": 5, "unresolved": 2, "critical_unresolved": 2,
-            "by_severity": {"normal": 3, "critical": 2},
-        }
-        score_clean    = service._calculate_health_score(stats_clean)
-        score_critical = service._calculate_health_score(stats_critical)
-        assert score_critical < score_clean
+    async def test_by_type_counts(self, db, repo, animal):
+        for _ in range(2):
+            await repo.create(db, _rec(animal.id, record_type=HealthRecordType.VACCINATION, diagnosis="v"))
+        await repo.create(db, _rec(animal.id, record_type=HealthRecordType.CHECKUP))
+        stats = await repo.get_statistics(db, animal_id=animal.id)
+        assert stats["by_type"].get("vaccination", 0) >= 2
+        assert stats["by_type"].get("checkup", 0) >= 1
 
-    def test_score_minimum_is_zero(self, service):
-        """Ball 0 dan past tushmaydi."""
-        stats = {
-            "total_records":         20,
-            "unresolved":            15,
-            "critical_unresolved":   10,
-            "by_severity":           {"critical": 15, "warning": 5},
-        }
-        score = service._calculate_health_score(stats)
-        assert score >= 0
+    async def test_unresolved_count(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, is_resolved=False))
+        await repo.create(db, _rec(animal.id, is_resolved=False))
+        await repo.create(db, _rec(animal.id, is_resolved=True, resolved_at=datetime.utcnow()))
+        stats = await repo.get_statistics(db, animal_id=animal.id)
+        assert stats["unresolved"] >= 2
 
-    def test_score_maximum_is_100(self, service):
-        """Ball 100 dan oshib ketmaydi."""
-        stats = {
-            "total_records": 0, "unresolved": 0, "critical_unresolved": 0,
-            "by_severity": {},
-        }
-        score = service._calculate_health_score(stats)
-        assert score <= 100
+    async def test_critical_unresolved_count(self, db, repo, animal):
+        await repo.create(db, _rec(animal.id, severity=HealthRecordSeverity.CRITICAL, is_resolved=False))
+        stats = await repo.get_statistics(db, animal_id=animal.id)
+        assert stats["critical_unresolved"] >= 1
+
+    async def test_global_stats_no_filter(self, db, repo, animal, second_animal):
+        await repo.create(db, _rec(animal.id))
+        await repo.create(db, _rec(second_animal.id))
+        stats = await repo.get_statistics(db)
+        assert stats["total_records"] >= 2
 
 
-# =============================================================================
-# STATUS BELGILASH TESTLARI (UNIT)
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE — CREATE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestGetHealthStatus:
-    """_get_health_status() mantiq testlari."""
+class TestHealthServiceCreate:
+    async def test_create_success(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Routine")
+        assert r.id is not None and r.animal_id == animal.id
 
-    @pytest.mark.parametrize("score,expected", [
-        (100, "excellent"),
-        (90,  "excellent"),
-        (89,  "good"),
-        (75,  "good"),
-        (74,  "fair"),
-        (60,  "fair"),
-        (59,  "poor"),
-        (40,  "poor"),
-        (39,  "critical"),
-        (0,   "critical"),
-    ])
-    def test_status_boundaries(self, service, score: int, expected: str):
-        """Chegaradagi qiymatlar to'g'ri status qaytaradi."""
-        result = service._get_health_status(score)
-        assert result == expected, (
-            f"score={score}: expected='{expected}', got='{result}'"
-        )
+    async def test_create_missing_animal_raises(self, db, svc):
+        with pytest.raises(ValueError) as exc_info:
+            await svc.create_health_record(db, 999999,
+                record_type=HealthRecordType.CHECKUP,
+                severity=HealthRecordSeverity.NORMAL, diagnosis="T")
+        assert "999999" in str(exc_info.value)
 
-    def test_all_statuses_covered(self, service):
-        """Barcha 5 ta status qaytarilishi mumkin."""
-        all_statuses = set()
-        for score in range(0, 101, 5):
-            all_statuses.add(service._get_health_status(score))
+    async def test_create_negative_cost_raises(self, db, svc, animal):
+        with pytest.raises(ValueError):
+            await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.TREATMENT,
+                severity=HealthRecordSeverity.NORMAL, diagnosis="T", cost=-100.0)
 
-        expected_statuses = {"excellent", "good", "fair", "poor", "critical"}
-        assert all_statuses == expected_statuses
+    async def test_create_past_checkup_date_raises(self, db, svc, animal):
+        with pytest.raises(ValueError):
+            await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.CHECKUP,
+                severity=HealthRecordSeverity.NORMAL, diagnosis="T",
+                next_checkup_date=TODAY - timedelta(days=1))
+
+    async def test_create_today_checkup_date_ok(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="T",
+            next_checkup_date=TODAY)
+        assert r.next_checkup_date == TODAY
+
+    async def test_create_zero_cost_ok(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Free", cost=0.0)
+        assert r.cost == 0.0
+
+    async def test_create_is_resolved_false(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.WARNING, diagnosis="Cold")
+        assert r.is_resolved is False
+
+    async def test_create_all_record_types(self, db, svc, animal):
+        for rtype in HealthRecordType:
+            r = await svc.create_health_record(db, animal.id,
+                record_type=rtype, severity=HealthRecordSeverity.NORMAL,
+                diagnosis=f"T {rtype.value}")
+            assert r.record_type == rtype
+
+    async def test_create_all_severities(self, db, svc, animal):
+        for sev in HealthRecordSeverity:
+            r = await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.CHECKUP, severity=sev, diagnosis="T")
+            assert r.severity == sev
 
 
-# =============================================================================
-# UNRESOLVED VA CRITICAL TESTLARI
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE — GET & FILTER
+# ═══════════════════════════════════════════════════════════════════════════════
 
-class TestUnresolvedAndCritical:
-    """get_unresolved_records() va get_critical_records() testlari."""
+class TestHealthServiceGet:
+    async def test_get_by_id_existing(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="T")
+        found = await svc.get_record_by_id(db, r.id)
+        assert found is not None and found.id == r.id
 
-    async def test_unresolved_excludes_resolved(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Hal etilgan record unresolved da ko'rinmaydi."""
-        record = await _make_record(
-            service, db, sample_animal,
-            diagnosis="Will be resolved"
-        )
-        await service.resolve_health_record(db, record.id)
+    async def test_get_by_id_missing_none(self, db, svc):
+        assert await svc.get_record_by_id(db, 999999) is None
 
-        unresolved, total = await service.get_unresolved_records(
-            db, animal_id=sample_animal.id
-        )
-        resolved_ids = {r.id for r in unresolved}
-        assert record.id not in resolved_ids
+    async def test_get_animal_records_tuple(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.VACCINATION,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="T")
+        recs, total = await svc.get_animal_records(db, animal.id)
+        assert total >= 1 and isinstance(recs, list)
 
-    async def test_critical_records_only_critical(
-        self, service, db: AsyncSession, sample_animal
-    ):
-        """Critical ro'yxatda faqat critical severity."""
-        from app.models.health_record import HealthRecordSeverity, HealthRecordType
+    async def test_get_animal_records_pagination(self, db, svc, animal):
+        for i in range(5):
+            await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.CHECKUP,
+                severity=HealthRecordSeverity.NORMAL, diagnosis=f"C{i}")
+        p1, _ = await svc.get_animal_records(db, animal.id, skip=0, limit=2)
+        p2, _ = await svc.get_animal_records(db, animal.id, skip=2, limit=2)
+        assert {r.id for r in p1}.isdisjoint({r.id for r in p2})
 
-        await _make_record(
-            service, db, sample_animal,
-            severity    = HealthRecordSeverity.CRITICAL,
-            record_type = HealthRecordType.ILLNESS,
-            diagnosis   = "Critical test record",
-        )
-        await _make_record(
-            service, db, sample_animal,
-            severity  = HealthRecordSeverity.NORMAL,
-            diagnosis = "Normal test record",
-        )
+    async def test_get_animal_records_missing_raises(self, db, svc):
+        with pytest.raises(ValueError):
+            await svc.get_animal_records(db, 999999)
 
-        critical, _ = await service.get_critical_records(db)
-        for r in critical:
-            assert r.severity == HealthRecordSeverity.CRITICAL
+    async def test_get_records_by_type(self, db, svc, animal):
+        for _ in range(2):
+            await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.VACCINATION,
+                severity=HealthRecordSeverity.NORMAL, diagnosis="V")
+        recs, total = await svc.get_records_by_type(db, animal.id, HealthRecordType.VACCINATION)
+        assert total >= 2
+        assert all(r.record_type == HealthRecordType.VACCINATION for r in recs)
+
+    async def test_get_records_by_severity(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.CRITICAL, diagnosis="Serious")
+        recs, total = await svc.get_records_by_severity(db, animal.id, HealthRecordSeverity.CRITICAL)
+        assert total >= 1
+        assert all(r.severity == HealthRecordSeverity.CRITICAL for r in recs)
+
+    async def test_get_unresolved(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.WARNING, diagnosis="Active")
+        recs, total = await svc.get_unresolved_records(db, animal_id=animal.id)
+        assert total >= 1
+        assert all(not r.is_resolved for r in recs)
+
+    async def test_get_critical(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.SURGERY,
+            severity=HealthRecordSeverity.CRITICAL, diagnosis="Critical")
+        recs, total = await svc.get_critical_records(db, animal_id=animal.id)
+        assert total >= 1
+        assert all(r.severity == HealthRecordSeverity.CRITICAL for r in recs)
+
+    async def test_get_upcoming_checkups(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Upcoming",
+            next_checkup_date=TODAY + timedelta(days=3))
+        recs, total = await svc.get_upcoming_checkups(db, days_ahead=7)
+        assert total >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE — UPDATE & RESOLVE & DELETE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHealthServiceUpdateResolveDelete:
+    async def test_update_with_dict(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Original")
+        u = await svc.update_health_record(db, r.id, {"diagnosis": "Updated"})
+        assert u.diagnosis == "Updated"
+
+    async def test_update_with_kwargs(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Original")
+        u = await svc.update_health_record(db, r.id, diagnosis="Via kwargs")
+        assert u.diagnosis == "Via kwargs"
+
+    async def test_update_missing_raises(self, db, svc):
+        with pytest.raises(EntityNotFoundError):
+            await svc.update_health_record(db, 999999, {"diagnosis": "Ghost"})
+
+    async def test_resolve(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.WARNING, diagnosis="Healing")
+        resolved = await svc.resolve_health_record(db, r.id)
+        assert resolved.is_resolved is True and resolved.resolved_at is not None
+
+    async def test_resolve_with_note(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Minor")
+        resolved = await svc.resolve_health_record(db, r.id, resolution_note="Recovered")
+        assert resolved.notes == "Recovered"
+
+    async def test_resolve_missing_raises(self, db, svc):
+        with pytest.raises(EntityNotFoundError):
+            await svc.resolve_health_record(db, 999999)
+
+    async def test_delete_success(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="To delete")
+        assert await svc.delete_health_record(db, r.id) is True
+
+    async def test_delete_removes(self, db, svc, animal):
+        r = await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Gone")
+        rid = r.id
+        await svc.delete_health_record(db, rid)
+        assert await svc.get_record_by_id(db, rid) is None
+
+    async def test_delete_missing_raises(self, db, svc):
+        with pytest.raises(EntityNotFoundError):
+            await svc.delete_health_record(db, 999999)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE — STATISTICS & SCORE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHealthServiceStatistics:
+    async def test_statistics_structure(self, db, svc, animal):
+        stats = await svc.get_health_statistics(db, animal_id=animal.id)
+        for k in ["total_records", "unresolved", "critical_unresolved",
+                  "by_severity", "by_type", "health_score"]:
+            assert k in stats
+
+    async def test_score_100_no_issues(self, db, svc, animal):
+        stats = await svc.get_health_statistics(db, animal_id=animal.id)
+        assert stats["health_score"] == 100
+
+    async def test_score_decreases_with_unresolved(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Issue")
+        stats = await svc.get_health_statistics(db, animal_id=animal.id)
+        assert stats["health_score"] < 100
+
+    async def test_score_never_below_zero(self, db, svc, animal):
+        for _ in range(10):
+            await svc.create_health_record(db, animal.id,
+                record_type=HealthRecordType.ILLNESS,
+                severity=HealthRecordSeverity.CRITICAL, diagnosis="Critical")
+        stats = await svc.get_health_statistics(db, animal_id=animal.id)
+        assert stats["health_score"] >= 0
+
+    def test_calculate_score_no_issues(self):
+        svc = HealthRecordService(db=None)
+        assert svc._calculate_health_score({"critical_unresolved": 0, "unresolved": 0}) == 100
+
+    def test_calculate_score_one_critical(self):
+        svc = HealthRecordService(db=None)
+        score = svc._calculate_health_score({"critical_unresolved": 1, "unresolved": 1})
+        assert score == 75  # 100 - 20 - 5
+
+    def test_calculate_score_clamp_max(self):
+        svc = HealthRecordService(db=None)
+        assert svc._calculate_health_score({"critical_unresolved": 0, "unresolved": 0}) <= 100
+
+    def test_calculate_score_clamp_min(self):
+        svc = HealthRecordService(db=None)
+        assert svc._calculate_health_score({"critical_unresolved": 100, "unresolved": 100}) == 0
+
+    def test_status_excellent(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(95) == "excellent"
+        assert svc._get_health_status(90) == "excellent"
+
+    def test_status_good(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(89) == "good"
+        assert svc._get_health_status(75) == "good"
+
+    def test_status_fair(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(74) == "fair"
+        assert svc._get_health_status(60) == "fair"
+
+    def test_status_poor(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(59) == "poor"
+        assert svc._get_health_status(40) == "poor"
+
+    def test_status_critical(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(39) == "critical"
+        assert svc._get_health_status(0)  == "critical"
+
+    def test_score_boundary_90(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(90) == "excellent"
+        assert svc._get_health_status(89) == "good"
+
+    def test_score_boundary_75(self):
+        svc = HealthRecordService(db=None)
+        assert svc._get_health_status(75) == "good"
+        assert svc._get_health_status(74) == "fair"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERVICE — SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHealthServiceSummary:
+    async def test_summary_structure(self, db, svc, animal):
+        summary = await svc.get_health_summary(db, animal.id)
+        for k in ["animal_id", "animal_tag", "total_records",
+                  "unresolved_issues", "upcoming_checkups",
+                  "statistics", "health_score", "health_status"]:
+            assert k in summary
+
+    async def test_summary_animal_id(self, db, svc, animal):
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["animal_id"] == animal.id
+
+    async def test_summary_animal_tag(self, db, svc, animal):
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["animal_tag"] == animal.tag_id
+
+    async def test_summary_missing_raises(self, db, svc):
+        with pytest.raises(ValueError) as exc_info:
+            await svc.get_health_summary(db, 999999)
+        assert "999999" in str(exc_info.value)
+
+    async def test_summary_unresolved_issues(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.ILLNESS,
+            severity=HealthRecordSeverity.WARNING, diagnosis="Active issue")
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["unresolved_issues"]["count"] >= 1
+
+    async def test_summary_health_score_range(self, db, svc, animal):
+        summary = await svc.get_health_summary(db, animal.id)
+        assert 0 <= summary["health_score"] <= 100
+
+    async def test_summary_health_status_valid(self, db, svc, animal):
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["health_status"] in {"excellent", "good", "fair", "poor", "critical"}
+
+    async def test_summary_latest_record(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Latest")
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["latest_record"] is not None
+        assert "diagnosis" in summary["latest_record"]
+
+    async def test_summary_upcoming_checkups(self, db, svc, animal):
+        await svc.create_health_record(db, animal.id,
+            record_type=HealthRecordType.CHECKUP,
+            severity=HealthRecordSeverity.NORMAL, diagnosis="Future",
+            next_checkup_date=TODAY + timedelta(days=3))
+        summary = await svc.get_health_summary(db, animal.id)
+        assert summary["upcoming_checkups"]["count"] >= 1
+        assert summary["upcoming_checkups"]["next_date"] is not None
