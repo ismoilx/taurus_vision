@@ -4,6 +4,11 @@
  * ENDPOINTLAR:
  *   GET /api/v1/analytics/herd/statistics  → jonivorlar turi taqsimoti
  *   GET /api/v1/analytics/overview         → jami aktiv jonivorlar soni
+ *
+ * O'ZGARISHLAR:
+ *   - Chap karta ichiga 2 ta ichki ramka qo'shildi (tizim ko'k rangi #1E3EB4)
+ *   - Ramkalar karta pastki qatlamida turadi (z-index ko'tarilmagan)
+ *   - Tooltip barcha qatlamlar ustida erkin suzadi (position: fixed, z-index: 9999)
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
@@ -149,26 +154,51 @@ function InactiveSector(props: SectorProps & { globalActive: boolean }) {
 }
 
 // =============================================================================
+// INNER FRAME COMPONENT
+// Karta ichidagi ko'k chegarali ramka.
+// z-index ko'tarilmagan — tooltip har doim ustida suzadi.
+// =============================================================================
+
+interface InnerFrameProps {
+  children?: React.ReactNode;
+  style?: React.CSSProperties;
+}
+
+function InnerFrame({ children, style }: InnerFrameProps) {
+  return (
+    <div
+      style={{
+        border:        '1px solid rgba(30, 62, 180, 0.22)',
+        borderRadius:   16,
+        background:    'transparent',
+        position:      'relative',
+        zIndex:         0,
+        overflow:      'hidden',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// =============================================================================
 // PAGE
 // =============================================================================
 
 export default function DashboardPage() {
   const isMobile = useIsMobile();
 
-  // ── Hover state ──────────────────────────────────────────────────────────
   const [activeIndex, setActiveIndex]   = useState<number | undefined>(undefined);
   const [activeData,  setActiveData]    = useState<DonutEntry | null>(null);
   const leaveTimer                       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Tooltip DOM ref — pozitsiya to'g'ridan DOM'ga yoziladi ──────────────
   const tooltipRef                       = useRef<HTMLDivElement>(null);
   const [tipVisible, setTipVisible]      = useState(false);
 
-  // ── Chart o'lchami ────────────────────────────────────────────────────────
   const chartRef   = useRef<HTMLDivElement>(null);
   const chartRect  = useRef<DOMRect | null>(null);
 
-  // ── Queries ──────────────────────────────────────────────────────────────
   const { data: overview, isLoading: overviewLoading } = useQuery<OverviewStats>({
     queryKey: ['analytics', 'overview'],
     queryFn:  () => apiFetch<OverviewStats>('/api/v1/analytics/overview'),
@@ -199,7 +229,6 @@ export default function DashboardPage() {
 
   const isLoading = overviewLoading || herdLoading;
 
-  // Chart rect ni kuzatish
   useEffect(() => {
     const update = () => {
       if (chartRef.current) chartRect.current = chartRef.current.getBoundingClientRect();
@@ -209,7 +238,6 @@ export default function DashboardPage() {
     return () => window.removeEventListener('resize', update);
   }, [isLoading]);
 
-  // ── Mouse move — DOM'ga to'g'ridan yoziladi, inner radius tekshiriladi ──
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const tip = tooltipRef.current;
     const r   = chartRect.current;
@@ -218,9 +246,8 @@ export default function DashboardPage() {
     const cx     = r.left + r.width  / 2;
     const cy     = r.top  + r.height / 2;
     const dist   = Math.hypot(e.clientX - cx, e.clientY - cy);
-    const innerR = Math.min(r.width, r.height) / 2 * 0.46;
+    const innerR = Math.min(r.width, r.height) / 2 * 0.48;
 
-    // Halqa ichiga kirganda — 500ms sekin yo'qolish
     if (dist < innerR) {
       if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
       leaveTimer.current = setTimeout(() => {
@@ -230,14 +257,12 @@ export default function DashboardPage() {
       return;
     }
 
-    // Tooltip pozitsiyasini yangilash
     const angle  = Math.atan2(e.clientY - cy, e.clientX - cx);
-    const outerR = Math.min(r.width, r.height) / 2 * 0.74;
+    const outerR = Math.min(r.width, r.height) / 2 * 0.80;
     tip.style.left = `${cx + Math.cos(angle) * (outerR + MAX_OFFSET + 70)}px`;
     tip.style.top  = `${cy + Math.sin(angle) * (outerR + MAX_OFFSET + 70)}px`;
   }, []);
 
-  // ── Segment enter ────────────────────────────────────────────────────────
   const handleEnter = useCallback((_: unknown, index: number) => {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
     setActiveIndex(index);
@@ -245,7 +270,6 @@ export default function DashboardPage() {
     setTipVisible(true);
   }, [donutData]);
 
-  // ── Container leave — 500ms, silliq yo'qolish ────────────────────────────
   const handleContainerLeave = useCallback(() => {
     leaveTimer.current = setTimeout(() => {
       setActiveIndex(undefined);
@@ -257,7 +281,6 @@ export default function DashboardPage() {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
   }, []);
 
-  // ── Shape renderers ──────────────────────────────────────────────────────
   const renderActiveShape = useCallback((props: any) => <AnimatedSector {...props} />, []);
 
   const renderShape = useCallback((props: any) => (
@@ -272,7 +295,7 @@ export default function DashboardPage() {
     <div style={{
       background: 'var(--bg)',
       minHeight:  'calc(100vh - 56px)',
-      padding:    isMobile ? '14px 12px 24px' : '20px 24px 32px',
+      padding:    isMobile ? '24px 12px 34px' : '30px 24px 42px',
       overflow:   'hidden',
     }}>
 
@@ -288,7 +311,7 @@ export default function DashboardPage() {
         <div style={{
           flex:          '0 0 420px',
           maxWidth:       480,
-          marginLeft:     12,
+          marginLeft:     32,
           height:         isMobile ? 'auto' : 'calc(100vh - 56px - 48px)',
           minHeight:      480,
           background:    '#fff',
@@ -297,6 +320,10 @@ export default function DashboardPage() {
           boxShadow:     '0 1px 3px rgba(0,0,0,0.06)',
           display:       'flex',
           flexDirection: 'column',
+          padding:        12,
+          gap:            10,
+          position:      'relative',
+          zIndex:         0,
         }}>
           {isLoading ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -304,82 +331,126 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              {/* ── Yuqori qism: donut ── */}
-              <div
-                className="tv-donut"
-                ref={chartRef}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleContainerLeave}
-                onMouseEnter={handleContainerEnter}
-                style={{ position: 'relative', height: isMobile ? 280 : 340, flexShrink: 0 }}
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={donutData}
-                      dataKey="value"
-                      nameKey="label"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius="46%"
-                      outerRadius="74%"
-                      paddingAngle={2}
-                      stroke="none"
-                      strokeWidth={0}
-                      activeIndex={activeIndex}
-                      activeShape={renderActiveShape}
-                      shape={renderShape as any}
-                      onMouseEnter={handleEnter}
-                      isAnimationActive={true}
-                      animationBegin={0}
-                      animationDuration={900}
-                      animationEasing="ease-out"
-                      style={{ outline: 'none', cursor: 'default' }}
-                    >
-                      {donutData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} style={{ outline: 'none' }} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
+              {/* ═══════════════════════════════════════════════════════
+                  ICHKI RAMKA 1 — Donut diagramma
+              ═══════════════════════════════════════════════════════ */}
+              <InnerFrame style={{ flexShrink: 0 }}>
+                <div
+                  className="tv-donut"
+                  ref={chartRef}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleContainerLeave}
+                  onMouseEnter={handleContainerEnter}
+                  style={{ position: 'relative', height: isMobile ? 300 : 370 }}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={donutData}
+                        dataKey="value"
+                        nameKey="label"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius="48%"
+                        outerRadius="80%"
+                        paddingAngle={2}
+                        stroke="none"
+                        strokeWidth={0}
+                        activeIndex={activeIndex}
+                        activeShape={renderActiveShape}
+                        shape={renderShape as any}
+                        onMouseEnter={handleEnter}
+                        isAnimationActive={true}
+                        animationBegin={0}
+                        animationDuration={900}
+                        animationEasing="ease-out"
+                        style={{ outline: 'none', cursor: 'default' }}
+                      >
+                        {donutData.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} style={{ outline: 'none' }} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
 
-                {/* Markaz */}
-                <div style={{
-                  position:       'absolute',
-                  inset:           0,
-                  display:        'flex',
-                  flexDirection:  'column',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  pointerEvents:  'none',
-                }}>
-                  <span style={{
-                    fontSize:      40,
-                    fontWeight:    800,
-                    color:         '#111827',
-                    lineHeight:    1,
-                    fontFamily:    "'JetBrains Mono', monospace",
-                    letterSpacing: '-0.02em',
+                  {/* Markaz */}
+                  <div style={{
+                    position:       'absolute',
+                    inset:           0,
+                    display:        'flex',
+                    flexDirection:  'column',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    pointerEvents:  'none',
                   }}>
-                    {activeAnimals > 0 ? activeAnimals : '—'}
-                  </span>
-                  <span style={{ marginTop: 8, fontSize: 13, fontWeight: 500, color: '#6b7280' }}>
-                    Jami jonivorlar soni
-                  </span>
+                    <span style={{
+                      fontSize:      40,
+                      fontWeight:    800,
+                      color:         '#111827',
+                      lineHeight:    1,
+                      fontFamily:    "'JetBrains Mono', monospace",
+                      letterSpacing: '-0.02em',
+                    }}>
+                      {activeAnimals > 0 ? activeAnimals : '—'}
+                    </span>
+                    <span style={{ marginTop: 8, fontSize: 13, fontWeight: 500, color: '#6b7280' }}>
+                      Jami jonivorlar soni
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </InnerFrame>
 
-              {/* ── Pastki qism: keyingi buyruqda ── */}
-              <div style={{ flex: 1 }} />
+              {/* ═══════════════════════════════════════════════════════
+                  ICHKI RAMKA 2 — Keyingi buyruqda to'ldiriladi
+              ═══════════════════════════════════════════════════════ */}
+              <InnerFrame style={{ flex: 1, minHeight: 80 }} />
             </>
           )}
         </div>
 
-        {/* ── O'ng tomon: keyingi buyruqda ─────────────────────────────── */}
-        <div style={{ flex: 1 }} />
+        {/* ── O'ng tomon: 2 ta karta tagma-tag ────────────────────────── */}
+        <div style={{
+          flex:          1,
+          display:       'flex',
+          flexDirection: 'column',
+          gap:            10,
+          marginRight:    32,
+          height:        isMobile ? 'auto' : 'calc(100vh - 56px - 48px)',
+          minHeight:      480,
+        }}>
+
+          {/* ── O'ng karta 1 ──────────────────────────────────────────── */}
+          <div style={{
+            flex:          1,
+            background:   '#fff',
+            border:       '1px solid rgba(30, 62, 180, 0.22)',
+            borderRadius:  24,
+            boxShadow:    '0 1px 3px rgba(0,0,0,0.06)',
+            position:     'relative',
+            zIndex:        0,
+            overflow:     'hidden',
+          }} />
+
+          {/* ── O'ng karta 2 ──────────────────────────────────────────── */}
+          <div style={{
+            flex:          1,
+            background:   '#fff',
+            border:       '1px solid rgba(30, 62, 180, 0.22)',
+            borderRadius:  24,
+            boxShadow:    '0 1px 3px rgba(0,0,0,0.06)',
+            position:     'relative',
+            zIndex:        0,
+            overflow:     'hidden',
+          }} />
+
+        </div>
       </div>
 
-      {/* ── Floating tooltip — position:fixed, DOM ref orqali boshqariladi ── */}
+      {/* ── Floating tooltip ─────────────────────────────────────────────
+          position: fixed + z-index: 9999
+          Barcha qatlamlar ustida erkin suzadi — ramkalar, karta hech narsa
+          to'sqinlik qilmaydi.
+      ──────────────────────────────────────────────────────────────────── */}
       <div
         ref={tooltipRef}
         style={{
