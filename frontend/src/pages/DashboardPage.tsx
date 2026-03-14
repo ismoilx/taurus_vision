@@ -12,7 +12,11 @@
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, Sector,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip as RechartsTooltip,
+} from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '../utils/apiFetch';
 import { useIsMobile } from '../hooks/useResponsive';
@@ -67,6 +71,178 @@ const SPECIES_LABELS: Record<string, string> = {
 };
 
 const MAX_OFFSET = 10;
+
+// =============================================================================
+// ADI TREND TYPES
+// =============================================================================
+
+interface ADITrendPoint {
+  date: string;
+  adi_score: number;
+  animal_count?: number;
+}
+
+interface ADITrendsResponse {
+  data: ADITrendPoint[];
+  stats: { trend_direction: 'improving' | 'declining' | 'stable'; start_score: number; end_score: number };
+  period_days: number;
+}
+
+type PeriodKey = 'all' | '7' | '15' | '30' | 'custom';
+
+// =============================================================================
+// TRADING CHART COMPONENT
+// =============================================================================
+
+function TradingChart() {
+  const [period, setPeriod]         = useState<PeriodKey>('7');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo,   setCustomTo]   = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+
+  const days = period === '30' ? 30 : period === '7' ? 7 : 3650;
+
+  const { data, isLoading } = useQuery<ADITrendsResponse>({
+    queryKey: ['adi-trends-dashboard', period, customFrom, customTo],
+    queryFn:  () => {
+      if (period === 'custom' && customFrom && customTo) {
+        const from = new Date(customFrom);
+        const to   = new Date(customTo);
+        const d    = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
+        return apiFetch<ADITrendsResponse>(`/api/v1/analytics/trends/adi?days=${d}`);
+      }
+      return apiFetch<ADITrendsResponse>(`/api/v1/analytics/trends/adi?days=${days}`);
+    },
+    staleTime: 300_000,
+    retry: false,
+  });
+
+  const chartData = useMemo(() => {
+    const raw = data?.data ?? [];
+    if (!raw.length) return [];
+    let filtered = raw;
+    if (period === 'custom' && customFrom && customTo) {
+      filtered = raw.filter(p => p.date >= customFrom && p.date <= customTo);
+    }
+    return filtered.map(p => ({
+      date:  p.date,
+      value: Math.round(p.adi_score * 10) / 10,
+      label: p.date.slice(5),
+    }));
+  }, [data, period, customFrom, customTo]);
+
+  const trendDir = data?.stats?.trend_direction ?? 'stable';
+  const delta    = (data?.stats?.end_score ?? 0) - (data?.stats?.start_score ?? 0);
+  const isUp     = delta >= 0;
+  const lineColor = trendDir === 'improving' ? '#10b981' : trendDir === 'declining' ? '#ef4444' : '#3b82f6';
+
+  const PERIODS: { key: PeriodKey; label: string }[] = [
+    { key: '7',      label: '7k'     },
+    { key: '30',     label: '30k'    },
+    { key: 'custom', label: 'Maxsus' },
+  ];
+
+  const btnStyle = (active: boolean): React.CSSProperties => ({
+    padding:      '0px 5px',
+    borderRadius:  3,
+    border:       `1px solid ${active ? lineColor : 'var(--border)'}`,
+    background:    active ? `${lineColor}14` : 'transparent',
+    color:         active ? lineColor : 'var(--text-muted)',
+    fontSize:      9,
+    fontWeight:    active ? 700 : 500,
+    cursor:        'pointer',
+    fontFamily:    "'JetBrains Mono', monospace",
+    transition:    'all .15s',
+    whiteSpace:   'nowrap',
+    lineHeight:    '16px',
+    height:        16,
+    minWidth:      24,
+    textAlign:    'center',
+    display:      'inline-flex',
+    alignItems:   'center',
+    justifyContent:'center',
+  });
+
+  return (
+    <InnerFrame style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
+
+      {/* ─ Sarlavha + tugmalar bir qatorda ────────────────────────────── */}
+      <div style={{ padding: '6px 10px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", letterSpacing: '0.01em' }}>
+          Umumiy rivojlanish grafigi
+        </span>
+
+        {!isLoading && data && (
+          <span style={{ fontSize: 10, fontWeight: 700, color: isUp ? '#10b981' : '#ef4444', fontFamily: "'JetBrains Mono', monospace" }}>
+            {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
+          </span>
+        )}
+
+        {/* Tugmalar — o'ng burchakda */}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
+          {PERIODS.map(p => (
+            <button key={p.key} style={btnStyle(period === p.key)}
+              onClick={() => { setPeriod(p.key); setShowCustom(p.key === 'custom'); }}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+        {/* ─ Maxsus sana inputlari ────────────────────────────────────── */}
+        {showCustom && (
+          <div style={{ display: 'flex', gap: 5, marginTop: 6, alignItems: 'center', padding: '0 14px' }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ fontSize: 10, padding: '2px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%' }} />
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>—</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ fontSize: 10, padding: '2px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%' }} />
+          </div>
+        )}
+
+      {/* ─ Grafik ─────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, paddingTop: 6 }}>
+        {isLoading ? (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 18, height: 18, border: '2px solid var(--border)', borderTopColor: lineColor, borderRadius: '50%', animation: 'tv-spin .65s linear infinite' }} />
+          </div>
+        ) : chartData.length === 0 ? (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Outfit', sans-serif" }}>Ma'lumot yo'q</span>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 4, right: 10, left: -28, bottom: 0 }}>
+              <defs>
+                <linearGradient id="tvAdiGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={lineColor} stopOpacity={0.20} />
+                  <stop offset="95%" stopColor={lineColor} stopOpacity={0}    />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="label"
+                tick={{ fontSize: 8, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
+                tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis
+                tick={{ fontSize: 8, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
+                tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+              <RechartsTooltip
+                contentStyle={{ background: 'var(--surface)', border: `1px solid ${lineColor}44`, borderRadius: 9, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxShadow: '0 4px 16px rgba(0,0,0,0.10)', padding: '6px 10px' }}
+                labelStyle={{ color: 'var(--text-muted)', marginBottom: 2 }}
+                itemStyle={{ color: lineColor, fontWeight: 700 }}
+                formatter={(v: number) => [`${v} ball`, 'ADI']}
+              />
+              <Area type="monotone" dataKey="value"
+                stroke={lineColor} strokeWidth={1.8}
+                fill="url(#tvAdiGrad)"
+                dot={false} activeDot={{ r: 3, fill: lineColor, strokeWidth: 0 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </InnerFrame>
+  );
+}
 
 // =============================================================================
 // SPRING HOOK
@@ -305,7 +481,7 @@ export default function DashboardPage() {
         .tv-donut path { outline: none !important; }
       `}</style>
 
-      <div style={{ display: 'flex', gap: 24 }}>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'stretch' }}>
 
         {/* ── Chap karta ───────────────────────────────────────────────── */}
         <div style={{
@@ -429,7 +605,22 @@ export default function DashboardPage() {
             position:     'relative',
             zIndex:        0,
             overflow:     'hidden',
-          }} />
+            display:      'flex',
+            flexDirection:'column',
+            padding:       12,
+            gap:           10,
+          }}>
+            {/* ═══════════════════════════════════════════════════════
+                ICHKI RAMKALAR — yonma-yon (chap: grafik, o'ng: bo'sh)
+            ═══════════════════════════════════════════════════════ */}
+            <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
+              {/* Chap yarmi 30% — Keyingi buyruqda to'ldiriladi */}
+              <InnerFrame style={{ flex: '0 0 30%' }} />
+
+              {/* O'ng yarmi 70% — Umumiy rivojlanish grafigi */}
+              <TradingChart />
+            </div>
+          </div>
 
           {/* ── O'ng karta 2 ──────────────────────────────────────────── */}
           <div style={{
@@ -441,7 +632,16 @@ export default function DashboardPage() {
             position:     'relative',
             zIndex:        0,
             overflow:     'hidden',
-          }} />
+            display:      'flex',
+            flexDirection:'column',
+            padding:       12,
+            gap:           10,
+          }}>
+            {/* ═══════════════════════════════════════════════════════
+                ICHKI RAMKA 1 — Keyingi buyruqda to'ldiriladi
+            ═══════════════════════════════════════════════════════ */}
+            <InnerFrame style={{ flex: 1 }} />
+          </div>
 
         </div>
       </div>
