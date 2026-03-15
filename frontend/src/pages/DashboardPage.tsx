@@ -131,9 +131,9 @@ function TradingChart() {
     }));
   }, [data, period, customFrom, customTo]);
 
-  const trendDir = data?.stats?.trend_direction ?? 'stable';
-  const delta    = (data?.stats?.end_score ?? 0) - (data?.stats?.start_score ?? 0);
-  const isUp     = delta >= 0;
+  const trendDir  = data?.stats?.trend_direction ?? 'stable';
+  const delta     = (data?.stats?.end_score ?? 0) - (data?.stats?.start_score ?? 0);
+  const isUp      = delta >= 0;
   const lineColor = trendDir === 'improving' ? '#10b981' : trendDir === 'declining' ? '#ef4444' : '#3b82f6';
 
   const PERIODS: { key: PeriodKey; label: string }[] = [
@@ -143,76 +143,152 @@ function TradingChart() {
   ];
 
   const btnStyle = (active: boolean): React.CSSProperties => ({
-    padding:      '0px 5px',
-    borderRadius:  3,
-    border:       `1px solid ${active ? lineColor : 'var(--border)'}`,
-    background:    active ? `${lineColor}14` : 'transparent',
-    color:         active ? lineColor : 'var(--text-muted)',
-    fontSize:      9,
-    fontWeight:    active ? 700 : 500,
-    cursor:        'pointer',
-    fontFamily:    "'JetBrains Mono', monospace",
-    transition:    'all .15s',
-    whiteSpace:   'nowrap',
-    lineHeight:    '16px',
-    height:        16,
-    minWidth:      24,
-    textAlign:    'center',
-    display:      'inline-flex',
-    alignItems:   'center',
-    justifyContent:'center',
+    appearance:       'none',
+    WebkitAppearance: 'none',
+    boxSizing:        'border-box',
+    margin:            0,
+    padding:          '3px 10px',
+    borderRadius:      4,
+    border:           `1px solid ${active ? lineColor : 'rgba(30,62,180,0.18)'}`,
+    background:        active ? `${lineColor}14` : 'transparent',
+    color:             active ? lineColor : 'var(--text-muted)',
+    fontSize:          8,
+    fontWeight:        active ? 700 : 500,
+    cursor:            'pointer',
+    fontFamily:        "'JetBrains Mono', monospace",
+    transition:        'all .15s',
+    whiteSpace:       'nowrap',
+    display:          'inline-flex',
+    alignItems:       'center',
+    justifyContent:   'center',
+    flexShrink:        0,
+    lineHeight:        1,
+    minHeight:         0,
+    minWidth:          0,
+    outline:          'none',
   });
 
   return (
-    <InnerFrame style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
+    <InnerFrame style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* ─ Sarlavha + tugmalar bir qatorda ────────────────────────────── */}
-      <div style={{ padding: '6px 10px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', fontFamily: "'Outfit', sans-serif", letterSpacing: '0.01em' }}>
-          Umumiy rivojlanish grafigi
-        </span>
-
-        {!isLoading && data && (
-          <span style={{ fontSize: 10, fontWeight: 700, color: isUp ? '#10b981' : '#ef4444', fontFamily: "'JetBrains Mono', monospace" }}>
-            {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
+      {/* ─ Sarlavha qatori ─────────────────────────────────────────────── */}
+      <div style={{
+        padding:      '10px 12px 6px',
+        display:      'flex',
+        alignItems:   'center',
+        gap:           8,
+        flexShrink:    0,
+        flexWrap:     'nowrap',
+        minWidth:      0,
+      }}>
+        {/* Sarlavha + delta — chap */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+          <span style={{
+            fontSize:      13,
+            fontWeight:    700,
+            color:        'var(--text-primary)',
+            fontFamily:   "'Outfit', sans-serif",
+            letterSpacing: '0.01em',
+            whiteSpace:   'nowrap',
+            overflow:     'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            Umumiy rivojlanish grafigi
           </span>
-        )}
+          {!isLoading && data && (
+            <span style={{
+              fontSize:   12,
+              fontWeight: 700,
+              color:      isUp ? '#10b981' : '#ef4444',
+              fontFamily: "'JetBrains Mono', monospace",
+              flexShrink:  0,
+            }}>
+              {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
+            </span>
+          )}
+        </div>
 
-        {/* Tugmalar — o'ng burchakda */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
+        {/* Tugmalar — o'ng, siqilmaydi */}
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
           {PERIODS.map(p => (
-            <button key={p.key} style={btnStyle(period === p.key)}
-              onClick={() => { setPeriod(p.key); setShowCustom(p.key === 'custom'); }}>
+            <button
+              key={p.key}
+              style={btnStyle(period === p.key)}
+              onClick={() => { setPeriod(p.key); setShowCustom(p.key === 'custom'); }}
+            >
               {p.label}
             </button>
           ))}
         </div>
       </div>
 
-        {/* ─ Maxsus sana inputlari ────────────────────────────────────── */}
-        {showCustom && (
-          <div style={{ display: 'flex', gap: 5, marginTop: 6, alignItems: 'center', padding: '0 14px' }}>
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              style={{ fontSize: 10, padding: '2px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%' }} />
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>—</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              style={{ fontSize: 10, padding: '2px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)', fontFamily: "'JetBrains Mono', monospace", outline: 'none', width: '100%' }} />
-          </div>
-        )}
+      {/* ─ Maxsus sana inputlari ────────────────────────────────────────── */}
+      {showCustom && (
+        <div style={{
+          display:    'flex',
+          gap:         6,
+          alignItems: 'center',
+          padding:    '0 12px 6px',
+          flexShrink:  0,
+        }}>
+          <input
+            type="date"
+            value={customFrom}
+            onChange={e => setCustomFrom(e.target.value)}
+            style={{
+              fontSize:   11,
+              padding:    '4px 8px',
+              borderRadius: 6,
+              border:     '1px solid var(--border)',
+              background: 'var(--bg)',
+              color:      'var(--text-primary)',
+              fontFamily: "'JetBrains Mono', monospace",
+              outline:    'none',
+              width:      '100%',
+            }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>—</span>
+          <input
+            type="date"
+            value={customTo}
+            onChange={e => setCustomTo(e.target.value)}
+            style={{
+              fontSize:   11,
+              padding:    '4px 8px',
+              borderRadius: 6,
+              border:     '1px solid var(--border)',
+              background: 'var(--bg)',
+              color:      'var(--text-primary)',
+              fontFamily: "'JetBrains Mono', monospace",
+              outline:    'none',
+              width:      '100%',
+            }}
+          />
+        </div>
+      )}
 
-      {/* ─ Grafik ─────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, minHeight: 0, paddingTop: 6 }}>
+      {/* ─ Grafik ──────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, paddingBottom: 6 }}>
         {isLoading ? (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 18, height: 18, border: '2px solid var(--border)', borderTopColor: lineColor, borderRadius: '50%', animation: 'tv-spin .65s linear infinite' }} />
+            <div style={{
+              width:       20,
+              height:      20,
+              border:      '2px solid var(--border)',
+              borderTopColor: lineColor,
+              borderRadius: '50%',
+              animation:   'tv-spin .65s linear infinite',
+            }} />
           </div>
         ) : chartData.length === 0 ? (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: "'Outfit', sans-serif" }}>Ma'lumot yo'q</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: "'Outfit', sans-serif" }}>
+              Ma'lumot yo'q
+            </span>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 4, right: 10, left: -28, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 4, right: 12, left: -24, bottom: 0 }}>
               <defs>
                 <linearGradient id="tvAdiGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor={lineColor} stopOpacity={0.20} />
@@ -220,22 +296,42 @@ function TradingChart() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="label"
-                tick={{ fontSize: 8, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
-                tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+              />
               <YAxis
-                tick={{ fontSize: 8, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
-                tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                tick={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}
+                tickLine={false}
+                axisLine={false}
+                domain={['auto', 'auto']}
+              />
               <RechartsTooltip
-                contentStyle={{ background: 'var(--surface)', border: `1px solid ${lineColor}44`, borderRadius: 9, fontSize: 10, fontFamily: "'JetBrains Mono', monospace", boxShadow: '0 4px 16px rgba(0,0,0,0.10)', padding: '6px 10px' }}
+                contentStyle={{
+                  background:  'var(--surface)',
+                  border:      `1px solid ${lineColor}44`,
+                  borderRadius: 9,
+                  fontSize:    12,
+                  fontFamily:  "'JetBrains Mono', monospace",
+                  boxShadow:   '0 4px 16px rgba(0,0,0,0.10)',
+                  padding:     '8px 12px',
+                }}
                 labelStyle={{ color: 'var(--text-muted)', marginBottom: 2 }}
                 itemStyle={{ color: lineColor, fontWeight: 700 }}
                 formatter={(v: number) => [`${v} ball`, 'ADI']}
               />
-              <Area type="monotone" dataKey="value"
-                stroke={lineColor} strokeWidth={1.8}
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke={lineColor}
+                strokeWidth={2}
                 fill="url(#tvAdiGrad)"
-                dot={false} activeDot={{ r: 3, fill: lineColor, strokeWidth: 0 }} />
+                dot={false}
+                activeDot={{ r: 4, fill: lineColor, strokeWidth: 0 }}
+              />
             </AreaChart>
           </ResponsiveContainer>
         )}
