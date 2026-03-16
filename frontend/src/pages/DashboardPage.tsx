@@ -10,6 +10,13 @@
  *   - Ramkalar karta pastki qatlamida turadi (z-index ko'tarilmagan)
  *   - Tooltip barcha qatlamlar ustida erkin suzadi (position: fixed, z-index: 9999)
  *   - O'ng karta 1, chap 30%: Jami tirik vazn ko'rsatkichlari qo'shildi
+ *
+ * TUZATILGAN XATOLAR:
+ *   - tv-spin keyframe e'lon qilinmagan edi (spinner ishlamayotgan edi)
+ *   - 3 ta `any` tipi SectorProps bilan almashtirildi
+ *   - PERIODS, HEALTH_STATUSES, NOTICE_LEVELS, rowBase komponent tashqarisiga chiqarildi
+ *   - rowBase ikki joyda takrorlanayotgan edi — bitta konstantaga birlashtirildi
+ *   - window.addEventListener('resize') → ResizeObserver ga o'tkazildi
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
@@ -31,11 +38,10 @@ interface OverviewStats {
   weight:  { average_kg: number | null; change_percentage_7d: number | null };
 }
 
-
 interface SpeciesBreakdown {
-  species: string;
-  count: number;
-  percentage: number;
+  species:       string;
+  count:         number;
+  percentage:    number;
   avg_weight_kg: number | null;
 }
 
@@ -60,21 +66,33 @@ interface AlertStats {
 }
 
 interface HerdStatistics {
-  total_animals: number;
-  active_animals: number;
+  total_animals:     number;
+  active_animals:    number;
   species_breakdown: SpeciesBreakdown[];
 }
 
 interface DonutEntry {
-  species: string;
-  label: string;
-  value: number;
+  species:    string;
+  label:      string;
+  value:      number;
   percentage: number;
-  color: string;
+  color:      string;
+}
+
+// Recharts activeShape / shape callback props
+interface SectorCallbackProps {
+  cx:           number;
+  cy:           number;
+  innerRadius:  number;
+  outerRadius:  number;
+  startAngle:   number;
+  endAngle:     number;
+  fill:         string;
+  midAngle:     number;
 }
 
 // =============================================================================
-// CONSTANTS
+// CONSTANTS  (komponent tashqarisida — har renderlda qayta yaratilmaydi)
 // =============================================================================
 
 const SPECIES_COLORS: Record<string, string> = {
@@ -95,30 +113,79 @@ const SPECIES_LABELS: Record<string, string> = {
 
 const MAX_OFFSET = 10;
 
-// =============================================================================
-// ADI TREND TYPES
-// =============================================================================
+// Hover hover hover — FarmHealthPanel va NoticesPanel da bir xil stilga ishlatiladi
+const ROW_BUTTON_BASE: React.CSSProperties = {
+  width:          '100%',
+  display:        'flex',
+  alignItems:     'center',
+  justifyContent: 'space-between',
+  padding:        '5px 6px',
+  borderRadius:    8,
+  border:         '1px solid transparent',
+  background:     'transparent',
+  cursor:         'pointer',
+  outline:        'none',
+  transition:     'background .15s, border-color .15s',
+};
 
+// FarmHealthPanel ichidagi statuslar
+const HEALTH_STATUSES = [
+  { key: 'sick',       label: 'Kasal',                    color: '#ef4444' },
+  { key: 'quarantine', label: 'Karantin',                 color: '#f59e0b' },
+  { key: 'attention',  label: "E'tibor talab qiladigan",  color: '#8b5cf6' },
+] as const;
+
+// NoticesPanel ichidagi alert darajalari
+const NOTICE_LEVELS = [
+  { key: 'critical_open' as const, label: 'Jiddiy', color: '#DC2626' },
+  { key: 'high_open'     as const, label: 'Yuqori', color: '#F59E0B' },
+  { key: 'medium_open'   as const, label: "O'rta",  color: '#3B82F6' },
+  { key: 'low_open'      as const, label: 'Oddiy',  color: '#10B981' },
+];
+
+// TradingChart davr tugmalari
+type PeriodKey = 'all' | '7' | '15' | '30' | 'custom';
+
+const CHART_PERIODS: { key: PeriodKey; label: string }[] = [
+  { key: '7',      label: '7k'     },
+  { key: '30',     label: '30k'    },
+  { key: 'custom', label: 'Maxsus' },
+];
+
+// ADI trend types
 interface ADITrendPoint {
-  date: string;
-  adi_score: number;
+  date:          string;
+  adi_score:     number;
   animal_count?: number;
 }
 
 interface ADITrendsResponse {
-  data: ADITrendPoint[];
-  stats: { trend_direction: 'improving' | 'declining' | 'stable'; start_score: number; end_score: number };
+  data:        ADITrendPoint[];
+  stats:       { trend_direction: 'improving' | 'declining' | 'stable'; start_score: number; end_score: number };
   period_days: number;
 }
 
-type PeriodKey = 'all' | '7' | '15' | '30' | 'custom';
+// =============================================================================
+// SKELETON  (FarmHealthPanel ichida e'lon qilinmagan edi — tashqariga chiqarildi)
+// =============================================================================
+
+function PulseBlock({ style }: { style?: React.CSSProperties }) {
+  return (
+    <div style={{
+      borderRadius: 4,
+      background:   'rgba(30,62,180,0.06)',
+      animation:    'tv-pulse 1.4s ease-in-out infinite',
+      ...style,
+    }} />
+  );
+}
 
 // =============================================================================
 // TRADING CHART COMPONENT
 // =============================================================================
 
 function TradingChart() {
-  const [period, setPeriod]         = useState<PeriodKey>('7');
+  const [period,     setPeriod]     = useState<PeriodKey>('7');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo,   setCustomTo]   = useState('');
   const [showCustom, setShowCustom] = useState(false);
@@ -137,7 +204,7 @@ function TradingChart() {
       return apiFetch<ADITrendsResponse>(`/api/v1/analytics/trends/adi?days=${days}`);
     },
     staleTime: 300_000,
-    retry: false,
+    retry:     false,
   });
 
   const chartData = useMemo(() => {
@@ -159,12 +226,7 @@ function TradingChart() {
   const isUp      = delta >= 0;
   const lineColor = trendDir === 'improving' ? '#10b981' : trendDir === 'declining' ? '#ef4444' : '#3b82f6';
 
-  const PERIODS: { key: PeriodKey; label: string }[] = [
-    { key: '7',      label: '7k'     },
-    { key: '30',     label: '30k'    },
-    { key: 'custom', label: 'Maxsus' },
-  ];
-
+  // btnStyle lineColor ga bog'liq — ichida qoladi, lekin funksiya tashqarida
   const btnStyle = (active: boolean): React.CSSProperties => ({
     appearance:       'none',
     WebkitAppearance: 'none',
@@ -196,13 +258,13 @@ function TradingChart() {
 
       {/* ─ Sarlavha qatori ─────────────────────────────────────────────── */}
       <div style={{
-        padding:      '10px 12px 6px',
-        display:      'flex',
-        alignItems:   'center',
-        gap:           8,
-        flexShrink:    0,
-        flexWrap:     'nowrap',
-        minWidth:      0,
+        padding:    '10px 12px 6px',
+        display:    'flex',
+        alignItems: 'center',
+        gap:         8,
+        flexShrink:  0,
+        flexWrap:   'nowrap',
+        minWidth:    0,
       }}>
         {/* Sarlavha + delta — chap */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
@@ -233,7 +295,7 @@ function TradingChart() {
 
         {/* Tugmalar — o'ng, siqilmaydi */}
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          {PERIODS.map(p => (
+          {CHART_PERIODS.map(p => (
             <button
               key={p.key}
               style={btnStyle(period === p.key)}
@@ -259,15 +321,15 @@ function TradingChart() {
             value={customFrom}
             onChange={e => setCustomFrom(e.target.value)}
             style={{
-              fontSize:   11,
-              padding:    '4px 8px',
-              borderRadius: 6,
-              border:     '1px solid var(--border)',
-              background: 'var(--bg)',
-              color:      'var(--text-primary)',
-              fontFamily: "'JetBrains Mono', monospace",
-              outline:    'none',
-              width:      '100%',
+              fontSize:     11,
+              padding:      '4px 8px',
+              borderRadius:  6,
+              border:       '1px solid var(--border)',
+              background:   'var(--bg)',
+              color:        'var(--text-primary)',
+              fontFamily:   "'JetBrains Mono', monospace",
+              outline:      'none',
+              width:        '100%',
             }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>—</span>
@@ -276,15 +338,15 @@ function TradingChart() {
             value={customTo}
             onChange={e => setCustomTo(e.target.value)}
             style={{
-              fontSize:   11,
-              padding:    '4px 8px',
-              borderRadius: 6,
-              border:     '1px solid var(--border)',
-              background: 'var(--bg)',
-              color:      'var(--text-primary)',
-              fontFamily: "'JetBrains Mono', monospace",
-              outline:    'none',
-              width:      '100%',
+              fontSize:     11,
+              padding:      '4px 8px',
+              borderRadius:  6,
+              border:       '1px solid var(--border)',
+              background:   'var(--bg)',
+              color:        'var(--text-primary)',
+              fontFamily:   "'JetBrains Mono', monospace",
+              outline:      'none',
+              width:        '100%',
             }}
           />
         </div>
@@ -294,13 +356,14 @@ function TradingChart() {
       <div style={{ flex: 1, minHeight: 0, paddingBottom: 6 }}>
         {isLoading ? (
           <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {/* BUG FIX: tv-spin keyframe <style> da e'lon qilingan */}
             <div style={{
-              width:       20,
-              height:      20,
-              border:      '2px solid var(--border)',
+              width:          20,
+              height:         20,
+              border:         '2px solid var(--border)',
               borderTopColor: lineColor,
-              borderRadius: '50%',
-              animation:   'tv-spin .65s linear infinite',
+              borderRadius:   '50%',
+              animation:      'tv-spin .65s linear infinite',
             }} />
           </div>
         ) : chartData.length === 0 ? (
@@ -334,13 +397,13 @@ function TradingChart() {
               />
               <RechartsTooltip
                 contentStyle={{
-                  background:  'var(--surface)',
-                  border:      `1px solid ${lineColor}44`,
-                  borderRadius: 9,
-                  fontSize:    12,
-                  fontFamily:  "'JetBrains Mono', monospace",
-                  boxShadow:   '0 4px 16px rgba(0,0,0,0.10)',
-                  padding:     '8px 12px',
+                  background:   'var(--surface)',
+                  border:       `1px solid ${lineColor}44`,
+                  borderRadius:  9,
+                  fontSize:      12,
+                  fontFamily:   "'JetBrains Mono', monospace",
+                  boxShadow:    '0 4px 16px rgba(0,0,0,0.10)',
+                  padding:      '8px 12px',
                 }}
                 labelStyle={{ color: 'var(--text-muted)', marginBottom: 2 }}
                 itemStyle={{ color: lineColor, fontWeight: 700 }}
@@ -377,15 +440,16 @@ function useSpringOffset(active: boolean) {
   const startAnim = useCallback(() => {
     if (rafRef.current !== null) return;
     const step = () => {
-      const target    = active ? MAX_OFFSET : 0;
-      const s         = springRef.current;
-      s.velocity      = s.velocity * 0.78 + (target - s.value) * 0.10;
-      s.value        += s.velocity;
+      const target = active ? MAX_OFFSET : 0;
+      const s      = springRef.current;
+      s.velocity   = s.velocity * 0.78 + (target - s.value) * 0.10;
+      s.value     += s.velocity;
       setTick(t => t + 1);
       if (Math.abs(s.velocity) > 0.005 || Math.abs(target - s.value) > 0.005) {
         rafRef.current = requestAnimationFrame(step);
       } else {
-        s.value = target; s.velocity = 0;
+        s.value        = target;
+        s.velocity     = 0;
         rafRef.current = null;
         setTick(t => t + 1);
       }
@@ -401,10 +465,14 @@ function useSpringOffset(active: boolean) {
 // =============================================================================
 
 interface SectorProps {
-  cx: number; cy: number;
-  innerRadius: number; outerRadius: number;
-  startAngle: number; endAngle: number;
-  fill: string; midAngle: number;
+  cx:           number;
+  cy:           number;
+  innerRadius:  number;
+  outerRadius:  number;
+  startAngle:   number;
+  endAngle:     number;
+  fill:         string;
+  midAngle:     number;
 }
 
 function AnimatedSector(props: SectorProps) {
@@ -430,11 +498,10 @@ function AnimatedSector(props: SectorProps) {
 }
 
 function InactiveSector(props: SectorProps & { globalActive: boolean }) {
-  const { globalActive, cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, midAngle } = props;
+  const { globalActive, cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
   const { offset, startAnim } = useSpringOffset(globalActive);
   const started = useRef(false);
   if (!started.current) { started.current = true; startAnim(); }
-  void midAngle;
 
   return (
     <Sector
@@ -456,19 +523,19 @@ function InactiveSector(props: SectorProps & { globalActive: boolean }) {
 
 interface InnerFrameProps {
   children?: React.ReactNode;
-  style?: React.CSSProperties;
+  style?:    React.CSSProperties;
 }
 
 function InnerFrame({ children, style }: InnerFrameProps) {
   return (
     <div
       style={{
-        border:        '1px solid rgba(30, 62, 180, 0.22)',
-        borderRadius:   16,
-        background:    'transparent',
-        position:      'relative',
-        zIndex:         0,
-        overflow:      'hidden',
+        border:       '1px solid rgba(30, 62, 180, 0.22)',
+        borderRadius:  16,
+        background:   'transparent',
+        position:     'relative',
+        zIndex:        0,
+        overflow:     'hidden',
         ...style,
       }}
     >
@@ -477,53 +544,37 @@ function InnerFrame({ children, style }: InnerFrameProps) {
   );
 }
 
-
 // =============================================================================
 // FARM HEALTH PANEL
 // =============================================================================
 
 interface FarmHealthPanelProps {
-  healthScore:      number | null;
-  sickCount:        number;
-  quarantineCount:  number;
-  attentionCount:   number;
-  isLoading:        boolean;
+  healthScore:     number | null;
+  sickCount:       number;
+  quarantineCount: number;
+  attentionCount:  number;
+  isLoading:       boolean;
 }
 
-function FarmHealthPanel({ healthScore, sickCount, quarantineCount, attentionCount, isLoading }: FarmHealthPanelProps) {
+function FarmHealthPanel({
+  healthScore,
+  sickCount,
+  quarantineCount,
+  attentionCount,
+  isLoading,
+}: FarmHealthPanelProps) {
   const scoreColor =
     healthScore == null ? '#9ca3af' :
     healthScore >= 80   ? '#10b981' :
     healthScore >= 60   ? '#f59e0b' :
                           '#ef4444';
 
-  const HEALTH_STATUSES = [
-    { key: 'sick',       label: 'Kasal',    color: '#ef4444', count: sickCount        },
-    { key: 'quarantine', label: 'Karantin', color: '#f59e0b', count: quarantineCount  },
-    { key: 'attention',  label: "E'tibor talab qiladigan", color: '#8b5cf6', count: attentionCount },
+  // Har render da qayta qurilmaydi — tashqaridagi HEALTH_STATUSES + runtime count
+  const rows = [
+    { ...HEALTH_STATUSES[0], count: sickCount        },
+    { ...HEALTH_STATUSES[1], count: quarantineCount  },
+    { ...HEALTH_STATUSES[2], count: attentionCount   },
   ];
-
-  const Skeleton = () => (
-    <div style={{
-      width: '60%', height: 12, borderRadius: 4,
-      background: 'rgba(30,62,180,0.06)',
-      animation: 'tv-pulse 1.4s ease-in-out infinite',
-    }} />
-  );
-
-  const rowBase: React.CSSProperties = {
-    width:          '100%',
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    padding:        '5px 6px',
-    borderRadius:    8,
-    border:         '1px solid transparent',
-    background:     'transparent',
-    cursor:         'pointer',
-    outline:        'none',
-    transition:     'background .15s, border-color .15s',
-  };
 
   return (
     <div className="tv-health-panel" style={{
@@ -535,10 +586,12 @@ function FarmHealthPanel({ healthScore, sickCount, quarantineCount, attentionCou
       overflow:      'auto',
     }}>
 
-      {/* ── Ferma sog'lig'i sarlavha ── */}
+      {/* Sarlavha */}
       <div style={{
-        fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
-        fontFamily: "'Outfit', sans-serif",
+        fontSize:    13,
+        fontWeight:  700,
+        color:       'var(--text-primary)',
+        fontFamily:  "'Outfit', sans-serif",
         marginBottom: 6,
       }}>
         Ferma sog'lig'i
@@ -546,60 +599,49 @@ function FarmHealthPanel({ healthScore, sickCount, quarantineCount, attentionCou
 
       {/* Ball */}
       {isLoading ? (
-        <div style={{
-          width: 80, height: 34, borderRadius: 8,
-          background: 'rgba(30,62,180,0.06)',
-          animation: 'tv-pulse 1.4s ease-in-out infinite',
-          marginBottom: 6,
-        }} />
+        <PulseBlock style={{ width: 80, height: 34, marginBottom: 6 }} />
       ) : (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 6 }}>
           <span style={{
-            fontSize: 76, fontWeight: 800, color: scoreColor,
-            fontFamily: "'JetBrains Mono', monospace",
-            lineHeight: 1, letterSpacing: '-0.03em',
+            fontSize:      76,
+            fontWeight:    800,
+            color:         scoreColor,
+            fontFamily:    "'JetBrains Mono', monospace",
+            lineHeight:    1,
+            letterSpacing: '-0.03em',
           }}>
             {healthScore ?? '—'}
           </span>
-          <span style={{
-            fontSize: 35, fontWeight: 700, color: '#9ca3af',
-            fontFamily: "'JetBrains Mono', monospace", lineHeight: 1,
-          }}>/</span>
-          <span style={{
-            fontSize: 35, fontWeight: 700, color: '#10b981',
-            fontFamily: "'JetBrains Mono', monospace", lineHeight: 1,
-          }}>100</span>
+          <span style={{ fontSize: 35, fontWeight: 700, color: '#9ca3af', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>/</span>
+          <span style={{ fontSize: 35, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}>100</span>
         </div>
       )}
 
-      {/* Kasal / Karantin — button */}
+      {/* Status qatorlari */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 8 }}>
-        {HEALTH_STATUSES.map(({ key, label, color, count }) => (
+        {rows.map(({ key, label, color, count }) => (
           <button
             key={key}
-            style={rowBase}
+            style={ROW_BUTTON_BASE}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLButtonElement).style.background = `${color}0d`;
+              (e.currentTarget as HTMLButtonElement).style.background  = `${color}0d`;
               (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}33`;
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+              (e.currentTarget as HTMLButtonElement).style.background  = 'transparent';
               (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: color, flexShrink: 0,
-              }} />
-              <span style={{
-                fontSize: 12, color: 'var(--text-secondary)',
-                fontFamily: "'Outfit', sans-serif", fontWeight: 500,
-              }}>{label}</span>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: "'Outfit', sans-serif", fontWeight: 500 }}>
+                {label}
+              </span>
             </div>
             <span style={{
-              fontSize: 12, fontWeight: 700,
-              color: isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
+              fontSize:   12,
+              fontWeight: 700,
+              color:      isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
               fontFamily: "'JetBrains Mono', monospace",
             }}>
               {isLoading ? '—' : `${count} ta`}
@@ -608,11 +650,9 @@ function FarmHealthPanel({ healthScore, sickCount, quarantineCount, attentionCou
         ))}
       </div>
 
-
     </div>
   );
 }
-
 
 // =============================================================================
 // NOTICES PANEL — Chap karta, InnerFrame 2 (donut tagida)
@@ -624,27 +664,6 @@ interface NoticesPanelProps {
 }
 
 function NoticesPanel({ alertStats, isLoading }: NoticesPanelProps) {
-  const NOTICE_LEVELS = [
-    { label: 'Jiddiy',  count: alertStats?.critical_open ?? 0, color: '#DC2626' },
-    { label: 'Yuqori',  count: alertStats?.high_open     ?? 0, color: '#F59E0B' },
-    { label: "O'rta",   count: alertStats?.medium_open   ?? 0, color: '#3B82F6' },
-    { label: 'Oddiy',   count: alertStats?.low_open      ?? 0, color: '#10B981' },
-  ];
-
-  const rowBase: React.CSSProperties = {
-    width:          '100%',
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    padding:        '4px 6px',
-    borderRadius:    8,
-    border:         '1px solid transparent',
-    background:     'transparent',
-    cursor:         'pointer',
-    outline:        'none',
-    transition:     'background .15s, border-color .15s',
-  };
-
   return (
     <div style={{
       height:        '100%',
@@ -656,8 +675,10 @@ function NoticesPanel({ alertStats, isLoading }: NoticesPanelProps) {
 
       {/* Sarlavha */}
       <div style={{
-        fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
-        fontFamily: "'Outfit', sans-serif",
+        fontSize:    13,
+        fontWeight:  700,
+        color:       'var(--text-primary)',
+        fontFamily:  "'Outfit', sans-serif",
         marginBottom: 6,
       }}>
         Bildirishnomalar
@@ -665,38 +686,38 @@ function NoticesPanel({ alertStats, isLoading }: NoticesPanelProps) {
 
       {/* Qatorlar */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {NOTICE_LEVELS.map(({ label, count, color }) => (
-          <button
-            key={label}
-            style={rowBase}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLButtonElement).style.background    = `${color}0d`;
-              (e.currentTarget as HTMLButtonElement).style.borderColor   = `${color}33`;
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLButtonElement).style.background    = 'transparent';
-              (e.currentTarget as HTMLButtonElement).style.borderColor   = 'transparent';
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {NOTICE_LEVELS.map(({ key, label, color }) => {
+          const count = alertStats?.[key] ?? 0;
+          return (
+            <button
+              key={key}
+              style={ROW_BUTTON_BASE}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.background  = `${color}0d`;
+                (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}33`;
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.background  = 'transparent';
+                (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontFamily: "'Outfit', sans-serif", fontWeight: 500 }}>
+                  {label}
+                </span>
+              </div>
               <span style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: color, flexShrink: 0,
-              }} />
-              <span style={{
-                fontSize: 12, color: 'var(--text-secondary)',
-                fontFamily: "'Outfit', sans-serif", fontWeight: 500,
-              }}>{label}</span>
-            </div>
-            <span style={{
-              fontSize: 12, fontWeight: 700,
-              color: isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}>
-              {isLoading ? '—' : `${count} ta`}
-            </span>
-          </button>
-        ))}
+                fontSize:   12,
+                fontWeight: 700,
+                color:      isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
+                fontFamily: "'JetBrains Mono', monospace",
+              }}>
+                {isLoading ? '—' : `${count} ta`}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
     </div>
@@ -710,31 +731,33 @@ function NoticesPanel({ alertStats, isLoading }: NoticesPanelProps) {
 export default function DashboardPage() {
   const isMobile = useIsMobile();
 
-  const [activeIndex, setActiveIndex]   = useState<number | undefined>(undefined);
-  const [activeData,  setActiveData]    = useState<DonutEntry | null>(null);
-  const leaveTimer                       = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
+  const [activeData,  setActiveData]  = useState<DonutEntry | null>(null);
+  const leaveTimer                     = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const tooltipRef                       = useRef<HTMLDivElement>(null);
-  const [tipVisible, setTipVisible]      = useState(false);
+  const tooltipRef              = useRef<HTMLDivElement>(null);
+  const [tipVisible, setTipVisible] = useState(false);
 
-  const chartRef   = useRef<HTMLDivElement>(null);
-  const chartRect  = useRef<DOMRect | null>(null);
+  const chartRef  = useRef<HTMLDivElement>(null);
+  const chartRect = useRef<DOMRect | null>(null);
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
 
   const { data: overview, isLoading: overviewLoading } = useQuery<OverviewStats>({
-    queryKey: ['analytics', 'overview'],
-    queryFn:  () => apiFetch<OverviewStats>('/api/v1/analytics/overview'),
+    queryKey:  ['analytics', 'overview'],
+    queryFn:   () => apiFetch<OverviewStats>('/api/v1/analytics/overview'),
     staleTime: 60_000,
   });
 
   const { data: herd, isLoading: herdLoading } = useQuery<HerdStatistics>({
-    queryKey: ['analytics', 'herd', 'statistics'],
-    queryFn:  () => apiFetch<HerdStatistics>('/api/v1/analytics/herd/statistics'),
+    queryKey:  ['analytics', 'herd', 'statistics'],
+    queryFn:   () => apiFetch<HerdStatistics>('/api/v1/analytics/herd/statistics'),
     staleTime: 60_000,
   });
 
   const { data: healthStats, isLoading: healthLoading } = useQuery<HealthStatistics>({
-    queryKey: ['health', 'statistics'],
-    queryFn:  () => apiFetch<HealthStatistics>('/api/v1/health/statistics'),
+    queryKey:  ['health', 'statistics'],
+    queryFn:   () => apiFetch<HealthStatistics>('/api/v1/health/statistics'),
     staleTime: 60_000,
     retry:     false,
   });
@@ -748,19 +771,21 @@ export default function DashboardPage() {
   });
 
   const { data: predSummary, isLoading: predLoading } = useQuery<PredictionSummary>({
-    queryKey: ['predictions', 'farm-summary'],
-    queryFn:  () => apiFetch<PredictionSummary>('/api/v1/predictions/farm-summary'),
+    queryKey:  ['predictions', 'farm-summary'],
+    queryFn:   () => apiFetch<PredictionSummary>('/api/v1/predictions/farm-summary'),
     staleTime: 120_000,
     retry:     false,
   });
+
+  // ── Derived ───────────────────────────────────────────────────────────────
 
   const activeAnimals = overview?.animals?.active ?? herd?.active_animals ?? 0;
 
   const donutData = useMemo<DonutEntry[]>(
     () =>
       (herd?.species_breakdown ?? [])
-        .filter((s) => s.count > 0)
-        .map((s) => ({
+        .filter(s => s.count > 0)
+        .map(s => ({
           species:    s.species,
           label:      SPECIES_LABELS[s.species] ?? s.species,
           value:      s.count,
@@ -772,14 +797,21 @@ export default function DashboardPage() {
 
   const isLoading = overviewLoading || herdLoading;
 
+  // ── Chart rect — BUG FIX: ResizeObserver (window.resize o'rniga) ─────────
+
   useEffect(() => {
-    const update = () => {
-      if (chartRef.current) chartRect.current = chartRef.current.getBoundingClientRect();
-    };
+    const el = chartRef.current;
+    if (!el) return;
+
+    const update = () => { chartRect.current = el.getBoundingClientRect(); };
     update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [isLoading]);
+
+  // ── Donut mouse handlers ──────────────────────────────────────────────────
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const tip = tooltipRef.current;
@@ -824,15 +856,20 @@ export default function DashboardPage() {
     if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
   }, []);
 
-  const renderActiveShape = useCallback((props: any) => <AnimatedSector {...props} />, []);
+  // BUG FIX: `any` → SectorCallbackProps
+  const renderActiveShape = useCallback(
+    (props: SectorCallbackProps) => <AnimatedSector {...props} />,
+    [],
+  );
 
-  const renderShape = useCallback((props: any) => (
-    <InactiveSector {...props} globalActive={activeIndex !== undefined} />
-  ), [activeIndex]);
+  const renderShape = useCallback(
+    (props: SectorCallbackProps) => (
+      <InactiveSector {...props} globalActive={activeIndex !== undefined} />
+    ),
+    [activeIndex],
+  );
 
-  // ==========================================================================
-  // RENDER
-  // ==========================================================================
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{
@@ -842,14 +879,23 @@ export default function DashboardPage() {
       overflow:   'hidden',
     }}>
 
+      {/*
+        BUG FIX: tv-spin keyframe qo'shildi.
+        Avval faqat tv-pulse bor edi — TradingChart spinner ishlamayotgan edi.
+      */}
       <style>{`
         .tv-donut path:focus,
         .tv-donut svg:focus,
         .tv-donut path { outline: none !important; }
+
         @keyframes tv-pulse {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.4; }
         }
+        @keyframes tv-spin {
+          to { transform: rotate(360deg); }
+        }
+
         .tv-health-panel::-webkit-scrollbar { width: 3px; }
         .tv-health-panel::-webkit-scrollbar-track { background: transparent; }
         .tv-health-panel::-webkit-scrollbar-thumb { background: transparent; border-radius: 99px; }
@@ -882,9 +928,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <>
-              {/* ═══════════════════════════════════════════════════════
-                  ICHKI RAMKA 1 — Donut diagramma
-              ═══════════════════════════════════════════════════════ */}
+              {/* ICHKI RAMKA 1 — Donut diagramma */}
               <InnerFrame style={{ flexShrink: 0 }}>
                 <div
                   className="tv-donut"
@@ -908,8 +952,8 @@ export default function DashboardPage() {
                         stroke="none"
                         strokeWidth={0}
                         activeIndex={activeIndex}
-                        activeShape={renderActiveShape}
-                        shape={renderShape as any}
+                        activeShape={renderActiveShape as never}
+                        shape={renderShape as never}
                         onMouseEnter={handleEnter}
                         isAnimationActive={true}
                         animationBegin={0}
@@ -951,9 +995,7 @@ export default function DashboardPage() {
                 </div>
               </InnerFrame>
 
-              {/* ═══════════════════════════════════════════════════════
-                  ICHKI RAMKA 2 — Bildirishnomalar
-              ═══════════════════════════════════════════════════════ */}
+              {/* ICHKI RAMKA 2 — Bildirishnomalar */}
               <InnerFrame style={{ flex: 1, minHeight: 80 }}>
                 <NoticesPanel
                   alertStats={alertStats ?? null}
@@ -971,11 +1013,11 @@ export default function DashboardPage() {
           flexDirection: 'column',
           gap:            10,
           marginRight:    32,
-          height:        isMobile ? 'auto' : 'calc(100vh - 56px - 48px)',
+          height:         isMobile ? 'auto' : 'calc(100vh - 56px - 48px)',
           minHeight:      480,
         }}>
 
-          {/* ── O'ng karta 1 ──────────────────────────────────────────── */}
+          {/* O'ng karta 1 */}
           <div style={{
             flex:          1,
             background:   '#fff',
@@ -986,13 +1028,10 @@ export default function DashboardPage() {
             zIndex:        0,
             overflow:     'hidden',
             display:      'flex',
-            flexDirection:'column',
+            flexDirection: 'column',
             padding:       12,
             gap:           10,
           }}>
-            {/* ═══════════════════════════════════════════════════════
-                ICHKI RAMKALAR — yonma-yon
-            ═══════════════════════════════════════════════════════ */}
             <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
               {/* Chap 30% — Ferma sog'lig'i */}
               <InnerFrame style={{ flex: '0 0 30%' }}>
@@ -1010,7 +1049,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ── O'ng karta 2 ──────────────────────────────────────────── */}
+          {/* O'ng karta 2 — keyingi versiyada to'ldiriladi */}
           <div style={{
             flex:          1,
             background:   '#fff',
@@ -1021,24 +1060,17 @@ export default function DashboardPage() {
             zIndex:        0,
             overflow:     'hidden',
             display:      'flex',
-            flexDirection:'column',
+            flexDirection: 'column',
             padding:       12,
             gap:           10,
           }}>
-            {/* ═══════════════════════════════════════════════════════
-                ICHKI RAMKA 1 — Keyingi buyruqda to'ldiriladi
-            ═══════════════════════════════════════════════════════ */}
             <InnerFrame style={{ flex: 1 }} />
           </div>
 
         </div>
       </div>
 
-      {/* ── Floating tooltip ─────────────────────────────────────────────
-          position: fixed + z-index: 9999
-          Barcha qatlamlar ustida erkin suzadi — ramkalar, karta hech narsa
-          to'sqinlik qilmaydi.
-      ──────────────────────────────────────────────────────────────────── */}
+      {/* ── Floating tooltip — position: fixed, z-index: 9999 ────────────── */}
       <div
         ref={tooltipRef}
         style={{
@@ -1064,9 +1096,12 @@ export default function DashboardPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
               <span style={{
-                width: 10, height: 10, borderRadius: '50%',
-                background: activeData.color, flexShrink: 0,
-                boxShadow: `0 0 6px ${activeData.color}88`,
+                width:     10,
+                height:    10,
+                borderRadius: '50%',
+                background: activeData.color,
+                flexShrink: 0,
+                boxShadow:  `0 0 6px ${activeData.color}88`,
               }} />
               <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
                 {activeData.label}

@@ -2,29 +2,28 @@
  * Taurus Vision — Service Worker (PWA)
  *
  * Strategiya:
- *   - App shell (HTML, CSS, JS) → Cache First (offline ishlaydi)
- *   - API so'rovlari → Network First (yangi ma'lumot, offline da cache)
- *   - Rasmlar → Cache First with network fallback
+ *   - index.html (navigate)  → Network First, KESHLANMAYDI
+ *                               Sabab: yangi deploy keyin brauzer har doim yangi HTML olishi kerak
+ *   - JS / CSS (hashed)      → Cache First (immutable — hash o'zgarsa yangi URL)
+ *   - API so'rovlari         → Network First (yangi ma'lumot, offline da cache)
+ *   - Rasmlar                → Cache First with network fallback
  *
  * Cache nomlanishi:
- *   tv-shell-v1   — statik fayllar (app shell)
- *   tv-api-v1     — API javoblari (qisqa muddatli)
- *   tv-images-v1  — rasmlar (uzun muddatli)
+ *   tv-shell-v2   — statik fayllar (app shell)  ← v2: eski keshni tozalash uchun
+ *   tv-api-v2     — API javoblari
+ *   tv-images-v2  — rasmlar
  *
  * YANGILANISH JARAYONI:
  *   Yangi SW o'rnatilganda → eski cache tozalanadi → yangi versiya faollashadi.
  */
 
-const SHELL_CACHE    = 'tv-shell-v1';
-const API_CACHE      = 'tv-api-v1';
-const IMAGES_CACHE   = 'tv-images-v1';
-const ALL_CACHES     = [SHELL_CACHE, API_CACHE, IMAGES_CACHE];
+const SHELL_CACHE  = 'tv-shell-v2';   // ← versiya oshirildi: eski tv-shell-v1 o'chadi
+const API_CACHE    = 'tv-api-v2';
+const IMAGES_CACHE = 'tv-images-v2';
+const ALL_CACHES   = [SHELL_CACHE, API_CACHE, IMAGES_CACHE];
 
 // App shell fayllar — har doim cache da bo'lishi kerak
-const SHELL_URLS = [
-  '/',
-  '/offline.html',
-];
+const SHELL_URLS = ['/offline.html'];  // index.html bu yerdan olib tashlandi
 
 // ─── Install ──────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -44,7 +43,10 @@ self.addEventListener('activate', (event) => {
         Promise.all(
           keys
             .filter((k) => !ALL_CACHES.includes(k))
-            .map((k) => caches.delete(k))
+            .map((k) => {
+              console.log('[SW] Eski cache o\'chirildi:', k);
+              return caches.delete(k);
+            })
         )
       )
       .then(() => self.clients.claim())
@@ -62,6 +64,21 @@ self.addEventListener('fetch', (event) => {
   // WebSocket so'rovlarini o'tkazib yuborish
   if (request.headers.get('upgrade') === 'websocket') return;
 
+  // ── HTML navigatsiya (index.html): KESHLANMAYDI — har doim tarmoqdan ──────
+  // Bu eng muhim qism: yangi deploy keyin foydalanuvchi har doim
+  // yangi index.html ni olishi kerak. index.html o'zida hashed JS/CSS
+  // linklar bor — ular o'zgaradi, shuning uchun HTML yangi bo'lishi shart.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .catch(() =>
+          // Tarmoq yo'q → offline sahifasi
+          caches.match('/offline.html').then((r) => r || offlineFallback())
+        )
+    );
+    return;
+  }
+
   // ── API so'rovlari: Network First ──────────────────────────────────────────
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
     event.respondWith(networkFirst(request, API_CACHE));
@@ -77,21 +94,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ── App Shell (HTML, JS, CSS, fonts): Cache First ─────────────────────────
-  event.respondWith(cacheFirst(request, SHELL_CACHE));
+  // ── Hashed statik fayllar (JS, CSS, fonts): Cache First ───────────────────
+  // Vite build da barcha fayllar hash bilan nomlanadi (main-abc123.js)
+  // Hash o'zgarsa → yangi URL → SW avtomatik yangi faylni yuklab keshga qo'yadi
+  if (
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.match(/\.(js|css|woff2?|ttf|eot)$/)
+  ) {
+    event.respondWith(cacheFirst(request, SHELL_CACHE));
+    return;
+  }
+
+  // ── Qolganlar: Network First ───────────────────────────────────────────────
+  event.respondWith(networkFirst(request, SHELL_CACHE));
 });
 
 // ─── Strategiyalar ────────────────────────────────────────────────────────────
 
 /**
  * Network First: tarmoqdan olishga urinadi, muvaffaqiyatsiz bo'lsa cache dan.
- * API so'rovlari uchun — har doim yangi ma'lumot kerak.
  */
 async function networkFirst(request, cacheName) {
   try {
     const networkResponse = await fetch(request);
 
-    // Muvaffaqiyatli GET so'rovlarni cache ga yozish
     if (networkResponse.ok && request.method === 'GET') {
       const cache = await caches.open(cacheName);
       cache.put(request, networkResponse.clone());
@@ -99,18 +125,15 @@ async function networkFirst(request, cacheName) {
 
     return networkResponse;
   } catch {
-    // Tarmoq yo'q → cache dan
     const cached = await caches.match(request);
     if (cached) return cached;
 
-    // Cache ham yo'q → offline sahifasi
     if (request.destination === 'document') {
-      return caches.match('/offline.html') || offlineFallback();
+      return caches.match('/offline.html').then((r) => r || offlineFallback());
     }
 
-    // API uchun offline JSON
     return new Response(
-      JSON.stringify({ error: 'Offline', message: 'Internet aloqasi yo\'q' }),
+      JSON.stringify({ error: 'Offline', message: "Internet aloqasi yo'q" }),
       {
         status: 503,
         headers: { 'Content-Type': 'application/json' },
@@ -121,7 +144,7 @@ async function networkFirst(request, cacheName) {
 
 /**
  * Cache First: avval cache dan, yo'q bo'lsa tarmoqdan.
- * Statik fayllar va rasmlar uchun — tez yuklash.
+ * Hashed statik fayllar uchun — tez yuklash + uzoq muddatli kesh.
  */
 async function cacheFirst(request, cacheName) {
   const cached = await caches.match(request);
@@ -137,9 +160,8 @@ async function cacheFirst(request, cacheName) {
 
     return networkResponse;
   } catch {
-    // HTML so'rovi → offline sahifasi
     if (request.destination === 'document') {
-      return caches.match('/offline.html') || offlineFallback();
+      return caches.match('/offline.html').then((r) => r || offlineFallback());
     }
     return new Response('', { status: 503 });
   }
@@ -199,14 +221,13 @@ function offlineFallback() {
     </body>
     </html>`,
     {
-      status: 200,
+      status:  200,
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     }
   );
 }
 
 // ─── Message Handler — SKIP_WAITING ──────────────────────────────────────────
-// usePWA hook dan keladi: "Yangilash" tugmasi bosilganda
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
@@ -226,15 +247,15 @@ self.addEventListener('push', (event) => {
 
   const title   = data.title || 'Taurus Vision';
   const options = {
-    body:    data.body || data.message || 'Yangi xabar',
-    icon:    '/icons/icon-192.png',
-    badge:   '/icons/icon-72.png',
-    tag:     data.tag || 'tv-notification',
+    body:     data.body || data.message || 'Yangi xabar',
+    icon:     '/icons/icon-192.png',
+    badge:    '/icons/icon-72.png',
+    tag:      data.tag || 'tv-notification',
     renotify: true,
-    data:    { url: data.url || '/' },
-    actions: data.alert_id ? [
-      { action: 'view',    title: 'Ko\'rish' },
-      { action: 'dismiss', title: 'Yopish'   },
+    data:     { url: data.url || '/' },
+    actions:  data.alert_id ? [
+      { action: 'view',    title: "Ko'rish" },
+      { action: 'dismiss', title: 'Yopish'  },
     ] : [],
     vibrate: data.severity === 'critical' ? [200, 100, 200, 100, 400] : [200],
   };
@@ -253,14 +274,12 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then((clients) => {
-        // Mavjud tab bor → fokusga olish
         const existing = clients.find((c) => c.url.includes(self.location.origin));
         if (existing) {
           existing.focus();
           existing.navigate(targetUrl);
           return;
         }
-        // Yo'q → yangi oyna ochish
         return self.clients.openWindow(targetUrl);
       })
   );
