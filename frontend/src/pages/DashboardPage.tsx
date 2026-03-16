@@ -3,12 +3,13 @@
  *
  * ENDPOINTLAR:
  *   GET /api/v1/analytics/herd/statistics  → jonivorlar turi taqsimoti
- *   GET /api/v1/analytics/overview         → jami aktiv jonivorlar soni
+ *   GET /api/v1/analytics/overview         → jami aktiv jonivorlar soni + vazn
  *
  * O'ZGARISHLAR:
  *   - Chap karta ichiga 2 ta ichki ramka qo'shildi (tizim ko'k rangi #1E3EB4)
  *   - Ramkalar karta pastki qatlamida turadi (z-index ko'tarilmagan)
  *   - Tooltip barcha qatlamlar ustida erkin suzadi (position: fixed, z-index: 9999)
+ *   - O'ng karta 1, chap 30%: Jami tirik vazn ko'rsatkichlari qo'shildi
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
@@ -26,14 +27,36 @@ import { useIsMobile } from '../hooks/useResponsive';
 // =============================================================================
 
 interface OverviewStats {
-  animals: { total: number; active: number };
+  animals: { total: number; active: number; by_status: Record<string, number> };
+  weight:  { average_kg: number | null; change_percentage_7d: number | null };
 }
+
 
 interface SpeciesBreakdown {
   species: string;
   count: number;
   percentage: number;
   avg_weight_kg: number | null;
+}
+
+interface HealthStatistics {
+  health_score:     number;
+  sick_count:       number;
+  quarantine_count: number;
+  total_animals:    number;
+}
+
+interface PredictionSummary {
+  high_count:     number;
+  critical_count: number;
+}
+
+interface AlertStats {
+  total_open:    number;
+  critical_open: number;
+  high_open:     number;
+  medium_open:   number;
+  low_open:      number;
 }
 
 interface HerdStatistics {
@@ -454,6 +477,232 @@ function InnerFrame({ children, style }: InnerFrameProps) {
   );
 }
 
+
+// =============================================================================
+// FARM HEALTH PANEL
+// =============================================================================
+
+interface FarmHealthPanelProps {
+  healthScore:      number | null;
+  sickCount:        number;
+  quarantineCount:  number;
+  attentionCount:   number;
+  isLoading:        boolean;
+}
+
+function FarmHealthPanel({ healthScore, sickCount, quarantineCount, attentionCount, isLoading }: FarmHealthPanelProps) {
+  const scoreColor =
+    healthScore == null ? '#9ca3af' :
+    healthScore >= 80   ? '#10b981' :
+    healthScore >= 60   ? '#f59e0b' :
+                          '#ef4444';
+
+  const HEALTH_STATUSES = [
+    { key: 'sick',       label: 'Kasal',    color: '#ef4444', count: sickCount        },
+    { key: 'quarantine', label: 'Karantin', color: '#f59e0b', count: quarantineCount  },
+    { key: 'attention',  label: "E'tibor talab qiladigan", color: '#8b5cf6', count: attentionCount },
+  ];
+
+  const Skeleton = () => (
+    <div style={{
+      width: '60%', height: 12, borderRadius: 4,
+      background: 'rgba(30,62,180,0.06)',
+      animation: 'tv-pulse 1.4s ease-in-out infinite',
+    }} />
+  );
+
+  const rowBase: React.CSSProperties = {
+    width:          '100%',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    padding:        '5px 6px',
+    borderRadius:    8,
+    border:         '1px solid transparent',
+    background:     'transparent',
+    cursor:         'pointer',
+    outline:        'none',
+    transition:     'background .15s, border-color .15s',
+  };
+
+  return (
+    <div className="tv-health-panel" style={{
+      height:        '100%',
+      display:       'flex',
+      flexDirection: 'column',
+      padding:       '12px 10px',
+      gap:            0,
+      overflow:      'auto',
+    }}>
+
+      {/* ── Ferma sog'lig'i sarlavha ── */}
+      <div style={{
+        fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+        fontFamily: "'Outfit', sans-serif",
+        marginBottom: 6,
+      }}>
+        Ferma sog'lig'i
+      </div>
+
+      {/* Ball */}
+      {isLoading ? (
+        <div style={{
+          width: 80, height: 34, borderRadius: 8,
+          background: 'rgba(30,62,180,0.06)',
+          animation: 'tv-pulse 1.4s ease-in-out infinite',
+          marginBottom: 6,
+        }} />
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, marginBottom: 6 }}>
+          <span style={{
+            fontSize: 76, fontWeight: 800, color: scoreColor,
+            fontFamily: "'JetBrains Mono', monospace",
+            lineHeight: 1, letterSpacing: '-0.03em',
+          }}>
+            {healthScore ?? '—'}
+          </span>
+          <span style={{
+            fontSize: 35, fontWeight: 700, color: '#9ca3af',
+            fontFamily: "'JetBrains Mono', monospace", lineHeight: 1,
+          }}>/</span>
+          <span style={{
+            fontSize: 35, fontWeight: 700, color: '#10b981',
+            fontFamily: "'JetBrains Mono', monospace", lineHeight: 1,
+          }}>100</span>
+        </div>
+      )}
+
+      {/* Kasal / Karantin — button */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 8 }}>
+        {HEALTH_STATUSES.map(({ key, label, color, count }) => (
+          <button
+            key={key}
+            style={rowBase}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = `${color}0d`;
+              (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}33`;
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'transparent';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: color, flexShrink: 0,
+              }} />
+              <span style={{
+                fontSize: 12, color: 'var(--text-secondary)',
+                fontFamily: "'Outfit', sans-serif", fontWeight: 500,
+              }}>{label}</span>
+            </div>
+            <span style={{
+              fontSize: 12, fontWeight: 700,
+              color: isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>
+              {isLoading ? '—' : `${count} ta`}
+            </span>
+          </button>
+        ))}
+      </div>
+
+
+    </div>
+  );
+}
+
+
+// =============================================================================
+// NOTICES PANEL — Chap karta, InnerFrame 2 (donut tagida)
+// =============================================================================
+
+interface NoticesPanelProps {
+  alertStats: AlertStats | null;
+  isLoading:  boolean;
+}
+
+function NoticesPanel({ alertStats, isLoading }: NoticesPanelProps) {
+  const NOTICE_LEVELS = [
+    { label: 'Jiddiy',  count: alertStats?.critical_open ?? 0, color: '#DC2626' },
+    { label: 'Yuqori',  count: alertStats?.high_open     ?? 0, color: '#F59E0B' },
+    { label: "O'rta",   count: alertStats?.medium_open   ?? 0, color: '#3B82F6' },
+    { label: 'Oddiy',   count: alertStats?.low_open      ?? 0, color: '#10B981' },
+  ];
+
+  const rowBase: React.CSSProperties = {
+    width:          '100%',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    padding:        '4px 6px',
+    borderRadius:    8,
+    border:         '1px solid transparent',
+    background:     'transparent',
+    cursor:         'pointer',
+    outline:        'none',
+    transition:     'background .15s, border-color .15s',
+  };
+
+  return (
+    <div style={{
+      height:        '100%',
+      display:       'flex',
+      flexDirection: 'column',
+      padding:       '10px 10px',
+      overflow:      'hidden',
+    }}>
+
+      {/* Sarlavha */}
+      <div style={{
+        fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+        fontFamily: "'Outfit', sans-serif",
+        marginBottom: 6,
+      }}>
+        Bildirishnomalar
+      </div>
+
+      {/* Qatorlar */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        {NOTICE_LEVELS.map(({ label, count, color }) => (
+          <button
+            key={label}
+            style={rowBase}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.background    = `${color}0d`;
+              (e.currentTarget as HTMLButtonElement).style.borderColor   = `${color}33`;
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.background    = 'transparent';
+              (e.currentTarget as HTMLButtonElement).style.borderColor   = 'transparent';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: color, flexShrink: 0,
+              }} />
+              <span style={{
+                fontSize: 12, color: 'var(--text-secondary)',
+                fontFamily: "'Outfit', sans-serif", fontWeight: 500,
+              }}>{label}</span>
+            </div>
+            <span style={{
+              fontSize: 12, fontWeight: 700,
+              color: isLoading ? 'var(--text-muted)' : count > 0 ? color : 'var(--text-muted)',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>
+              {isLoading ? '—' : `${count} ta`}
+            </span>
+          </button>
+        ))}
+      </div>
+
+    </div>
+  );
+}
+
 // =============================================================================
 // PAGE
 // =============================================================================
@@ -481,6 +730,28 @@ export default function DashboardPage() {
     queryKey: ['analytics', 'herd', 'statistics'],
     queryFn:  () => apiFetch<HerdStatistics>('/api/v1/analytics/herd/statistics'),
     staleTime: 60_000,
+  });
+
+  const { data: healthStats, isLoading: healthLoading } = useQuery<HealthStatistics>({
+    queryKey: ['health', 'statistics'],
+    queryFn:  () => apiFetch<HealthStatistics>('/api/v1/health/statistics'),
+    staleTime: 60_000,
+    retry:     false,
+  });
+
+  const { data: alertStats, isLoading: alertLoading } = useQuery<AlertStats>({
+    queryKey:        ['alert-stats-nav'],
+    queryFn:         () => apiFetch<AlertStats>('/api/v1/alerts/stats'),
+    refetchInterval:  60_000,
+    staleTime:        45_000,
+    retry:            false,
+  });
+
+  const { data: predSummary, isLoading: predLoading } = useQuery<PredictionSummary>({
+    queryKey: ['predictions', 'farm-summary'],
+    queryFn:  () => apiFetch<PredictionSummary>('/api/v1/predictions/farm-summary'),
+    staleTime: 120_000,
+    retry:     false,
   });
 
   const activeAnimals = overview?.animals?.active ?? herd?.active_animals ?? 0;
@@ -575,6 +846,14 @@ export default function DashboardPage() {
         .tv-donut path:focus,
         .tv-donut svg:focus,
         .tv-donut path { outline: none !important; }
+        @keyframes tv-pulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+        .tv-health-panel::-webkit-scrollbar { width: 3px; }
+        .tv-health-panel::-webkit-scrollbar-track { background: transparent; }
+        .tv-health-panel::-webkit-scrollbar-thumb { background: transparent; border-radius: 99px; }
+        .tv-health-panel:hover::-webkit-scrollbar-thumb { background: rgba(30,62,180,0.15); }
       `}</style>
 
       <div style={{ display: 'flex', gap: 24, alignItems: 'stretch' }}>
@@ -613,7 +892,7 @@ export default function DashboardPage() {
                   onMouseMove={handleMouseMove}
                   onMouseLeave={handleContainerLeave}
                   onMouseEnter={handleContainerEnter}
-                  style={{ position: 'relative', height: isMobile ? 300 : 370 }}
+                  style={{ position: 'relative', height: isMobile ? 285 : 365, marginTop: -15 }}
                 >
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -673,9 +952,14 @@ export default function DashboardPage() {
               </InnerFrame>
 
               {/* ═══════════════════════════════════════════════════════
-                  ICHKI RAMKA 2 — Keyingi buyruqda to'ldiriladi
+                  ICHKI RAMKA 2 — Bildirishnomalar
               ═══════════════════════════════════════════════════════ */}
-              <InnerFrame style={{ flex: 1, minHeight: 80 }} />
+              <InnerFrame style={{ flex: 1, minHeight: 80 }}>
+                <NoticesPanel
+                  alertStats={alertStats ?? null}
+                  isLoading={alertLoading}
+                />
+              </InnerFrame>
             </>
           )}
         </div>
@@ -707,13 +991,21 @@ export default function DashboardPage() {
             gap:           10,
           }}>
             {/* ═══════════════════════════════════════════════════════
-                ICHKI RAMKALAR — yonma-yon (chap: grafik, o'ng: bo'sh)
+                ICHKI RAMKALAR — yonma-yon
             ═══════════════════════════════════════════════════════ */}
             <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
-              {/* Chap yarmi 30% — Keyingi buyruqda to'ldiriladi */}
-              <InnerFrame style={{ flex: '0 0 30%' }} />
+              {/* Chap 30% — Ferma sog'lig'i */}
+              <InnerFrame style={{ flex: '0 0 30%' }}>
+                <FarmHealthPanel
+                  healthScore={healthStats?.health_score ?? null}
+                  sickCount={healthStats?.sick_count ?? 0}
+                  quarantineCount={healthStats?.quarantine_count ?? 0}
+                  attentionCount={(predSummary?.high_count ?? 0) + (predSummary?.critical_count ?? 0)}
+                  isLoading={healthLoading || overviewLoading || predLoading}
+                />
+              </InnerFrame>
 
-              {/* O'ng yarmi 70% — Umumiy rivojlanish grafigi */}
+              {/* O'ng 70% — Umumiy rivojlanish grafigi */}
               <TradingChart />
             </div>
           </div>

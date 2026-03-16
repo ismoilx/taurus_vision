@@ -4,6 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.health_record import HealthRecord, HealthRecordType, HealthRecordSeverity
+from app.models.animal import Animal, AnimalStatus
 from app.core.exceptions import EntityNotFoundError
 
 
@@ -182,31 +183,83 @@ class HealthRecordService:
     async def get_health_statistics(
         self, db: AsyncSession, animal_id: Optional[int] = None
     ) -> dict:
+        # ── 1. HealthRecord yozuvlari ─────────────────────────────────────
         q = select(HealthRecord)
         if animal_id:
             q = q.where(HealthRecord.animal_id == animal_id)
         records = (await db.execute(q)).scalars().all()
-        total = len(records)
+
+        total    = len(records)
         unresolved = sum(1 for r in records if not r.is_resolved)
         critical_val = HealthRecordSeverity.CRITICAL.value
         critical_unresolved = sum(
             1 for r in records if not r.is_resolved and
             (r.severity.value if hasattr(r.severity, 'value') else r.severity) == critical_val
         )
-        by_severity = {}
-        by_type = {}
+        by_severity: dict = {}
+        by_type:     dict = {}
         for r in records:
-            sev = r.severity.value if hasattr(r.severity, 'value') else str(r.severity)
-            by_severity[sev] = by_severity.get(sev, 0) + 1
+            sev   = r.severity.value    if hasattr(r.severity,    'value') else str(r.severity)
             rtype = r.record_type.value if hasattr(r.record_type, 'value') else str(r.record_type)
-            by_type[rtype] = by_type.get(rtype, 0) + 1
+            by_severity[sev]   = by_severity.get(sev,   0) + 1
+            by_type[rtype]     = by_type.get(rtype,     0) + 1
+
+        # ── 2. Jonivor statuslari (ferma uchun, bitta jonivor uchun emas) ─
+        # Faqat ferma darajasida hisoblanadi (animal_id bo'lmasa)
+        sick_count       = 0
+        quarantine_count = 0
+        total_animals    = 0
+
+        if not animal_id:
+            animal_q = select(Animal).where(
+                Animal.status.in_([
+                    AnimalStatus.ACTIVE,
+                    AnimalStatus.SICK,
+                    AnimalStatus.QUARANTINE,
+                ])
+            )
+            animals = (await db.execute(animal_q)).scalars().all()
+            total_animals    = len(animals)
+            sick_count       = sum(1 for a in animals if a.status == AnimalStatus.SICK)
+            quarantine_count = sum(1 for a in animals if a.status == AnimalStatus.QUARANTINE)
+
+        # ── 3. health_score hisoblash ─────────────────────────────────────
+        #
+        # Agar ferma darajasi (animal_id yo'q):
+        #   Asosiy omil  (60%) — sog'lom jonivorlar ulushi
+        #   Yozuvlar     (25%) — hal qilinmagan yozuvlar penaltisi
+        #   Kritik       (15%) — kritik yozuvlar penaltisi
+        #
+        # Agar bitta jonivor:
+        #   Faqat yozuvlardan hisoblanadi (eski mantiq)
+        #
+        if not animal_id and total_animals > 0:
+            # Sog'lom ulushi: sick va quarantine lar chiqarilgan
+            unhealthy_ratio  = (sick_count + quarantine_count) / total_animals  # 0.0–1.0
+            status_score     = round((1.0 - unhealthy_ratio) * 100)             # 0–100
+
+            # Yozuvlar penaltisi: har 1 ta unresolved = -3 ball (max -25)
+            record_penalty   = min(25, unresolved * 3)
+
+            # Kritik penaltisi: har 1 ta critical = -5 ball (max -15)
+            critical_penalty = min(15, critical_unresolved * 5)
+
+            health_score = max(0, status_score - record_penalty - critical_penalty)
+        else:
+            # Bitta jonivor uchun: eski mantiq
+            health_score = max(0, min(100, 100 - (unresolved * 10) - (critical_unresolved * 20)))
+
         return {
-            "total_records":      total,
-            "unresolved":         unresolved,
+            "total_records":       total,
+            "unresolved":          unresolved,
             "critical_unresolved": critical_unresolved,
-            "by_severity":        by_severity,
-            "by_type":            by_type,
-            "health_score":       max(0, min(100, 100 - (unresolved * 10) - (critical_unresolved * 20))),
+            "by_severity":         by_severity,
+            "by_type":             by_type,
+            # Ferma darajasi uchun qo'shimcha ma'lumot
+            "sick_count":          sick_count,
+            "quarantine_count":    quarantine_count,
+            "total_animals":       total_animals,
+            "health_score":        health_score,
         }
 
     async def get_health_summary(self, db: AsyncSession, animal_id: int) -> dict:

@@ -406,7 +406,11 @@ class HealthStatistics(BaseModel):
         ge=0,
         le=100
     )
-    
+    # Ferma darajasida jonivor statuslari
+    sick_count:       int = Field(default=0, description="Kasal jonivorlar soni",     ge=0)
+    quarantine_count: int = Field(default=0, description="Karantindagi jonivorlar",   ge=0)
+    total_animals:    int = Field(default=0, description="Hisobdagi jonivorlar soni", ge=0)
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
