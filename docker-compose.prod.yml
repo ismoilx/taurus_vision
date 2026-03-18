@@ -1,11 +1,6 @@
 # ============================================================
 # Taurus Vision — Production Docker Compose
 # ============================================================
-# Ishlatish:
-#   cp .env.example .env
-#   # .env faylini tahrirlang
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# ============================================================
 
 services:
 
@@ -17,31 +12,16 @@ services:
       POSTGRES_DB:       ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Production PostgreSQL config
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-    command: >
-      postgres
-        -c max_connections=200
-        -c shared_buffers=256MB
-        -c effective_cache_size=768MB
-        -c maintenance_work_mem=64MB
-        -c checkpoint_completion_target=0.9
-        -c wal_buffers=16MB
-        -c random_page_cost=1.1
-        -c effective_io_concurrency=200
-    ports: []          # Production da port ochmaymiz
+    command: postgres -c max_connections=200 -c shared_buffers=256MB -c effective_cache_size=768MB -c maintenance_work_mem=64MB -c checkpoint_completion_target=0.9 -c wal_buffers=16MB -c random_page_cost=1.1 -c effective_io_concurrency=200
+    ports: []
     networks:
       - taurus-internal
 
   # ── Redis (production) ──────────────────────────────────────
   redis:
-    command: >
-      redis-server
-        --appendonly yes
-        --maxmemory 512mb
-        --maxmemory-policy allkeys-lru
-        --requirepass ${REDIS_PASSWORD:-}
-    ports: []          # Tashqariga ochmang
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports: []
     networks:
       - taurus-internal
 
@@ -56,18 +36,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       LOG_LEVEL:    ${LOG_LEVEL:-INFO}
       LOG_FORMAT:   json
-    command: >
-      sh -c "
-        alembic upgrade head &&
-        uvicorn app.main:app
-          --host 0.0.0.0
-          --port 8000
-          --workers 4
-          --worker-class uvicorn.workers.UvicornWorker
-          --access-log
-          --log-level info
-      "
-    ports: []          # Nginx orqali
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4 --access-log --log-level info"
+    ports: []
     networks:
       - taurus-internal
     deploy:
@@ -125,12 +95,12 @@ services:
       dockerfile: Dockerfile
       target: production
       args:
-        VITE_API_URL:  ""         # Nginx orqali — relative URL
+        VITE_API_URL:  ""
         VITE_WS_URL:   ""
     environment:
       VITE_API_URL: ""
       VITE_WS_URL:  ""
-    ports: []          # Nginx orqali
+    ports: []
     networks:
       - taurus-internal
     logging:
@@ -150,8 +120,7 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - nginx_logs:/var/log/nginx
-      # SSL sertifikatlar (Let's Encrypt)
-      # - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -187,7 +156,7 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:9090:9090"   # Faqat localhost dan
+      - "127.0.0.1:9090:9090"
     networks:
       - taurus-internal
     logging:
@@ -212,7 +181,7 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "127.0.0.1:3001:3000"   # Faqat localhost dan
+      - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
     networks:
@@ -227,7 +196,7 @@ networks:
   taurus-internal:
     driver: bridge
     name: taurus-internal
-    internal: true    # Internet ga to'g'ridan chiqish yo'q
+    internal: true
 
   taurus-external:
     driver: bridge

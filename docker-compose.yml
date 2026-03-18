@@ -286,42 +286,6 @@ services:
     stdin_open: true
     tty: true
 
-  # ─────────────────────────────────────────────
-  # TELEGRAM ADMIN BOT — Tizim boshqaruvi
-  # Notification botidan ALOHIDA servis
-  # ─────────────────────────────────────────────
-  telegram-admin-bot:
-    build:
-      context: ./telegram_bot
-      dockerfile: Dockerfile
-    container_name: taurus-admin-bot
-    restart: unless-stopped
-    environment:
-      # ⚠️ .env faylida to'ldiring:
-      ADMIN_BOT_TOKEN: ${ADMIN_BOT_TOKEN:-}
-      ADMIN_ALLOWED_CHAT_IDS: ${ADMIN_ALLOWED_CHAT_IDS:-}
-      BACKEND_URL: "http://taurus-backend:8000"
-      BACKEND_INTERNAL_TOKEN: ${BACKEND_INTERNAL_TOKEN:-}
-      # Har soatda avtomatik status xabari (true/false)
-      HOURLY_STATUS_ENABLED: ${HOURLY_STATUS_ENABLED:-true}
-      # Container holati tekshirish intervali (soniya)
-      WATCH_INTERVAL_SEC: ${WATCH_INTERVAL_SEC:-60}
-    volumes:
-      # Docker socket — container boshqaruvi uchun ZARURIY
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      # /proc — tizim resurslari (CPU, RAM) uchun
-      - /proc:/proc:ro
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - taurus-network
-    healthcheck:
-      test: ["CMD-SHELL", "python -c 'import bot' 2>/dev/null && echo ok || exit 1"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-
 networks:
   taurus-network:
     driver: bridge

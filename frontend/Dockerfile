@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Dependencies (layer caching uchun alohida)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 # Source code
 COPY . .
